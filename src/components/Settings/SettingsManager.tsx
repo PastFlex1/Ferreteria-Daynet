@@ -2,10 +2,11 @@ import { Select } from '../Shared/Select';
 import React, { useState, useEffect } from 'react';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
+import { defaultUsersList, defaultPaymentMethods, defaultTaxRates } from '../../data/initialData';
 import { 
   SettingsSubTab, 
-  StoreSettings 
+  StoreSettings,
+  TaxRateItem 
 } from '../../types';
 import { 
   Building2, 
@@ -43,7 +44,10 @@ import {
   Copy,
   Check,
   FileCode,
-  ExternalLink
+  ExternalLink,
+  Tag,
+  Star,
+  CheckCircle
 } from 'lucide-react';
 
 import { SriBackendService } from '../../services/sriBackendService';
@@ -99,6 +103,26 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
   const [secRetention, setSecRetention] = useFirestoreSync<string>('ferreteria_settings_sec_retention', '000000001');
 
+  // Tax Rates (IVAs) Management State
+  const [taxRates, setTaxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const [showTaxModal, setShowTaxModal] = useState(false);
+  const [editingTax, setEditingTax] = useState<TaxRateItem | null>(null);
+  const [taxForm, setTaxForm] = useState<{
+    name: string;
+    rate: number;
+    codeSri: string;
+    isDefault: boolean;
+    active: boolean;
+    description: string;
+  }>({
+    name: '',
+    rate: 15,
+    codeSri: '4',
+    isDefault: false,
+    active: true,
+    description: '',
+  });
+
   // Users Management State
   const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -117,6 +141,132 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [blockNoStockSales, setBlockNoStockSales] = useFirestoreSync<boolean>('ferreteria_settings_block_no_stock_sales', true);
   const [minStockAlert, setMinStockAlert] = useFirestoreSync<boolean>('ferreteria_settings_min_stock_alert', true);
   const [autoSessionTimeout, setAutoSessionTimeout] = useFirestoreSync<string>('ferreteria_settings_auto_session_timeout', '30');
+
+  // Tax Management Handlers
+  const handleOpenAddTax = () => {
+    setEditingTax(null);
+    setTaxForm({
+      name: '',
+      rate: 15,
+      codeSri: '4',
+      isDefault: false,
+      active: true,
+      description: '',
+    });
+    setShowTaxModal(true);
+  };
+
+  const handleOpenEditTax = (tax: TaxRateItem) => {
+    setEditingTax(tax);
+    setTaxForm({
+      name: tax.name,
+      rate: tax.rate,
+      codeSri: tax.codeSri || '4',
+      isDefault: !!tax.isDefault,
+      active: tax.active !== false,
+      description: tax.description || '',
+    });
+    setShowTaxModal(true);
+  };
+
+  const handleSaveTax = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!taxForm.name.trim()) {
+      showAlert('Por favor ingrese un nombre para la tarifa de IVA.', 'Campo Requerido', 'warning');
+      return;
+    }
+
+    const rateNumber = parseFloat(String(taxForm.rate));
+    if (isNaN(rateNumber) || rateNumber < 0) {
+      showAlert('El porcentaje de IVA debe ser un número válido igual o mayor a 0.', 'Valor Inválido', 'warning');
+      return;
+    }
+
+    let updated: TaxRateItem[];
+    if (editingTax) {
+      updated = taxRates.map((t) =>
+        t.id === editingTax.id
+          ? {
+              ...t,
+              name: taxForm.name.trim(),
+              rate: rateNumber,
+              codeSri: taxForm.codeSri,
+              isDefault: taxForm.isDefault,
+              active: taxForm.active,
+              description: taxForm.description.trim(),
+            }
+          : taxForm.isDefault
+          ? { ...t, isDefault: false }
+          : t
+      );
+    } else {
+      const newTax: TaxRateItem = {
+        id: `tax-${Date.now()}`,
+        name: taxForm.name.trim(),
+        rate: rateNumber,
+        codeSri: taxForm.codeSri,
+        isDefault: taxForm.isDefault,
+        active: taxForm.active,
+        description: taxForm.description.trim(),
+      };
+      if (taxForm.isDefault) {
+        updated = taxRates.map((t) => ({ ...t, isDefault: false }));
+        updated.push(newTax);
+      } else {
+        updated = [...taxRates, newTax];
+      }
+    }
+
+    if (taxForm.isDefault) {
+      const updatedSettings = { ...formData, defaultTaxRate: rateNumber };
+      setFormData(updatedSettings);
+      onSaveSettings(updatedSettings);
+    }
+
+    setTaxRates(updated);
+    setShowTaxModal(false);
+    showToast(editingTax ? 'Tarifa de IVA actualizada correctamente.' : 'Nueva tarifa de IVA agregada exitosamente.', 'success');
+  };
+
+  const handleDeleteTax = (tax: TaxRateItem) => {
+    if (tax.isDefault) {
+      showAlert('No puede eliminar la tarifa de IVA establecida por defecto. Primero establezca otra como predeterminada.', 'Operación No Permitida', 'warning');
+      return;
+    }
+    showConfirm(
+      `¿Está seguro de eliminar la tarifa "${tax.name}" (${tax.rate}%)?`,
+      () => {
+        const filtered = taxRates.filter((t) => t.id !== tax.id);
+        setTaxRates(filtered);
+        showToast(`Tarifa "${tax.name}" eliminada correctamente.`, 'info');
+      },
+      'Eliminar Tarifa de IVA'
+    );
+  };
+
+  const handleSetDefaultTax = (tax: TaxRateItem) => {
+    const updated = taxRates.map((t) => ({
+      ...t,
+      isDefault: t.id === tax.id,
+    }));
+    setTaxRates(updated);
+    const updatedSettings = { ...formData, defaultTaxRate: tax.rate };
+    setFormData(updatedSettings);
+    onSaveSettings(updatedSettings);
+    showToast(`"${tax.name}" establecida como tarifa predeterminada (${tax.rate}%).`, 'success');
+  };
+
+  const handleToggleActiveTax = (tax: TaxRateItem) => {
+    if (tax.isDefault && tax.active) {
+      showAlert('No puede desactivar la tarifa establecida por defecto.', 'Operación No Permitida', 'warning');
+      return;
+    }
+    const updated = taxRates.map((t) =>
+      t.id === tax.id ? { ...t, active: !t.active } : t
+    );
+    setTaxRates(updated);
+    showToast(`Tarifa "${tax.name}" ${tax.active ? 'desactivada' : 'activada'}.`, 'info');
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -938,45 +1088,204 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         </div>
       )}
 
-      {/* 3. IMPUESTOS */}
+      {/* 3. IMPUESTOS & TARIFAS DE IVA */}
       {currentTab === 'CFG_IMPUESTOS' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div className="flex items-center space-x-3.5">
               <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
                 <Percent className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-lg font-black text-white">Configuración de Impuestos & Retenciones</h2>
-                <p className="text-xs text-slate-400 font-medium">Tasas de IVA vigente, retenciones en la fuente e ICE</p>
+                <h2 className="text-lg font-black text-white">Catálogo de Impuestos & Tarifas de IVA (SRI)</h2>
+                <p className="text-xs text-slate-400 font-medium">
+                  Gestione las tarifas de IVA aplicadas en ventas, compras, productos y facturación electrónica
+                </p>
               </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenAddTax}
+              className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 shrink-0"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>NUEVA TARIFA DE IVA</span>
+            </button>
+          </div>
+
+          {/* Tabla de Tarifas de IVA */}
+          <div className="space-y-4">
+            <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-900/90 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="p-3.5">Tarifa / Denominación</th>
+                    <th className="p-3.5 text-center">Tasa (%)</th>
+                    <th className="p-3.5 text-center">Código SRI</th>
+                    <th className="p-3.5 text-center">Por Defecto</th>
+                    <th className="p-3.5 text-center">Estado</th>
+                    <th className="p-3.5 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70 font-medium">
+                  {taxRates.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-500">
+                        No hay tarifas de IVA registradas. Haga clic en "Nueva Tarifa de IVA" para agregar una.
+                      </td>
+                    </tr>
+                  ) : (
+                    taxRates.map((tax) => {
+                      const isDefault = tax.isDefault || formData.defaultTaxRate === tax.rate;
+                      return (
+                        <tr key={tax.id} className="hover:bg-slate-900/40 transition">
+                          <td className="p-3.5">
+                            <div className="flex items-center space-x-2.5">
+                              <span className="font-bold text-white text-xs">{tax.name}</span>
+                              {isDefault && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                  <Star className="w-2.5 h-2.5 fill-current" />
+                                  <span>PREDETERMINADA</span>
+                                </span>
+                              )}
+                            </div>
+                            {tax.description && (
+                              <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{tax.description}</p>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-center font-mono">
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-slate-900 text-emerald-400 border border-slate-800">
+                              {tax.rate.toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center font-mono">
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-900 text-orange-400 border border-slate-800">
+                              [{tax.codeSri || '4'}]
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center">
+                            {isDefault ? (
+                              <span className="text-[10px] font-black text-emerald-400 flex items-center justify-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                <span>Sí</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultTax(tax)}
+                                className="text-[10px] text-slate-400 hover:text-emerald-400 font-bold px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 transition cursor-pointer"
+                                title="Establecer como tarifa por defecto para nuevos productos"
+                              >
+                                Usar por defecto
+                              </button>
+                            )}
+                          </td>
+                          <td className="p-3.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActiveTax(tax)}
+                              className={`px-2.5 py-0.5 rounded text-[10px] font-black border transition cursor-pointer ${
+                                tax.active !== false
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                  : 'bg-slate-800 text-slate-500 border-slate-700 hover:bg-slate-700'
+                              }`}
+                              title={tax.active !== false ? 'Haga clic para desactivar' : 'Haga clic para activar'}
+                            >
+                              {tax.active !== false ? 'HABILITADO' : 'INACTIVO'}
+                            </button>
+                          </td>
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end space-x-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditTax(tax)}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+                                title="Editar Tarifa de IVA"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTax(tax)}
+                                disabled={isDefault}
+                                className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={isDefault ? 'No se puede eliminar la tarifa por defecto' : 'Eliminar Tarifa'}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Parámetros Generales de Facturación e Impuestos */}
+          <form onSubmit={handleSubmit} className="space-y-6 pt-2">
+            <div className="flex items-center space-x-2 pb-2 border-b border-slate-800">
+              <Sliders className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">
+                Parámetros Monetarios y Tarifa Predeterminada
+              </h3>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <label className="block text-xs font-bold text-slate-300">Tasa de Impuesto IVA Vendedor (%)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.defaultTaxRate}
-                  onChange={(e) => setFormData({ ...formData, defaultTaxRate: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-slate-900 border border-slate-800 text-emerald-400 font-mono font-black text-lg text-center rounded-xl py-2"
-                />
-                <span className="block text-[10px] text-slate-400">Tarifa general aplicada en Ecuador (15%)</span>
+                <label className="block text-xs font-bold text-slate-300">Tasa de IVA Predeterminada (%) *</label>
+                <Select
+                  value={formData.defaultTaxRate.toString()}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 0;
+                    setFormData({ ...formData, defaultTaxRate: val });
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 text-emerald-400 font-mono font-black text-sm rounded-xl py-2 px-3 focus:outline-none focus:border-emerald-500"
+                >
+                  {taxRates.map((t) => (
+                    <option key={t.id} value={t.rate.toString()}>
+                      {t.name} ({t.rate}%)
+                    </option>
+                  ))}
+                </Select>
+                <span className="block text-[10px] text-slate-400">Aplicada automáticamente al crear nuevos productos</span>
               </div>
 
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <label className="block text-xs font-bold text-slate-300">Símbolo Monetario Predeterminado</label>
+                <label className="block text-xs font-bold text-slate-300">Símbolo Monetario</label>
                 <input
                   type="text"
                   value={formData.currencySymbol}
                   onChange={(e) => setFormData({ ...formData, currencySymbol: e.target.value })}
                   className="w-full bg-slate-900 border border-slate-800 text-white font-mono font-bold text-center rounded-xl py-2"
                 />
-                <span className="block text-[10px] text-slate-400">Moneda contable predeterminada ($ USD)</span>
+                <span className="block text-[10px] text-slate-400">Símbolo visible en pantalla y reportes ($)</span>
               </div>
+
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-300">Código de Moneda ISO</label>
+                <input
+                  type="text"
+                  value={formData.currencyCode || 'USD'}
+                  onChange={(e) => setFormData({ ...formData, currencyCode: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-800 text-white font-mono font-bold text-center rounded-xl py-2 uppercase"
+                />
+                <span className="block text-[10px] text-slate-400">Código ISO para XML SRI (USD)</span>
+              </div>
+            </div>
+
+            {/* Información Técnica SRI */}
+            <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl space-y-2 text-xs text-slate-300">
+              <h4 className="font-bold text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Compatibilidad y Tabla de Códigos de Porcentaje SRI Ecuador</span>
+              </h4>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Según la ficha técnica del SRI (v2.10): Código <strong>0</strong> = 0% (Tarifa Cero), Código <strong>2</strong> = 12%, Código <strong>4</strong> = 15% (Vigente General), Código <strong>5</strong> = 5% (Materiales Construcción), Código <strong>10</strong> = 13%, Código <strong>6</strong> = No Objeto de IVA, Código <strong>7</strong> = Exento de IVA. Todas las tarifas agregadas se calculan y desglosan en el Punto de Venta, Inventario, Compras y Comprobantes Electrónicos.
+              </p>
             </div>
 
             <div className="pt-4 border-t border-slate-800 flex justify-end">
@@ -989,6 +1298,125 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </button>
             </div>
           </form>
+
+          {/* MODAL CREAR / EDITAR TARIFA DE IVA */}
+          {showTaxModal && (
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-5 shadow-2xl animate-scaleUp">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <Percent className="w-4 h-4 text-emerald-400" />
+                    <span>{editingTax ? 'Editar Tarifa de IVA' : 'Crear Nueva Tarifa de IVA'}</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowTaxModal(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveTax} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Nombre de la Tarifa *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: IVA 13% Especial, IVA 8% Turismo"
+                      value={taxForm.name}
+                      onChange={(e) => setTaxForm({ ...taxForm, name: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-300 block mb-1">Porcentaje (%) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        required
+                        value={taxForm.rate}
+                        onChange={(e) => setTaxForm({ ...taxForm, rate: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 text-center"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-300 block mb-1">Código SRI</label>
+                      <Select
+                        value={taxForm.codeSri}
+                        onChange={(e) => setTaxForm({ ...taxForm, codeSri: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-orange-400 font-mono font-bold"
+                      >
+                        <option value="4">[4] 15% (Tarifa General)</option>
+                        <option value="5">[5] 5% (Materiales Construcción)</option>
+                        <option value="0">[0] 0% (Tarifa Cero)</option>
+                        <option value="10">[10] 13%</option>
+                        <option value="2">[2] 12%</option>
+                        <option value="8">[8] 8% (Turismo/Feriados)</option>
+                        <option value="3">[3] 14%</option>
+                        <option value="6">[6] No Objeto de IVA</option>
+                        <option value="7">[7] Exento de IVA</option>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Descripción / Base Legal</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Información adicional sobre la aplicación de esta tarifa..."
+                      value={taxForm.description}
+                      onChange={(e) => setTaxForm({ ...taxForm, description: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-1 border-t border-slate-800">
+                    <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={taxForm.isDefault}
+                        onChange={(e) => setTaxForm({ ...taxForm, isDefault: e.target.checked })}
+                        className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500 border-slate-700 bg-slate-950"
+                      />
+                      <span>Establecer como tarifa predeterminada para nuevos productos</span>
+                    </label>
+
+                    <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={taxForm.active}
+                        onChange={(e) => setTaxForm({ ...taxForm, active: e.target.checked })}
+                        className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500 border-slate-700 bg-slate-950"
+                      />
+                      <span>Tarifa activa para selección en facturación y ventas</span>
+                    </label>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowTaxModal(false)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black transition shadow-lg shadow-emerald-600/20 cursor-pointer"
+                    >
+                      {editingTax ? 'Guardar Cambios' : 'Crear Tarifa'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

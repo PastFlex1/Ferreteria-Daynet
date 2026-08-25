@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { X, PackagePlus, Save, Package, Sparkles, Barcode, Layers, Plus, Trash2, TrendingUp } from 'lucide-react';
-import { Category, Product, ProductCategory, UnitOfMeasure, PriceScale } from '../../types';
+import { Category, Product, ProductCategory, UnitOfMeasure, PriceScale, TaxRateItem } from '../../types';
 import { Select } from '../Shared/Select';
 import { BarcodeSvg } from '../Shared/BarcodeSvg';
 import { generateEan13Barcode, generateCode128Barcode } from '../../utils/barcodeGenerator';
 import { useModal } from '../../context/ModalContext';
+import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { defaultTaxRates } from '../../data/initialData';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -14,6 +16,7 @@ interface ProductModalProps {
   units: any[];
   categories?: ProductCategory[];
   defaultTaxRate?: number;
+  taxRates?: TaxRateItem[];
 }
 
 const CATEGORIES: Category[] = [
@@ -38,8 +41,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   units,
   categories,
   defaultTaxRate = 15,
+  taxRates,
 }) => {
   const { showAlert, showToast } = useModal();
+  const [syncedTaxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const availableTaxRates = (taxRates && taxRates.length > 0 ? taxRates : syncedTaxRates).filter(t => t.active !== false);
   const categoryOptions = categories && categories.length > 0 ? categories.map((c) => c.name) : ['General'];
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
@@ -421,9 +427,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 onChange={(e) => handleTaxRateChange(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-orange-300 text-orange-600 font-mono font-bold rounded-xl text-sm focus:ring-2 focus:ring-orange-500 cursor-pointer"
               >
-                {Array.from(new Set([defaultTaxRate, 5, 0])).sort((a, b) => b - a).map(rate => (
-                  <option key={rate} value={rate}>IVA {rate}%</option>
+                {availableTaxRates.map(t => (
+                  <option key={t.id} value={t.rate}>
+                    {t.name} ({t.rate}%)
+                  </option>
                 ))}
+                {!availableTaxRates.some(t => t.rate === parseFloat(taxRate)) && (
+                  <option value={taxRate}>IVA {taxRate}% (Tarifa Actual)</option>
+                )}
               </Select>
             </div>
           </div>

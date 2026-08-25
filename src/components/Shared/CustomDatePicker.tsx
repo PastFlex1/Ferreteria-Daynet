@@ -5,6 +5,7 @@ interface CustomDatePickerProps {
   value: string; // YYYY-MM-DD
   onChange: (value: string) => void;
   className?: string;
+  align?: 'left' | 'right' | 'auto';
 }
 
 const DAYS = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'];
@@ -13,9 +14,11 @@ const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 
 export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   value,
   onChange,
-  className = ''
+  className = '',
+  align = 'auto'
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownAlign, setDropdownAlign] = useState<'left' | 'right'>('left');
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Parse value or use today
@@ -37,6 +40,24 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      if (align === 'right') {
+        setDropdownAlign('right');
+      } else if (align === 'left') {
+        setDropdownAlign('left');
+      } else {
+        const rect = containerRef.current.getBoundingClientRect();
+        const calendarWidth = 295; // w-72 (288px) + margin
+        if (rect.left + calendarWidth > window.innerWidth - 16) {
+          setDropdownAlign('right');
+        } else {
+          setDropdownAlign('left');
+        }
+      }
+    }
+  }, [isOpen, align]);
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
@@ -105,7 +126,9 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       </div>
 
       {isOpen && (
-        <div className="absolute z-50 mt-2 p-4 bg-white border border-slate-200 shadow-2xl rounded-3xl w-72 left-0 transform origin-top-left animate-in fade-in slide-in-from-top-2">
+        <div className={`absolute z-50 mt-2 p-4 bg-white border border-slate-200 shadow-2xl rounded-3xl w-72 ${
+          dropdownAlign === 'right' ? 'right-0 origin-top-right' : 'left-0 origin-top-left'
+        } transform animate-in fade-in slide-in-from-top-2`}>
           <div className="flex items-center justify-between mb-4">
             <button type="button" onClick={handlePrevMonth} className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-600 transition">
               <ChevronLeft className="w-5 h-5" />

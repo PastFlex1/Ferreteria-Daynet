@@ -28,10 +28,12 @@ import {
   Printer,
   Sparkles,
   AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { StoreSettings, SuppliersSubTab } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
+import { useCedulaSearch } from '../../hooks/useCedulaSearch';
 import { Select } from '../Shared/Select';
 
 interface SuppliersManagerProps {
@@ -123,6 +125,41 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
     status: 'ACTIVO',
     notes: ''
   });
+
+  const { isSearchingCedula, fetchCedulaData } = useCedulaSearch();
+  const lastSearchedDocRef = React.useRef<string>('');
+
+  const handleSearchSupplierDoc = (docToSearch?: string) => {
+    const doc = (docToSearch || supplierFormData.taxId || '').trim();
+    if (!doc) return;
+    fetchCedulaData(doc, (data) => {
+      setSupplierFormData((prev) => ({
+        ...prev,
+        name: data.name || prev.name,
+        address: data.address || prev.address,
+        phone: data.phone || prev.phone,
+        email: data.email || prev.email,
+      }));
+    });
+  };
+
+  useEffect(() => {
+    if (!isSupplierModalOpen) {
+      lastSearchedDocRef.current = '';
+      return;
+    }
+    const cleanDoc = (supplierFormData.taxId || '').trim();
+    if ((cleanDoc.length === 10 || cleanDoc.length === 13) && cleanDoc !== lastSearchedDocRef.current) {
+      const res = validateEcuadorianDocument('AUTO', cleanDoc);
+      if (res.isValid) {
+        lastSearchedDocRef.current = cleanDoc;
+        handleSearchSupplierDoc(cleanDoc);
+      }
+    }
+    if (cleanDoc === '') {
+      lastSearchedDocRef.current = '';
+    }
+  }, [supplierFormData.taxId, isSupplierModalOpen]);
 
   // Payment Form Modal State
   const [selectedPayableForPayment, setSelectedPayableForPayment] = useState<PayableInvoice | null>(null);
@@ -692,14 +729,35 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-black text-slate-800 mb-1">RUC / Cédula Proveedor (SRI) *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="1792048593001"
-                    value={supplierFormData.taxId}
-                    onChange={(e) => setSupplierFormData({ ...supplierFormData, taxId: e.target.value.trim() })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      required
+                      placeholder="1792048593001"
+                      value={supplierFormData.taxId}
+                      onChange={(e) => setSupplierFormData({ ...supplierFormData, taxId: e.target.value.trim() })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSearchSupplierDoc();
+                        }
+                      }}
+                      className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSearchSupplierDoc()}
+                      disabled={isSearchingCedula || !supplierFormData.taxId}
+                      className="p-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer shadow-sm"
+                      title="Consultar en SRI / Registro Civil"
+                    >
+                      {isSearchingCedula ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Search className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
                   {supplierFormData.taxId && (() => {
                     const res = validateEcuadorianDocument('AUTO', supplierFormData.taxId);
                     return (

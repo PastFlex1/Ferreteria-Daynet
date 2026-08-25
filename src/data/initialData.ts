@@ -1,4 +1,52 @@
-import { Customer, Invoice, Product, ProductCategory, StoreSettings } from '../types';
+import { Customer, Invoice, Product, ProductCategory, StoreSettings, TaxRateItem } from '../types';
+
+export const defaultTaxRates: TaxRateItem[] = [
+  {
+    id: 'tax-15',
+    name: 'IVA 15% (Tarifa General)',
+    rate: 15,
+    codeSri: '4',
+    isDefault: true,
+    active: true,
+    description: 'Tarifa general vigente en Ecuador para bienes y servicios gravados.',
+  },
+  {
+    id: 'tax-5',
+    name: 'IVA 5% (Materiales de Construcción)',
+    rate: 5,
+    codeSri: '5',
+    isDefault: false,
+    active: true,
+    description: 'Tarifa reducida para transferencias de materiales de construcción según Ley.',
+  },
+  {
+    id: 'tax-0',
+    name: 'IVA 0% (Tarifa Cero)',
+    rate: 0,
+    codeSri: '0',
+    isDefault: false,
+    active: true,
+    description: 'Productos de primera necesidad, medicinas y bienes no procesados.',
+  },
+  {
+    id: 'tax-no-objeto',
+    name: 'No Objeto de IVA',
+    rate: 0,
+    codeSri: '6',
+    isDefault: false,
+    active: true,
+    description: 'Bienes y servicios que no son objeto del impuesto.',
+  },
+  {
+    id: 'tax-exento',
+    name: 'Exento de IVA',
+    rate: 0,
+    codeSri: '7',
+    isDefault: false,
+    active: true,
+    description: 'Bienes y servicios exentos de IVA según régimen especial.',
+  },
+];
 
 export const initialStoreSettings: StoreSettings = {
   storeName: 'Ferretería DAYNET',

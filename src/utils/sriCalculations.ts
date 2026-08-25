@@ -18,6 +18,8 @@ export function calculateSriTotals(
   let iva5 = 0;
   let ivaEspecial = 0;
 
+  const rateBreakdowns: Record<number, { base: number; tax: number }> = {};
+
   items.forEach((item) => {
     const itemSubtotal = item.subtotal || item.unitPrice * item.quantity;
     const itemDiscount = (itemSubtotal * (item.discountPercent || 0)) / 100;
@@ -37,28 +39,37 @@ export function calculateSriTotals(
     } else if (item.taxAmount === 0 && itemSubtotal > 0) {
       taxRate = 0;
     } else if (item.taxAmount > 0 && baseAfterDiscount > 0) {
-      // Inferred rate from taxAmount / base
       const calcPct = Math.round((item.taxAmount / baseAfterDiscount) * 100);
       taxRate = calcPct;
     }
 
+    const calculatedTax = item.taxAmount !== undefined ? item.taxAmount : (baseAfterDiscount * (taxRate / 100));
+
+    if (!rateBreakdowns[taxRate]) {
+      rateBreakdowns[taxRate] = { base: 0, tax: 0 };
+    }
+    rateBreakdowns[taxRate].base += baseAfterDiscount;
+    rateBreakdowns[taxRate].tax += calculatedTax;
+
     if (taxRate === 15) {
       subtotal15 += baseAfterDiscount;
-      iva15 += item.taxAmount !== undefined ? item.taxAmount : (baseAfterDiscount * 0.15);
+      iva15 += calculatedTax;
     } else if (taxRate === 5) {
       subtotal5 += baseAfterDiscount;
-      iva5 += item.taxAmount !== undefined ? item.taxAmount : (baseAfterDiscount * 0.05);
+      iva5 += calculatedTax;
     } else if (taxRate === 0) {
       subtotal0 += baseAfterDiscount;
     } else {
       subtotalEspecial += baseAfterDiscount;
-      ivaEspecial += item.taxAmount !== undefined ? item.taxAmount : (baseAfterDiscount * (taxRate / 100));
+      ivaEspecial += calculatedTax;
     }
   });
 
-  const propina10Amount = propina10Enabled ? (subtotal15 + subtotal5 + subtotal0) * 0.10 : 0;
+  const totalTaxableBase = subtotal15 + subtotal5 + subtotalEspecial + subtotal0 + subtotalNoObjeto + subtotalExento;
+  const totalIva = iva15 + iva5 + ivaEspecial;
+  const propina10Amount = propina10Enabled ? (totalTaxableBase * 0.10) : 0;
   const valorICE = 0;
-  const valorAPagar = (subtotal15 + subtotal5 + subtotal0) + iva15 + iva5 + ivaEspecial + valorICE + propina10Amount;
+  const valorAPagar = totalTaxableBase + totalIva + valorICE + propina10Amount;
 
   return {
     subtotalSinImpuestos,
@@ -76,5 +87,6 @@ export function calculateSriTotals(
     propina10Enabled,
     propina10Amount,
     valorAPagar,
+    rateBreakdowns,
   };
 }

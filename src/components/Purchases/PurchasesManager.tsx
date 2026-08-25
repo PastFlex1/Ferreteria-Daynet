@@ -27,12 +27,24 @@ import {
   CreditCard,
   Package,
   Layers,
-  Sparkles
+  Sparkles,
+  Edit3,
+  ClipboardList,
+  Check,
+  CheckCircle,
+  TrendingDown,
+  Boxes,
+  FileText,
+  ShoppingCart,
+  Loader2
 } from 'lucide-react';
-import { Product, PurchasesSubTab, StoreSettings } from '../../types';
+import { Product, PurchasesSubTab, StoreSettings, TaxRateItem, PreOrder, PreOrderItem } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { Select } from '../Shared/Select';
+import { defaultTaxRates } from '../../data/initialData';
+import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
+import { useCedulaSearch } from '../../hooks/useCedulaSearch';
 
 interface PurchasesManagerProps {
   subTab: PurchasesSubTab;
@@ -101,7 +113,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   onSaveProduct,
   onStockAdjust,
 }) => {
-  const { showAlert, showToast } = useModal();
+  const { showAlert, showConfirm, showToast } = useModal();
   // Sync with the same collection used in SuppliersManager
   const [suppliers, setSuppliers] = useFirestoreSync<any[]>('ferreteria_suppliers_details', []);
 
@@ -113,6 +125,24 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
   // Purchase Orders
   const [purchaseOrders, setPurchaseOrders] = useFirestoreSync<PurchaseOrder[]>('ferreteria_purchase_orders', []);
+
+  // Pre-Orders / Requisitions State
+  const [preOrders, setPreOrders] = useFirestoreSync<PreOrder[]>('ferreteria_pre_orders', []);
+  const [preOrdersActiveView, setPreOrdersActiveView] = useState<'SUGERIDOS' | 'HISTORIAL'>('SUGERIDOS');
+  const [isPreOrderModalOpen, setIsPreOrderModalOpen] = useState(false);
+  const [selectedPreOrderView, setSelectedPreOrderView] = useState<PreOrder | null>(null);
+
+  // Pre-Order Form State
+  const [preOrderSupplierId, setPreOrderSupplierId] = useState('');
+  const [preOrderPriority, setPreOrderPriority] = useState<'ALTA' | 'MEDIA' | 'BAJA'>('ALTA');
+  const [preOrderExpectedDate, setPreOrderExpectedDate] = useState(
+    new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]
+  );
+  const [preOrderNotes, setPreOrderNotes] = useState('');
+  const [preOrderItems, setPreOrderItems] = useState<PreOrderItem[]>([]);
+  const [preOrderAddProductId, setPreOrderAddProductId] = useState('');
+  const [preOrderAddQty, setPreOrderAddQty] = useState('10');
+  const [preOrderSearchFilter, setPreOrderSearchFilter] = useState('');
 
 
 
@@ -179,10 +209,12 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
 
   // Item selector for purchase form
+  const [taxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const activeTaxRates = taxRates.filter(t => t.active !== false);
   const [currentProductId, setCurrentProductId] = useState<string>(products[0]?.id || '');
   const [currentQty, setCurrentQty] = useState<string>('10');
   const [currentCost, setCurrentCost] = useState<string>(products[0]?.costPrice?.toString() || '10');
-  const [currentTaxRate, setCurrentTaxRate] = useState<string>('15');
+  const [currentTaxRate, setCurrentTaxRate] = useState<string>(settings.defaultTaxRate ? settings.defaultTaxRate.toString() : '15');
   const [currentBatch, setCurrentBatch] = useState<string>('');
   const [currentExpiry, setCurrentExpiry] = useState<string>('');
 
@@ -199,6 +231,41 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     address: '',
     paymentDays: 30
   });
+
+  const { isSearchingCedula, fetchCedulaData } = useCedulaSearch();
+  const lastSearchedQuickSupRef = React.useRef<string>('');
+
+  const handleSearchQuickSupplierDoc = (docToSearch?: string) => {
+    const doc = (docToSearch || newSupplier.taxId || '').trim();
+    if (!doc) return;
+    fetchCedulaData(doc, (data) => {
+      setNewSupplier((prev) => ({
+        ...prev,
+        name: data.name || prev.name,
+        address: data.address || prev.address,
+        phone: data.phone || prev.phone,
+        email: data.email || prev.email,
+      }));
+    });
+  };
+
+  useEffect(() => {
+    if (!isSupplierModalOpen) {
+      lastSearchedQuickSupRef.current = '';
+      return;
+    }
+    const cleanDoc = (newSupplier.taxId || '').trim();
+    if ((cleanDoc.length === 10 || cleanDoc.length === 13) && cleanDoc !== lastSearchedQuickSupRef.current) {
+      const res = validateEcuadorianDocument('AUTO', cleanDoc);
+      if (res.isValid) {
+        lastSearchedQuickSupRef.current = cleanDoc;
+        handleSearchQuickSupplierDoc(cleanDoc);
+      }
+    }
+    if (cleanDoc === '') {
+      lastSearchedQuickSupRef.current = '';
+    }
+  }, [newSupplier.taxId, isSupplierModalOpen]);
 
   // Invoice Detail Modal View
   const [selectedInvoiceView, setSelectedInvoiceView] = useState<PurchaseInvoice | null>(null);
@@ -350,43 +417,257 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setPaymentAbonoAmount('');
   };
 
-  // Convert Pre-order / Low Stock Items to Purchase Order
-  const handleGeneratePurchaseOrderFromLowStock = (lowStockProducts: Product[]) => {
-    if (lowStockProducts.length === 0) return;
+  // -------------------------------------------------------------------------
+  // PRE-ORDERS / REQUISITIONS HANDLERS
+  // -------------------------------------------------------------------------
+  const handleOpenCreatePreOrderFromLowStock = (selectedProds?: Product[]) => {
+    const prods = selectedProds || products.filter(p => p.stock <= p.minStock + 5);
+    if (prods.length === 0) {
+      showAlert('No hay productos en estado de stock bajo o crítico en este momento.', 'Inventario Óptimo', 'info');
+      return;
+    }
 
-    const defaultSupplier = suppliers[0];
-    const items: PurchaseItem[] = lowStockProducts.map((prod) => {
-      const suggestQty = Math.max(10, prod.minStock * 2 - prod.stock);
-      const sub = suggestQty * prod.costPrice;
-      const tax = sub * (prod.taxRate / 100);
+    const items: PreOrderItem[] = prods.map(p => {
+      const qty = Math.max(10, p.minStock * 2 - p.stock);
+      const sub = qty * (p.costPrice || 0);
+      const tax = sub * ((p.taxRate || 15) / 100);
       return {
-        productId: prod.id,
-        sku: prod.sku,
-        productName: prod.name,
-        quantity: suggestQty,
-        costPrice: prod.costPrice,
-        taxPercent: prod.taxRate,
+        productId: p.id,
+        sku: p.sku,
+        productName: p.name,
+        currentStock: p.stock,
+        minStock: p.minStock,
+        quantity: qty > 0 ? qty : 10,
+        costPrice: p.costPrice || 0,
+        taxPercent: p.taxRate || 15,
         subtotal: sub,
-        total: sub + tax
+        total: sub + tax,
       };
     });
 
-    const totalAmount = items.reduce((acc, i) => acc + i.total, 0);
+    setPreOrderSupplierId(suppliers[0]?.id || '');
+    setPreOrderPriority('ALTA');
+    setPreOrderExpectedDate(new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]);
+    setPreOrderNotes('Pre-orden generada por sugerido de stock crítico');
+    setPreOrderItems(items);
+    setIsPreOrderModalOpen(true);
+  };
+
+  const handleOpenCreateManualPreOrder = () => {
+    setPreOrderSupplierId(suppliers[0]?.id || '');
+    setPreOrderPriority('MEDIA');
+    setPreOrderExpectedDate(new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]);
+    setPreOrderNotes('');
+    setPreOrderItems([]);
+    setIsPreOrderModalOpen(true);
+  };
+
+  const handleOpenCreatePreOrderForSingleProduct = (product: Product) => {
+    const qty = Math.max(10, product.minStock * 2 - product.stock);
+    const sub = qty * (product.costPrice || 0);
+    const tax = sub * ((product.taxRate || 15) / 100);
+    const singleItem: PreOrderItem = {
+      productId: product.id,
+      sku: product.sku,
+      productName: product.name,
+      currentStock: product.stock,
+      minStock: product.minStock,
+      quantity: qty > 0 ? qty : 10,
+      costPrice: product.costPrice || 0,
+      taxPercent: product.taxRate || 15,
+      subtotal: sub,
+      total: sub + tax,
+    };
+
+    setPreOrderSupplierId(suppliers[0]?.id || '');
+    setPreOrderPriority(product.stock <= product.minStock ? 'ALTA' : 'MEDIA');
+    setPreOrderExpectedDate(new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]);
+    setPreOrderNotes(`Requisición individual para producto: ${product.name}`);
+    setPreOrderItems([singleItem]);
+    setIsPreOrderModalOpen(true);
+  };
+
+  const handleAddProductToPreOrderForm = () => {
+    if (!preOrderAddProductId) return;
+    const prod = products.find(p => p.id === preOrderAddProductId);
+    if (!prod) return;
+
+    const qty = parseFloat(preOrderAddQty) || 1;
+    const existingIdx = preOrderItems.findIndex(i => i.productId === prod.id);
+
+    if (existingIdx >= 0) {
+      const updated = [...preOrderItems];
+      const newQty = updated[existingIdx].quantity + qty;
+      const sub = newQty * updated[existingIdx].costPrice;
+      const tax = sub * (updated[existingIdx].taxPercent / 100);
+      updated[existingIdx] = {
+        ...updated[existingIdx],
+        quantity: newQty,
+        subtotal: sub,
+        total: sub + tax,
+      };
+      setPreOrderItems(updated);
+    } else {
+      const sub = qty * (prod.costPrice || 0);
+      const tax = sub * ((prod.taxRate || 15) / 100);
+      setPreOrderItems([
+        ...preOrderItems,
+        {
+          productId: prod.id,
+          sku: prod.sku,
+          productName: prod.name,
+          currentStock: prod.stock,
+          minStock: prod.minStock,
+          quantity: qty,
+          costPrice: prod.costPrice || 0,
+          taxPercent: prod.taxRate || 15,
+          subtotal: sub,
+          total: sub + tax,
+        }
+      ]);
+    }
+    setPreOrderAddProductId('');
+    setPreOrderAddQty('10');
+  };
+
+  const handleUpdatePreOrderItemQty = (index: number, newQty: number) => {
+    if (newQty <= 0) return;
+    const updated = [...preOrderItems];
+    const sub = newQty * updated[index].costPrice;
+    const tax = sub * (updated[index].taxPercent / 100);
+    updated[index] = {
+      ...updated[index],
+      quantity: newQty,
+      subtotal: sub,
+      total: sub + tax,
+    };
+    setPreOrderItems(updated);
+  };
+
+  const handleUpdatePreOrderItemCost = (index: number, newCost: number) => {
+    if (newCost < 0) return;
+    const updated = [...preOrderItems];
+    const sub = updated[index].quantity * newCost;
+    const tax = sub * (updated[index].taxPercent / 100);
+    updated[index] = {
+      ...updated[index],
+      costPrice: newCost,
+      subtotal: sub,
+      total: sub + tax,
+    };
+    setPreOrderItems(updated);
+  };
+
+  const handleRemovePreOrderItem = (index: number) => {
+    setPreOrderItems(preOrderItems.filter((_, idx) => idx !== index));
+  };
+
+  const handleSavePreOrder = (convertToOC = false) => {
+    if (preOrderItems.length === 0) {
+      showAlert('Debe agregar al menos un producto a la pre-orden.', 'Pre-Orden Vacía', 'warning');
+      return;
+    }
+
+    const supplierObj = suppliers.find(s => s.id === preOrderSupplierId) || suppliers[0];
+    const totalCost = preOrderItems.reduce((acc, i) => acc + i.total, 0);
+    const totalCount = preOrderItems.reduce((acc, i) => acc + i.quantity, 0);
+
+    const newPreOrder: PreOrder = {
+      id: `pre-${Date.now()}`,
+      preOrderNumber: `PRE-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      supplierId: supplierObj?.id,
+      supplierName: supplierObj?.name || 'Proveedor General',
+      createdAt: new Date().toISOString().split('T')[0],
+      expectedDate: preOrderExpectedDate,
+      priority: preOrderPriority,
+      status: convertToOC ? 'CONVERTIDA_A_ORDEN' : 'PENDIENTE',
+      items: preOrderItems,
+      totalEstimatedCost: totalCost,
+      totalItemsCount: totalCount,
+      notes: preOrderNotes,
+    };
+
+    setPreOrders([newPreOrder, ...preOrders]);
+
+    if (convertToOC) {
+      const ocItems: PurchaseItem[] = preOrderItems.map(i => ({
+        productId: i.productId,
+        sku: i.sku,
+        productName: i.productName,
+        quantity: i.quantity,
+        costPrice: i.costPrice,
+        taxPercent: i.taxPercent,
+        subtotal: i.subtotal,
+        total: i.total,
+      }));
+
+      const newOrder: PurchaseOrder = {
+        id: `oc-${Date.now()}`,
+        orderNumber: `OC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        supplier: supplierObj || { id: 'sup-gen', name: 'Proveedor General', taxId: '', contactPerson: '', phone: '', email: '', address: '', paymentDays: 30 },
+        createdAt: new Date().toISOString().split('T')[0],
+        expectedDelivery: preOrderExpectedDate,
+        items: ocItems,
+        totalAmount: totalCost,
+        status: 'ENVIADA',
+        notes: `Generado desde Pre-Orden #${newPreOrder.preOrderNumber}. ${preOrderNotes}`,
+      };
+
+      setPurchaseOrders([newOrder, ...purchaseOrders]);
+      showToast(`¡Pre-Orden #${newPreOrder.preOrderNumber} creada y convertida a Orden de Compra #${newOrder.orderNumber}!`, 'success');
+    } else {
+      showToast(`Pre-Orden #${newPreOrder.preOrderNumber} guardada exitosamente con ${preOrderItems.length} productos`, 'success');
+    }
+
+    setIsPreOrderModalOpen(false);
+  };
+
+  const handleConvertExistingPreOrderToOC = (preOrder: PreOrder) => {
+    const supplierObj = suppliers.find(s => s.id === preOrder.supplierId) || suppliers[0];
+    const ocItems: PurchaseItem[] = preOrder.items.map(i => ({
+      productId: i.productId,
+      sku: i.sku,
+      productName: i.productName,
+      quantity: i.quantity,
+      costPrice: i.costPrice,
+      taxPercent: i.taxPercent,
+      subtotal: i.subtotal,
+      total: i.total,
+    }));
 
     const newOrder: PurchaseOrder = {
       id: `oc-${Date.now()}`,
       orderNumber: `OC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      supplier: defaultSupplier,
+      supplier: supplierObj || { id: 'sup-gen', name: preOrder.supplierName || 'Proveedor General', taxId: '', contactPerson: '', phone: '', email: '', address: '', paymentDays: 30 },
       createdAt: new Date().toISOString().split('T')[0],
-      expectedDelivery: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
-      items,
-      totalAmount,
+      expectedDelivery: preOrder.expectedDate || new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
+      items: ocItems,
+      totalAmount: preOrder.totalEstimatedCost,
       status: 'ENVIADA',
-      notes: 'Generado automáticamente por sugerido de bajo stock'
+      notes: `Convertido desde Pre-Orden #${preOrder.preOrderNumber}. ${preOrder.notes || ''}`,
     };
 
     setPurchaseOrders([newOrder, ...purchaseOrders]);
-    showToast(`Orden de Compra #${newOrder.orderNumber} creada con ${items.length} artículos sugeridos!`, 'success');
+    const updatedPreOrders = preOrders.map(p => p.id === preOrder.id ? { ...p, status: 'CONVERTIDA_A_ORDEN' as const } : p);
+    setPreOrders(updatedPreOrders);
+    if (selectedPreOrderView && selectedPreOrderView.id === preOrder.id) {
+      setSelectedPreOrderView({ ...selectedPreOrderView, status: 'CONVERTIDA_A_ORDEN' });
+    }
+    showToast(`Pre-Orden #${preOrder.preOrderNumber} convertida a Orden de Compra #${newOrder.orderNumber}`, 'success');
+  };
+
+  const handleDeletePreOrder = (preOrderId: string) => {
+    showConfirm(
+      '¿Está seguro de eliminar esta pre-orden de requisición?',
+      () => {
+        setPreOrders(preOrders.filter(p => p.id !== preOrderId));
+        if (selectedPreOrderView && selectedPreOrderView.id === preOrderId) {
+          setSelectedPreOrderView(null);
+        }
+        showToast('Pre-Orden eliminada', 'info');
+      },
+      'Eliminar Pre-Orden'
+    );
   };
 
   return (
@@ -557,10 +838,14 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     onChange={(e) => setCurrentTaxRate(e.target.value)}
                     className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center text-orange-600"
                   >
-                    <option value="15">IVA 15%</option>
-                    <option value="5">IVA 5% (Construcción)</option>
-                    <option value="0">IVA 0%</option>
-                    <option value="8">IVA 8%</option>
+                    {activeTaxRates.map(t => (
+                      <option key={t.id} value={t.rate.toString()}>
+                        {t.name} ({t.rate}%)
+                      </option>
+                    ))}
+                    {!activeTaxRates.some(t => t.rate.toString() === currentTaxRate) && (
+                      <option value={currentTaxRate}>IVA {currentTaxRate}%</option>
+                    )}
                   </Select>
                 </div>
 
@@ -578,7 +863,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">F. Caducidad *</label>
-                  <CustomDatePicker value={currentExpiry} onChange={setCurrentExpiry} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono" />
+                  <CustomDatePicker value={currentExpiry} onChange={setCurrentExpiry} align="right" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono" />
                 </div>
 
                 <div>
@@ -948,77 +1233,367 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 4: PRE-ORDENES (REQUISICIÓN BAJO STOCK)
+          SUBTAB 4: PRE-ORDENES (REQUISICIÓN BAJO STOCK & HISTORIAL)
          --------------------------------------------------------------------- */}
       {subTab === 'PRE_ORDENES' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <FileCheck2 className="w-5 h-5 text-amber-500" />
-                <span>Pre-Órdenes & Sugeridos de Reabastecimiento</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Detección automática de productos agotados o con nivel crítico de stock para solicitar a proveedores.
-              </p>
+        <div className="space-y-6">
+          {/* Top KPI Stats */}
+          {(() => {
+            const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
+            const warningStockCount = products.filter((p) => p.stock > p.minStock && p.stock <= p.minStock + 5).length;
+            const pendingPreOrders = preOrders.filter((p) => p.status === 'PENDIENTE').length;
+            const totalEstimatedCost = products
+              .filter((p) => p.stock <= p.minStock + 5)
+              .reduce((acc, p) => acc + Math.max(10, p.minStock * 2 - p.stock) * p.costPrice, 0);
+
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">Stock Crítico (Agotados)</span>
+                    <h3 className="text-2xl font-black text-rose-600 mt-1">{lowStockCount}</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Requieren pedido urgente</p>
+                  </div>
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl">
+                    <TrendingDown className="w-6 h-6" />
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">Por Agotarse (Nivel Bajo)</span>
+                    <h3 className="text-2xl font-black text-amber-600 mt-1">{warningStockCount}</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Próximos a stock mínimo</p>
+                  </div>
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">Pre-Órdenes Pendientes</span>
+                    <h3 className="text-2xl font-black text-purple-600 mt-1">{pendingPreOrders}</h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{preOrders.length} registradas en total</p>
+                  </div>
+                  <div className="p-3 bg-purple-50 border border-purple-200 text-purple-600 rounded-2xl">
+                    <FileCheck2 className="w-6 h-6" />
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">Costo Estimado Sugerido</span>
+                    <h3 className="text-2xl font-black text-emerald-600 font-mono mt-1">
+                      {formatCurrency(totalEstimatedCost, settings.currencySymbol)}
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Para recuperar stock ideal</p>
+                  </div>
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-2xl">
+                    <DollarSign className="w-6 h-6" />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Main Card */}
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div className="space-y-1">
+                <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                  <FileCheck2 className="w-5 h-5 text-amber-500" />
+                  <span>Gestión de Pre-Órdenes & Requisiciones</span>
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Planifique y cotice compras de reposición antes de emitir órdenes de compra definitivas a proveedores.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenCreateManualPreOrder}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ NUEVA PRE-ORDEN MANUAL</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenCreatePreOrderFromLowStock()}
+                  className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs rounded-xl shadow-md shadow-orange-500/20 transition flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>GENERAR DESDE BAJO STOCK</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={() => {
-                const lowStockProds = products.filter((p) => p.stock <= p.minStock);
-                handleGeneratePurchaseOrderFromLowStock(lowStockProds);
-              }}
-              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Generar Orden de Compra Sugerida</span>
-            </button>
-          </div>
+            {/* Sub-view Switcher (Sugeridos vs Historial) */}
+            <div className="flex border-b border-slate-200">
+              <button
+                type="button"
+                onClick={() => setPreOrdersActiveView('SUGERIDOS')}
+                className={`pb-3 px-4 font-bold text-xs flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                  preOrdersActiveView === 'SUGERIDOS'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                <Boxes className="w-4 h-4" />
+                <span>Sugeridos por Bajo Stock ({products.filter((p) => p.stock <= p.minStock + 5).length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreOrdersActiveView('HISTORIAL')}
+                className={`pb-3 px-4 font-bold text-xs flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                  preOrdersActiveView === 'HISTORIAL'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                <ClipboardList className="w-4 h-4" />
+                <span>Pre-Órdenes Guardadas ({preOrders.length})</span>
+              </button>
+            </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">SKU / Producto</th>
-                  <th className="py-3 px-4 text-center">Stock Actual</th>
-                  <th className="py-3 px-4 text-center">Stock Mínimo</th>
-                  <th className="py-3 px-4 text-center">Sugerido a Pedir</th>
-                  <th className="py-3 px-4 text-right">Costo Estimado</th>
-                  <th className="py-3 px-4 text-center">Estado Alerta</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {products
-                  .filter((p) => p.stock <= p.minStock + 5)
-                  .map((p) => {
-                    const suggestQty = Math.max(10, p.minStock * 2 - p.stock);
-                    const isCritical = p.stock <= p.minStock;
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-50 transition">
-                        <td className="py-3 px-4 font-black text-slate-900">
-                          <span className="font-mono text-orange-600 text-[11px] block">{p.sku}</span>
-                          {p.name}
-                        </td>
-                        <td className="py-3 px-4 text-center font-mono font-black text-rose-600 text-sm">{p.stock} u.</td>
-                        <td className="py-3 px-4 text-center font-mono font-bold text-slate-600">{p.minStock} u.</td>
-                        <td className="py-3 px-4 text-center font-mono font-black text-emerald-600 text-sm">+{suggestQty} u.</td>
-                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                          {formatCurrency(suggestQty * p.costPrice, settings.currencySymbol)}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
-                              isCritical ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-amber-50 border-amber-200 text-amber-700'
-                            }`}
-                          >
-                            {isCritical ? 'STOCK CRÍTICO' : 'POR AGOTARSE'}
-                          </span>
-                        </td>
+            {/* VISTA 1: SUGERIDOS POR BAJO STOCK */}
+            {preOrdersActiveView === 'SUGERIDOS' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500 font-medium">
+                    Artículos con existencia menor o igual al umbral mínimo de seguridad.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const criticalOnly = products.filter((p) => p.stock <= p.minStock);
+                      handleOpenCreatePreOrderFromLowStock(criticalOnly);
+                    }}
+                    className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <TrendingDown className="w-3.5 h-3.5" />
+                    <span>Pedir Solo Stock Crítico ({products.filter((p) => p.stock <= p.minStock).length})</span>
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left text-xs text-slate-700">
+                    <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3 px-4">SKU / Producto</th>
+                        <th className="py-3 px-4 text-center">Stock Actual</th>
+                        <th className="py-3 px-4 text-center">Stock Mínimo</th>
+                        <th className="py-3 px-4 text-center">Sugerido a Pedir</th>
+                        <th className="py-3 px-4 text-right">Costo Estimado</th>
+                        <th className="py-3 px-4 text-center">Nivel Alerta</th>
+                        <th className="py-3 px-4 text-right">Acción</th>
                       </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                      {products.filter((p) => p.stock <= p.minStock + 5).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-400">
+                            <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-70" />
+                            <p className="font-bold text-slate-700 text-sm">¡Inventario en Niveles Óptimos!</p>
+                            <p className="text-xs text-slate-400 mt-1">No hay productos que requieran reposición urgente.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        products
+                          .filter((p) => p.stock <= p.minStock + 5)
+                          .map((p) => {
+                            const suggestQty = Math.max(10, p.minStock * 2 - p.stock);
+                            const isCritical = p.stock <= p.minStock;
+                            return (
+                              <tr key={p.id} className="hover:bg-slate-50 transition">
+                                <td className="py-3 px-4 font-black text-slate-900">
+                                  <span className="font-mono text-orange-600 text-[11px] block">{p.sku}</span>
+                                  {p.name}
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono font-black text-rose-600 text-sm">
+                                  {p.stock} u.
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono font-bold text-slate-600">
+                                  {p.minStock} u.
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono font-black text-emerald-600 text-sm">
+                                  +{suggestQty} u.
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                                  {formatCurrency(suggestQty * p.costPrice, settings.currencySymbol)}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                                      isCritical
+                                        ? 'bg-rose-50 border-rose-200 text-rose-700'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700'
+                                    }`}
+                                  >
+                                    {isCritical ? 'STOCK CRÍTICO' : 'POR AGOTARSE'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenCreatePreOrderForSingleProduct(p)}
+                                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                                  >
+                                    + Crear Pre-Orden
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* VISTA 2: HISTORIAL DE PRE-ORDENES */}
+            {preOrdersActiveView === 'HISTORIAL' && (
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="relative w-full sm:w-72">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por N° o proveedor..."
+                      value={preOrderSearchFilter}
+                      onChange={(e) => setPreOrderSearchFilter(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <span className="text-xs text-slate-500">
+                    Mostrando {preOrders.length} pre-órdenes registradas
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left text-xs text-slate-700">
+                    <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3 px-4">N° Pre-Orden / Fecha</th>
+                        <th className="py-3 px-4">Proveedor Asignado</th>
+                        <th className="py-3 px-4 text-center">Prioridad</th>
+                        <th className="py-3 px-4 text-center">Artículos</th>
+                        <th className="py-3 px-4 text-right">Costo Estimado</th>
+                        <th className="py-3 px-4 text-center">Estado</th>
+                        <th className="py-3 px-4 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                      {preOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-400">
+                            <ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50 text-slate-400" />
+                            <p className="font-bold text-slate-700 text-sm">No hay pre-órdenes registradas</p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              Haga clic en "+ NUEVA PRE-ORDEN MANUAL" o "GENERAR DESDE BAJO STOCK" para crear una.
+                            </p>
+                          </td>
+                        </tr>
+                      ) : (
+                        preOrders
+                          .filter((po) => {
+                            if (!preOrderSearchFilter) return true;
+                            const query = preOrderSearchFilter.toLowerCase();
+                            return (
+                              po.preOrderNumber.toLowerCase().includes(query) ||
+                              (po.supplierName && po.supplierName.toLowerCase().includes(query)) ||
+                              (po.notes && po.notes.toLowerCase().includes(query))
+                            );
+                          })
+                          .map((po) => {
+                            const isConverted = po.status === 'CONVERTIDA_A_ORDEN';
+                            return (
+                              <tr key={po.id} className="hover:bg-slate-50 transition">
+                                <td className="py-3 px-4">
+                                  <span className="font-mono font-black text-orange-600 text-xs block">
+                                    {po.preOrderNumber}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400">{po.createdAt}</span>
+                                </td>
+                                <td className="py-3 px-4 font-bold text-slate-800">
+                                  {po.supplierName || 'Proveedor General'}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                                      po.priority === 'ALTA'
+                                        ? 'bg-rose-50 border-rose-200 text-rose-700'
+                                        : po.priority === 'MEDIA'
+                                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                                        : 'bg-blue-50 border-blue-200 text-blue-700'
+                                    }`}
+                                  >
+                                    {po.priority || 'MEDIA'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                  {po.items.length} prod. ({po.totalItemsCount || po.items.reduce((a, b) => a + b.quantity, 0)} u.)
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono font-black text-emerald-600 text-sm">
+                                  {formatCurrency(po.totalEstimatedCost, settings.currencySymbol)}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                                      isConverted
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                        : 'bg-purple-50 border-purple-200 text-purple-700'
+                                    }`}
+                                  >
+                                    {isConverted ? 'CONVERTIDA A OC' : po.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end space-x-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedPreOrderView(po)}
+                                      className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
+                                      title="Ver Detalle de Pre-Orden"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    {!isConverted && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConvertExistingPreOrderToOC(po)}
+                                        className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-[11px] font-black transition shadow-sm cursor-pointer"
+                                        title="Convertir a Orden de Compra formal"
+                                      >
+                                        Convertir a OC
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePreOrder(po.id)}
+                                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                                      title="Eliminar Pre-Orden"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1156,14 +1731,57 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block font-black text-slate-800 mb-1">RUC / NIT / RFC</label>
-                <input
-                  type="text"
-                  placeholder="ej: 1792048591001"
-                  value={newSupplier.taxId}
-                  onChange={(e) => setNewSupplier({ ...newSupplier, taxId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                />
+                <label className="block font-black text-slate-800 mb-1">RUC / Cédula Proveedor (SRI) *</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="ej: 1792048591001"
+                    value={newSupplier.taxId}
+                    onChange={(e) => setNewSupplier({ ...newSupplier, taxId: e.target.value.trim() })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSearchQuickSupplierDoc();
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSearchQuickSupplierDoc()}
+                    disabled={isSearchingCedula || !newSupplier.taxId}
+                    className="p-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-xl transition flex items-center justify-center shrink-0 cursor-pointer shadow-sm"
+                    title="Consultar en SRI / Registro Civil"
+                  >
+                    {isSearchingCedula ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                {newSupplier.taxId && (() => {
+                  const res = validateEcuadorianDocument('AUTO', newSupplier.taxId);
+                  return (
+                    <div className={`mt-1.5 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border ${
+                      res.isValid 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}>
+                      {res.isValid ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{res.type} Válido</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>{res.message}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -1252,6 +1870,468 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 >
                   Guardar Proveedor
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 1: CREAR / CONFIGURAR PRE-ORDEN (REQUISICIÓN)
+          ===================================================================== */}
+      {isPreOrderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-6 sm:p-8 shadow-2xl my-auto space-y-6 animate-scaleUp">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-amber-500/10 text-amber-600 rounded-2xl border border-amber-500/20">
+                  <FileCheck2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <span>Nueva Pre-Orden & Requisición de Compras</span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300">
+                      BORRADOR / COTIZACIÓN
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Ajuste cantidades sugeridas, costos estimados y asigne proveedor antes de formalizar el pedido.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPreOrderModalOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* General Information Inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Proveedor Sugerido / Asignado</span>
+                </label>
+                <Select
+                  value={preOrderSupplierId}
+                  onChange={(e) => setPreOrderSupplierId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800"
+                >
+                  <option value="">-- Proveedor General / Por Definir --</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.taxId || 'Sin RUC'})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Nivel de Prioridad</span>
+                </label>
+                <Select
+                  value={preOrderPriority}
+                  onChange={(e) => setPreOrderPriority(e.target.value as any)}
+                  className={`w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold ${
+                    preOrderPriority === 'ALTA'
+                      ? 'text-rose-600'
+                      : preOrderPriority === 'MEDIA'
+                      ? 'text-amber-600'
+                      : 'text-blue-600'
+                  }`}
+                >
+                  <option value="ALTA">🔴 Alta (Urgente / Agotado)</option>
+                  <option value="MEDIA">🟡 Media (Stock Mínimo)</option>
+                  <option value="BAJA">🔵 Baja (Reposición Regular)</option>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Fecha Esperada de Llegada</span>
+                </label>
+                <CustomDatePicker
+                  value={preOrderExpectedDate}
+                  onChange={setPreOrderExpectedDate}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                />
+              </div>
+
+              <div className="sm:col-span-3">
+                <label className="block text-xs font-bold text-slate-700 mb-1">Notas / Justificación del Pedido</label>
+                <input
+                  type="text"
+                  placeholder="Ej: Reposición de materiales por alta demanda en proyectos de construcción..."
+                  value={preOrderNotes}
+                  onChange={(e) => setPreOrderNotes(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium focus:outline-none focus:border-orange-500"
+                />
+              </div>
+            </div>
+
+            {/* Agregar más productos al modal */}
+            <div className="p-4 bg-slate-900 rounded-2xl text-white space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-orange-400" />
+                  <span>Agregar Producto Adicional al Pedido</span>
+                </h4>
+                <span className="text-[10px] text-slate-400">Total en catálogo: {products.length} productos</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <div className="sm:col-span-8">
+                  <Select
+                    value={preOrderAddProductId}
+                    onChange={(e) => setPreOrderAddProductId(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-medium"
+                  >
+                    <option value="">-- Seleccionar producto del catálogo --</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.sku} - {p.name} (Stock: {p.stock} u. | Costo: ${p.costPrice.toFixed(2)})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Cant."
+                    value={preOrderAddQty}
+                    onChange={(e) => setPreOrderAddQty(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white text-center font-mono font-bold rounded-xl px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={handleAddProductToPreOrderForm}
+                    disabled={!preOrderAddProductId}
+                    className="w-full h-full py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Agregar</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Tabla de Productos de la Pre-Orden */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                <span>Lista de Artículos a Solicitar ({preOrderItems.length} productos)</span>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  Puede editar las cantidades y costos estimados directamente en la tabla
+                </span>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 max-h-72 overflow-y-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-100 font-black uppercase text-[10px] text-slate-600 tracking-wider sticky top-0 z-10 border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto / SKU</th>
+                      <th className="py-2.5 px-3 text-center">Stock Actual</th>
+                      <th className="py-2.5 px-3 text-center w-28">Cant. Pedir</th>
+                      <th className="py-2.5 px-3 text-right w-28">Costo Estimado</th>
+                      <th className="py-2.5 px-3 text-center">IVA</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                    {preOrderItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                          No hay artículos en esta pre-orden. Agregue productos arriba para comenzar.
+                        </td>
+                      </tr>
+                    ) : (
+                      preOrderItems.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/80 transition">
+                          <td className="py-2 px-3">
+                            <span className="font-mono text-orange-600 text-[10px] block">{item.sku}</span>
+                            <span className="font-bold text-slate-900">{item.productName}</span>
+                          </td>
+                          <td className="py-2 px-3 text-center font-mono font-bold text-slate-500">
+                            {item.currentStock} u. <span className="text-[10px] text-slate-400">(mín {item.minStock})</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <div className="flex items-center justify-center space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdatePreOrderItemQty(idx, item.quantity - 1)}
+                                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-black text-slate-700 text-xs transition cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => handleUpdatePreOrderItemQty(idx, parseFloat(e.target.value) || 1)}
+                                className="w-14 text-center font-mono font-black text-slate-900 text-xs border border-slate-200 rounded py-0.5 bg-slate-50"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleUpdatePreOrderItemQty(idx, item.quantity + 1)}
+                                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-black text-slate-700 text-xs transition cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <div className="flex items-center justify-end space-x-1">
+                              <span className="text-slate-400 font-mono">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={item.costPrice}
+                                onChange={(e) => handleUpdatePreOrderItemCost(idx, parseFloat(e.target.value) || 0)}
+                                className="w-16 text-right font-mono font-bold text-emerald-700 text-xs border border-slate-200 rounded py-0.5 bg-slate-50 px-1"
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-center font-mono text-[11px] text-slate-500">
+                            {item.taxPercent}%
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-slate-900">
+                            {formatCurrency(item.total, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePreOrderItem(idx)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                              title="Quitar de la pre-orden"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Financial Summary & Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200 bg-slate-50/70 p-4 rounded-2xl">
+              <div className="flex items-center space-x-6 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Artículos / Unidades</span>
+                  <span className="font-black text-slate-800 text-sm">
+                    {preOrderItems.length} prod. / {preOrderItems.reduce((a, b) => a + b.quantity, 0)} u.
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Subtotal Base</span>
+                  <span className="font-bold text-slate-700 text-sm">
+                    {formatCurrency(
+                      preOrderItems.reduce((a, b) => a + b.subtotal, 0),
+                      settings.currencySymbol
+                    )}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Total Estimado (con IVA)</span>
+                  <span className="font-black text-emerald-600 text-base font-mono">
+                    {formatCurrency(
+                      preOrderItems.reduce((a, b) => a + b.total, 0),
+                      settings.currencySymbol
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsPreOrderModalOpen(false)}
+                  className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs border border-slate-200 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSavePreOrder(false)}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs transition shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-4 h-4 text-slate-400" />
+                  <span>Guardar Pre-Orden</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSavePreOrder(true)}
+                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs transition shadow-lg shadow-purple-600/20 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ShoppingCart className="w-4 h-4" />
+                  <span>Crear y Emitir Orden de Compra (OC)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 2: DETALLE / VISUALIZACIÓN DE PRE-ORDEN
+          ===================================================================== */}
+      {selectedPreOrderView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-8 shadow-2xl my-auto space-y-6 animate-scaleUp">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-purple-500/10 text-purple-600 rounded-2xl border border-purple-500/20">
+                  <ClipboardList className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <span>Pre-Orden #{selectedPreOrderView.preOrderNumber}</span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                        selectedPreOrderView.status === 'CONVERTIDA_A_ORDEN'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : 'bg-purple-50 border-purple-200 text-purple-700'
+                      }`}
+                    >
+                      {selectedPreOrderView.status === 'CONVERTIDA_A_ORDEN'
+                        ? 'CONVERTIDA A ORDEN DE COMPRA'
+                        : selectedPreOrderView.status}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Registrada el {selectedPreOrderView.createdAt} • Prioridad {selectedPreOrderView.priority || 'MEDIA'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedPreOrderView(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Info Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 text-xs">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Proveedor Asignado</span>
+                <span className="font-bold text-slate-800 text-sm">
+                  {selectedPreOrderView.supplierName || 'Proveedor General'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Fecha Requerida</span>
+                <span className="font-bold text-slate-800 text-sm">
+                  {selectedPreOrderView.expectedDate || 'Inmediata'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Monto Total Estimado</span>
+                <span className="font-black text-emerald-600 text-base font-mono">
+                  {formatCurrency(selectedPreOrderView.totalEstimatedCost, settings.currencySymbol)}
+                </span>
+              </div>
+              {selectedPreOrderView.notes && (
+                <div className="sm:col-span-3 pt-2 border-t border-slate-200/60">
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Notas</span>
+                  <p className="text-slate-700 text-xs mt-0.5">{selectedPreOrderView.notes}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Items Table */}
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3">Producto / SKU</th>
+                    <th className="py-2.5 px-3 text-center">Cant. Solicitada</th>
+                    <th className="py-2.5 px-3 text-right">Costo Unit.</th>
+                    <th className="py-2.5 px-3 text-center">IVA</th>
+                    <th className="py-2.5 px-3 text-right">Subtotal</th>
+                    <th className="py-2.5 px-3 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                  {selectedPreOrderView.items.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3">
+                        <span className="font-mono text-orange-600 text-[10px] block">{item.sku}</span>
+                        <span className="font-bold text-slate-900">{item.productName}</span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-mono font-black text-slate-800">
+                        {item.quantity} u.
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-emerald-600">
+                        {formatCurrency(item.costPrice, settings.currencySymbol)}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-500 text-[11px]">
+                        {item.taxPercent}%
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                        {formatCurrency(item.subtotal, settings.currencySymbol)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">
+                        {formatCurrency(item.total, settings.currencySymbol)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  window.print();
+                }}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-slate-500" />
+                <span>Imprimir / Exportar Requisición</span>
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPreOrderView(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cerrar
+                </button>
+
+                {selectedPreOrderView.status !== 'CONVERTIDA_A_ORDEN' && (
+                  <button
+                    type="button"
+                    onClick={() => handleConvertExistingPreOrderToOC(selectedPreOrderView)}
+                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs transition shadow-lg shadow-purple-600/20 flex items-center gap-2 cursor-pointer"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>Convertir a Orden de Compra (OC)</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

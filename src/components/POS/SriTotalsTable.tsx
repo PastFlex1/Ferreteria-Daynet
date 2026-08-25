@@ -17,6 +17,7 @@ export interface SriTotalsBreakdown {
   propina10Enabled: boolean;
   propina10Amount: number;
   valorAPagar: number;
+  rateBreakdowns?: Record<number, { base: number; tax: number }>;
 }
 
 interface SriTotalsTableProps {
@@ -40,20 +41,44 @@ export const SriTotalsTable: React.FC<SriTotalsTableProps> = ({
 }) => {
   const headerBg = theme === 'dark' ? 'bg-slate-900 text-white' : 'bg-[#0f4c96] text-white';
 
-  const rows = [
+  const rows: Array<{ label: string; value: number }> = [
     { label: 'Subtotal sin impuestos:', value: breakdown.subtotalSinImpuestos },
     { label: 'Subtotal 15.00%:', value: breakdown.subtotal15 },
     { label: 'Subtotal 5%:', value: breakdown.subtotal5 },
-    { label: 'Subtotal tarifa especial:', value: breakdown.subtotalEspecial },
+  ];
+
+  // Dynamic rates (e.g. 13%, 8%, 12%)
+  if (breakdown.rateBreakdowns) {
+    Object.entries(breakdown.rateBreakdowns).forEach(([rateStr, data]) => {
+      const r = parseFloat(rateStr);
+      if (r !== 15 && r !== 5 && r !== 0) {
+        rows.push({ label: `Subtotal ${r}%:`, value: data.base });
+      }
+    });
+  } else if (breakdown.subtotalEspecial > 0) {
+    rows.push({ label: 'Subtotal tarifa especial:', value: breakdown.subtotalEspecial });
+  }
+
+  rows.push(
     { label: 'Subtotal 0%:', value: breakdown.subtotal0 },
     { label: 'Subtotal no objeto de IVA:', value: breakdown.subtotalNoObjeto },
     { label: 'Subtotal exento de IVA:', value: breakdown.subtotalExento },
     { label: 'Total descuento:', value: breakdown.totalDescuento },
     { label: 'Valor ICE:', value: breakdown.valorIce },
     { label: 'IVA 15.00% :', value: breakdown.iva15 },
-    { label: 'IVA 5% :', value: breakdown.iva5 },
-    { label: 'IVA tarifa especial:', value: breakdown.ivaEspecial },
-  ];
+    { label: 'IVA 5% :', value: breakdown.iva5 }
+  );
+
+  if (breakdown.rateBreakdowns) {
+    Object.entries(breakdown.rateBreakdowns).forEach(([rateStr, data]) => {
+      const r = parseFloat(rateStr);
+      if (r !== 15 && r !== 5 && r !== 0) {
+        rows.push({ label: `IVA ${r}% :`, value: data.tax });
+      }
+    });
+  } else if (breakdown.ivaEspecial > 0) {
+    rows.push({ label: 'IVA tarifa especial:', value: breakdown.ivaEspecial });
+  }
 
   return (
     <div className={`overflow-hidden border border-slate-300 rounded-lg text-xs font-sans ${className}`}>

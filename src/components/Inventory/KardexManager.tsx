@@ -515,15 +515,6 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setIsAdjustModalOpen(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-md shadow-orange-500/20 transition cursor-pointer flex items-center gap-1.5"
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Registrar Ajuste de Stock</span>
-          </button>
-
-          <button
-            type="button"
             onClick={handleExportExcel}
             className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
           >

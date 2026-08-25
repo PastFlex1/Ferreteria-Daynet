@@ -9,6 +9,16 @@ export interface ProductCategory {
   color?: string;
 }
 
+export interface TaxRateItem {
+  id: string;
+  name: string;
+  rate: number; // porcentaje ej: 15, 5, 0, 13
+  codeSri?: string; // Código SRI e.g. "4", "5", "0", "6", "7", "2", "10"
+  isDefault?: boolean;
+  active: boolean;
+  description?: string;
+}
+
 export interface Product {
   id: string;
   sku: string;
@@ -193,6 +203,34 @@ export type PurchasesSubTab =
   | 'HISTORIAL_COMPRAS'
   | 'ORDENES_COMPRA'
   | 'PRE_ORDENES';
+
+export interface PreOrderItem {
+  productId: string;
+  sku: string;
+  productName: string;
+  currentStock: number;
+  minStock: number;
+  quantity: number;
+  costPrice: number;
+  taxPercent: number;
+  subtotal: number;
+  total: number;
+}
+
+export interface PreOrder {
+  id: string;
+  preOrderNumber: string;
+  supplierId?: string;
+  supplierName?: string;
+  createdAt: string;
+  expectedDate?: string;
+  priority: 'ALTA' | 'MEDIA' | 'BAJA';
+  status: 'PENDIENTE' | 'COTIZADA' | 'CONVERTIDA_A_ORDEN' | 'CANCELADA';
+  items: PreOrderItem[];
+  totalEstimatedCost: number;
+  totalItemsCount: number;
+  notes?: string;
+}
 
 export type SuppliersSubTab =
   | 'PROVEEDORES'

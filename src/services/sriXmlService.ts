@@ -64,19 +64,30 @@ export function modulo11(cadena: string): number {
 /**
  * Mapea las tarifas de IVA locales a los códigos de porcentaje requeridos por el SRI.
  */
-export function getIvaMapping(ivaRate: string | number | undefined) {
+export function getIvaMapping(ivaRate: string | number | undefined, customCodeSri?: string) {
   const rateNum = typeof ivaRate === 'number' ? ivaRate : parseFloat(String(ivaRate || '0').replace('%', ''));
-  
+  const multiplier = isNaN(rateNum) ? 0 : rateNum / 100;
+
+  if (customCodeSri) {
+    return { codigoPorcentaje: customCodeSri, tarifa: rateNum.toFixed(2), multiplier };
+  }
+
   if (rateNum === 15) {
     return { codigoPorcentaje: '4', tarifa: '15.00', multiplier: 0.15 };
-  } else if (rateNum === 12) {
-    return { codigoPorcentaje: '2', tarifa: '12.00', multiplier: 0.12 };
   } else if (rateNum === 5) {
     return { codigoPorcentaje: '5', tarifa: '5.00', multiplier: 0.05 };
   } else if (rateNum === 0) {
     return { codigoPorcentaje: '0', tarifa: '0.00', multiplier: 0 };
+  } else if (rateNum === 12) {
+    return { codigoPorcentaje: '2', tarifa: '12.00', multiplier: 0.12 };
+  } else if (rateNum === 13) {
+    return { codigoPorcentaje: '10', tarifa: '13.00', multiplier: 0.13 };
+  } else if (rateNum === 14) {
+    return { codigoPorcentaje: '3', tarifa: '14.00', multiplier: 0.14 };
+  } else if (rateNum === 8) {
+    return { codigoPorcentaje: '8', tarifa: '8.00', multiplier: 0.08 };
   }
-  return { codigoPorcentaje: '4', tarifa: '15.00', multiplier: 0.15 };
+  return { codigoPorcentaje: '4', tarifa: rateNum.toFixed(2), multiplier };
 }
 
 /**
