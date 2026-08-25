@@ -1,0 +1,201 @@
+308:      {subTab === 'COMPRAS' && (
+309-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+310-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+311-            <div>
+312-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+313-                <ShoppingBag className="w-5 h-5 text-orange-500" />
+314-                <span>Registro de Facturas de Compra & Mercadería</span>
+315-              </h2>
+316-              <p className="text-xs text-slate-500 mt-0.5">
+317-                Ingresa compras de proveedores para reabastecer el inventario y actualizar precios de costo.
+318-              </p>
+319-            </div>
+320-
+321-            <button
+322-              onClick={() => setIsSupplierModalOpen(true)}
+323-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+324-            >
+325-              <Building2 className="w-4 h-4 text-orange-400" />
+326-              <span>Nuevo Proveedor</span>
+327-            </button>
+328-          </div>
+329-
+330-          {purchaseSuccessMsg && (
+331-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center justify-between">
+332-              <span className="flex items-center gap-2">
+333-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+334-                {purchaseSuccessMsg}
+335-              </span>
+336-              <button onClick={() => setPurchaseSuccessMsg(null)}>✕</button>
+337-            </div>
+338-          )}
+339-
+340-          <form onSubmit={handleProcessPurchase} className="space-y-6">
+341-            {/* Header Form Data */}
+342-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs">
+343-              <div>
+344-                <label className="block font-black text-slate-800 mb-1">Proveedor</label>
+345-                <Select
+346-                  value={selectedSupplierId}
+347-                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+348-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
+349-                >
+350-                  {suppliers.map((s) => (
+351-                    <option key={s.id} value={s.id}>
+352-                      {s.name} ({s.taxId})
+353-                    </option>
+354-                  ))}
+355-                </Select>
+356-              </div>
+357-
+358-              <div>
+359-                <label className="block font-black text-slate-800 mb-1">N° Factura Proveedor</label>
+360-                <input
+361-                  type="text"
+362-                  required
+363-                  value={invoiceNumberInput}
+364-                  onChange={(e) => setInvoiceNumberInput(e.target.value)}
+365-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
+366-                />
+367-              </div>
+368-
+369-              <div>
+370-                <label className="block font-black text-slate-800 mb-1">Fecha Emisión</label>
+371-                <input
+372-                  type="date"
+373-                  required
+374-                  value={purchaseDateInput}
+375-                  onChange={(e) => setPurchaseDateInput(e.target.value)}
+376-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
+377-                />
+378-              </div>
+379-
+380-              <div>
+381-                <label className="block font-black text-slate-800 mb-1">Condición de Pago</label>
+382-                <div className="flex gap-2">
+383-                  <Select
+384-                    value={paymentCondition}
+385-                    onChange={(e) => setPaymentCondition(e.target.value as any)}
+386-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
+387-                  >
+388-                    <option value="CONTADO">Contado (Pagado)</option>
+389-                    <option value="CREDITO">Crédito Proveedor</option>
+390-                  </Select>
+391-                  {paymentCondition === 'CREDITO' && (
+392-                    <input
+393-                      type="number"
+394-                      placeholder="Días"
+395-                      value={creditDaysInput}
+396-                      onChange={(e) => setCreditDaysInput(e.target.value)}
+397-                      className="w-20 px-2 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center"
+398-                    />
+399-                  )}
+400-                </div>
+401-              </div>
+402-            </div>
+403-
+404-            {/* Product Item Entry */}
+405-            <div className="p-4 bg-orange-50/50 border border-orange-200/80 rounded-2xl space-y-3 text-xs">
+406-              <h3 className="font-black text-orange-950 text-xs uppercase tracking-wider flex items-center gap-2">
+407-                <Plus className="w-4 h-4 text-orange-600" />
+408-                <span>Agregar Artículo a la Factura de Compra</span>
+409-              </h3>
+410-
+411-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 items-end">
+412-                <div className="md:col-span-2">
+413-                  <label className="block font-bold text-slate-700 mb-1">Producto Catálogo</label>
+414-                  <Select
+415-                    value={currentProductId}
+416-                    onChange={(e) => {
+417-                      setCurrentProductId(e.target.value);
+418-                      const p = products.find((prod) => prod.id === e.target.value);
+419-                      if (p) setCurrentCost(p.costPrice.toString());
+420-                    }}
+421-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
+422-                  >
+423-                    {products.map((p) => (
+424-                      <option key={p.id} value={p.id}>
+425-                        {p.name} (SKU: {p.sku})
+426-                      </option>
+427-                    ))}
+428-                  </Select>
+429-                </div>
+430-
+431-                <div>
+432-                  <label className="block font-bold text-slate-700 mb-1">Cantidad</label>
+433-                  <input
+434-                    type="number"
+435-                    min="1"
+436-                    value={currentQty}
+437-                    onChange={(e) => setCurrentQty(e.target.value)}
+438-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center"
+439-                  />
+440-                </div>
+441-
+442-                <div>
+443-                  <label className="block font-bold text-slate-700 mb-1">Costo Unitario ($)</label>
+444-                  <input
+445-                    type="number"
+446-                    step="0.01"
+447-                    value={currentCost}
+448-                    onChange={(e) => setCurrentCost(e.target.value)}
+449-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center text-emerald-700"
+450-                  />
+451-                </div>
+452-
+453-                <div>
+454-                  <label className="block font-bold text-slate-700 mb-1">N° Lote (Opcional)</label>
+455-                  <input
+456-                    type="text"
+457-                    placeholder="ej: LOT-901"
+458-                    value={currentBatch}
+459-                    onChange={(e) => setCurrentBatch(e.target.value)}
+460-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono"
+461-                  />
+462-                </div>
+463-
+464-                <div>
+465-                  <button
+466-                    type="button"
+467-                    onClick={handleAddPurchaseItem}
+468-                    className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
+469-                  >
+470-                    <Plus className="w-4 h-4" />
+471-                    <span>Añadir</span>
+472-                  </button>
+473-                </div>
+474-              </div>
+475-            </div>
+476-
+477-            {/* Items Table */}
+478-            <div className="overflow-x-auto rounded-xl border border-slate-200">
+479-              <table className="w-full text-left text-xs text-slate-700">
+480-                <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+481-                  <tr>
+482-                    <th className="py-3 px-4">SKU / Producto</th>
+483-                    <th className="py-3 px-4 text-center">Cantidad</th>
+484-                    <th className="py-3 px-4 text-right">Costo Unit.</th>
+485-                    <th className="py-3 px-4 text-center">Lote / Caducidad</th>
+486-                    <th className="py-3 px-4 text-right">Subtotal</th>
+487-                    <th className="py-3 px-4 text-right">Total IVA Included</th>
+488-                    <th className="py-3 px-4 text-center">Quitar</th>
+489-                  </tr>
+490-                </thead>
+491-                <tbody className="divide-y divide-slate-100 bg-white">
+492-                  {purchaseItems.length === 0 ? (
+493-                    <tr>
+494-                      <td colSpan={7} className="py-8 text-center text-slate-400 font-bold">
+495-                        No has agregado ningún artículo a esta compra.
+496-                      </td>
+497-                    </tr>
+498-                  ) : (
+499-                    purchaseItems.map((item, idx) => (
+500-                      <tr key={idx} className="hover:bg-slate-50 transition">
+501-                        <td className="py-3 px-4 font-black text-slate-900">
+502-                          <span className="font-mono text-orange-600 text-[11px] block">{item.sku}</span>
+503-                          {item.productName}
+504-                        </td>
+505-                        <td className="py-3 px-4 text-center font-mono font-bold text-slate-900">{item.quantity} u.</td>
+506-                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">
+507-                          {formatCurrency(item.costPrice, settings.currencySymbol)}
+508-                        </td>

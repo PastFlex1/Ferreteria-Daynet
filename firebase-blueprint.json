@@ -1,0 +1,28 @@
+{
+  "entities": {
+    "products": {
+      "title": "Products",
+      "description": "Products inventory for ferreteria",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "category": { "type": "string" },
+        "code": { "type": "string" }
+      },
+      "required": ["name", "price"]
+    },
+    "sales": {
+      "title": "Sales",
+      "description": "Sales transactions",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "total": { "type": "number" },
+        "customer": { "type": "string" }
+      },
+      "required": ["total"]
+    }
+  }
+}

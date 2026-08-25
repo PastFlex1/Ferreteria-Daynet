@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  code, kbd, samp, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom Smooth Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.8);
+  border-radius: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(249, 115, 22, 0.8);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Print styling adjustments */
+@media print {
+  @page {
+    size: auto;
+    margin: 8mm;
+  }
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  #printable-invoice {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+}
+
+/* Keyframe animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Industrial Card Glass & Glow Effects */
+.card-industrial {
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.03), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-industrial:hover {
+  border-color: rgba(249, 115, 22, 0.4);
+  box-shadow: 0 4px 12px -2px rgba(249, 115, 22, 0.12), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+}
+
+/* Custom Styled Select & Option Elements */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0.75rem center !important;
+  background-size: 1rem !important;
+  padding-right: 2.25rem !important;
+  border-radius: 0.75rem !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+select option {
+  background-color: #020617 !important; /* slate-950 dark */
+  color: #f8fafc !important; /* slate-50 */
+  padding: 10px 14px !important;
+  font-weight: 800 !important;
+}
+
+select option:hover,
+select option:focus,
+select option:active,
+select option:checked {
+  background: linear-gradient(135deg, #f97316, #d97706) !important;
+  color: #ffffff !important;
+}
+
+
+/* Hide number input arrows */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* Custom styles for react-datepicker */
+.react-datepicker-wrapper {
+  display: block;
+  width: 100%;
+}
+.react-datepicker {
+  font-family: inherit !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -4px rgba(15, 23, 42, 0.05) !important;
+  overflow: hidden;
+}
+.react-datepicker__header {
+  background-color: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  padding-top: 12px !important;
+}
+.react-datepicker__current-month {
+  font-weight: 800 !important;
+  color: #0f172a !important;
+  font-size: 0.9rem !important;
+}
+.react-datepicker__day-name {
+  color: #64748b !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+}
+.react-datepicker__day {
+  color: #334155 !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  transition: all 0.2s !important;
+}
+.react-datepicker__day:hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+  background-color: #f97316 !important;
+  color: white !important;
+  font-weight: 800 !important;
+}
+.react-datepicker__day--keyboard-selected {
+  background-color: #fb923c !important;
+}
+.react-datepicker__navigation-icon::before {
+  border-color: #64748b !important;
+}
+.react-datepicker__navigation:hover .react-datepicker__navigation-icon::before {
+  border-color: #0f172a !important;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-slideUp {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Ferretería DAYNET",
+  "description": "Sistema punto de venta, inventario y facturación profesional para Ferretería DAYNET.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
