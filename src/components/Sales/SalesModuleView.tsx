@@ -274,16 +274,15 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                         {formatCurrency(ord.total, settings.currencySymbol)}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <div className="flex items-center justify-center gap-1.5">
                           {/* 1. Ver */}
                           <button
                             type="button"
                             onClick={() => setSelectedOrderForDetail(ord)}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition cursor-pointer"
                             title="Ver Detalle del Pedido"
                           >
-                            <Eye className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="hidden lg:inline">Ver</span>
+                            <Eye className="w-4 h-4" />
                           </button>
 
                           {/* 2. Editar */}
@@ -294,7 +293,7 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                               setOrderToEdit(ord);
                               setIsCreateOrderOpen(true);
                             }}
-                            className="p-1.5 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed text-amber-800 border border-amber-200 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            className="p-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed text-amber-700 rounded-lg transition cursor-pointer"
                             title={
                               ord.status === 'FACTURADO'
                                 ? 'No se puede editar un pedido ya facturado'
@@ -303,30 +302,27 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                                 : 'Editar Pedido'
                             }
                           >
-                            <Pencil className="w-3.5 h-3.5 text-amber-600" />
-                            <span className="hidden lg:inline">Editar</span>
+                            <Pencil className="w-4 h-4" />
                           </button>
 
                           {/* 3. Imprimir */}
                           <button
                             type="button"
                             onClick={() => printOrderDocument(ord, settings)}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
                             title="Imprimir Pedido"
                           >
-                            <Printer className="w-3.5 h-3.5 text-slate-700" />
-                            <span className="hidden lg:inline">Imprimir</span>
+                            <Printer className="w-4 h-4" />
                           </button>
 
                           {/* 4. Descargar PDF */}
                           <button
                             type="button"
                             onClick={() => downloadOrderPdf(ord, settings)}
-                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
                             title="Descargar en PDF"
                           >
-                            <Download className="w-3.5 h-3.5 text-rose-600" />
-                            <span className="hidden lg:inline">PDF</span>
+                            <Download className="w-4 h-4" />
                           </button>
 
                           {/* 5. Facturar */}
@@ -340,11 +336,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                                   onNavigateToTab('CAJA');
                                 }
                               }}
-                              className="px-2 py-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg text-[11px] font-black transition cursor-pointer shadow-xs flex items-center gap-1"
+                              className="p-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg transition cursor-pointer shadow-xs"
                               title="Facturar Pedido en POS"
                             >
-                              <Receipt className="w-3.5 h-3.5" />
-                              <span>Facturar</span>
+                              <Receipt className="w-4 h-4" />
                             </button>
                           )}
                         </div>

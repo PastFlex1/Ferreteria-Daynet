@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { useModal } from '../../context/ModalContext';
-import { Invoice, StoreSettings } from '../../types';
+import { Invoice, SalesSubTab, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { defaultEmployees, defaultUsersList } from '../../data/initialData';
@@ -46,7 +46,7 @@ const defaultGoals: SellerGoalRecord[] = [];
 interface CommissionsAndGoalsManagerProps {
   invoices: Invoice[];
   settings: StoreSettings;
-  onNavigateToTab?: (tab: string) => void;
+  onNavigateToTab?: (tab: SalesSubTab) => void;
 }
 
 export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProps> = ({
