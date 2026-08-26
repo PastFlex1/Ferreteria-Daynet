@@ -64,6 +64,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
     name: '',
     email: '',
     phone: '',
+    country: 'Ecuador',
+    province: '',
+    city: '',
     address: '',
     creditLimit: '',
   });
@@ -93,6 +96,8 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.docNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.phone && c.phone.includes(searchTerm)) ||
+      (c.city && c.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (c.province && c.province.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (c.email && c.email.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesDocType = docTypeFilter === 'TODOS' || c.docType === docTypeFilter;
@@ -113,6 +118,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
         name: cust.name,
         email: cust.email || '',
         phone: cust.phone || '',
+        country: cust.country || 'Ecuador',
+        province: cust.province || '',
+        city: cust.city || '',
         address: cust.address || '',
         creditLimit: cust.creditLimit.toString(),
       });
@@ -124,6 +132,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
         name: '',
         email: '',
         phone: '',
+        country: 'Ecuador',
+        province: '',
+        city: '',
         address: '',
         creditLimit: '',
       });
@@ -164,6 +175,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
       name: formData.name.trim(),
       email: formData.email.trim() || undefined,
       phone: formData.phone.trim() || undefined,
+      country: formData.country.trim() || 'Ecuador',
+      province: formData.province.trim() || undefined,
+      city: formData.city.trim() || undefined,
       address: formData.address.trim() || undefined,
       creditLimit: parseFloat(formData.creditLimit) || 0,
       currentBalance: editingCustomer ? editingCustomer.currentBalance : 0,
@@ -481,9 +495,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                         <tr key={c.id} className="hover:bg-slate-50/80 transition group">
                           <td className="py-3 px-4 font-black text-slate-900 group-hover:text-orange-600">
                             {c.name}
-                            {c.address && (
-                              <span className="block text-[10px] text-slate-400 font-medium">
-                                {c.address}
+                            {(c.city || c.province || c.address) && (
+                              <span className="block text-[10px] text-slate-400 font-medium truncate max-w-xs">
+                                {[c.city, c.province, c.address].filter(Boolean).join(' • ')}
                               </span>
                             )}
                           </td>
@@ -771,6 +785,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                   name: formData.name,
                   email: formData.email,
                   phone: formData.phone,
+                  country: formData.country,
+                  province: formData.province,
+                  city: formData.city,
                   address: formData.address,
                   creditLimit: formData.creditLimit
                 }}
@@ -783,6 +800,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                     name: 'CONSUMIDOR FINAL',
                     email: 'consumidor@final.com',
                     phone: '9999999999',
+                    country: 'Ecuador',
+                    province: 'Pichincha',
+                    city: 'Quito',
                     address: 'S/N'
                   }));
                 }}

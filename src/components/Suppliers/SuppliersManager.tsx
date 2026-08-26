@@ -35,6 +35,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { useCedulaSearch } from '../../hooks/useCedulaSearch';
 import { Select } from '../Shared/Select';
+import { LocationSelectSection } from '../Shared/LocationSelectSection';
 
 interface SuppliersManagerProps {
   subTab: SuppliersSubTab;
@@ -48,6 +49,9 @@ export interface SupplierDetail {
   contactPerson: string;
   phone: string;
   email: string;
+  country?: string;
+  province?: string;
+  city?: string;
   address: string;
   paymentDays: number; // Días de crédito otorgados
   bankName?: string;
@@ -117,6 +121,9 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
     contactPerson: '',
     phone: '',
     email: '',
+    country: 'Ecuador',
+    province: '',
+    city: '',
     address: '',
     paymentDays: 30,
     bankName: '',
@@ -160,6 +167,17 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       lastSearchedDocRef.current = '';
     }
   }, [supplierFormData.taxId, isSupplierModalOpen]);
+
+  // Search filter
+  const filteredSuppliers = suppliers.filter(
+    (s) =>
+      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.taxId.includes(searchTerm) ||
+      (s.contactPerson && s.contactPerson.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.city && s.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.province && s.province.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (s.email && s.email.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   // Payment Form Modal State
   const [selectedPayableForPayment, setSelectedPayableForPayment] = useState<PayableInvoice | null>(null);
@@ -209,6 +227,9 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
         contactPerson: supplierFormData.contactPerson || '',
         phone: supplierFormData.phone || '',
         email: supplierFormData.email || '',
+        country: supplierFormData.country || 'Ecuador',
+        province: supplierFormData.province || '',
+        city: supplierFormData.city || '',
         address: supplierFormData.address || '',
         paymentDays: supplierFormData.paymentDays || 30,
         bankName: supplierFormData.bankName || '',
@@ -229,6 +250,9 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       contactPerson: '',
       phone: '',
       email: '',
+      country: 'Ecuador',
+      province: '',
+      city: '',
       address: '',
       paymentDays: 30,
       bankName: '',
@@ -237,6 +261,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       status: 'ACTIVO',
       notes: ''
     });
+    showToast(editingSupplier ? 'Proveedor actualizado con éxito.' : 'Proveedor registrado con éxito.', 'success');
   };
 
   const handleOpenEditSupplier = (sup: SupplierDetail) => {
@@ -436,6 +461,11 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                       <div>
                         <h3 className="font-black text-slate-950 text-sm">{sup.name}</h3>
                         <span className="font-mono text-[11px] text-slate-500 block">RUC / NIT: {sup.taxId}</span>
+                        {(sup.city || sup.province) && (
+                          <span className="text-[10px] text-orange-600 font-bold block">
+                            📍 {[sup.city, sup.province, sup.country].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -845,8 +875,19 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                 />
               </div>
 
+              <div className="pt-2">
+                <LocationSelectSection
+                  country={supplierFormData.country || 'Ecuador'}
+                  province={supplierFormData.province || ''}
+                  city={supplierFormData.city || ''}
+                  onCountryChange={(val) => setSupplierFormData({ ...supplierFormData, country: val })}
+                  onProvinceChange={(val) => setSupplierFormData({ ...supplierFormData, province: val })}
+                  onCityChange={(val) => setSupplierFormData({ ...supplierFormData, city: val })}
+                />
+              </div>
+
               <div>
-                <label className="block font-black text-slate-800 mb-1">Dirección Física / Bodega</label>
+                <label className="block font-black text-slate-800 mb-1">Dirección Física / Bodega (Calles & N°)</label>
                 <input
                   type="text"
                   placeholder="Av. Industrial N45-12 y Panamericana Norte"

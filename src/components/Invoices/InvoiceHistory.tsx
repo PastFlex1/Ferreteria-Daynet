@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CustomSelect } from '../CustomSelect';
+import { Select } from '../Shared/Select';
 import { 
   FileText, 
   Search, 
@@ -11,19 +12,24 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle, 
-  RefreshCw,
-  TrendingUp,
-  DollarSign,
-  Calculator,
-  ShieldCheck,
-  Send,
-  Trash2,
-  AlertTriangle
+  RefreshCw, 
+  TrendingUp, 
+  DollarSign, 
+  Calculator, 
+  ShieldCheck, 
+  Send, 
+  Trash2, 
+  AlertTriangle,
+  Edit3,
+  Plus,
+  X,
+  ShoppingCart
 } from 'lucide-react';
-import { DocumentType, Invoice, InvoiceStatus, StoreSettings } from '../../types';
+import { Customer, DocumentType, Invoice, InvoiceItem, InvoiceStatus, Product, StoreSettings } from '../../types';
 import { formatCurrency, formatDate, getDocumentTypeName, getPaymentMethodLabel } from '../../utils/formatters';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { useModal } from '../../context/ModalContext';
+import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 
 interface InvoiceHistoryProps {
   invoices: Invoice[];
@@ -52,6 +58,17 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InvoiceStatus>('TODOS');
   const [sriStatusFilter, setSriStatusFilter] = useState<'TODOS' | 'AUTORIZADO' | 'PENDIENTE' | 'DEVUELTA'>('TODOS');
   
+  // Data for editing quotes
+  const [products] = useFirestoreSync<Product[]>('ferreteria_products', []);
+  const [customers] = useFirestoreSync<Customer[]>('ferreteria_customers', []);
+  const [editingQuote, setEditingQuote] = useState<Invoice | null>(null);
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [editCustomerId, setEditCustomerId] = useState<string>('');
+  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editAddProductId, setEditAddProductId] = useState<string>('');
+  const [editAddQty, setEditAddQty] = useState<string>('');
+
   // SRI Modal Trigger
   const [selectedInvoiceForSri, setSelectedInvoiceForSri] = useState<Invoice | null>(null);
 
@@ -105,15 +122,80 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
     });
   }, [invoices, searchTerm, docTypeFilter, statusFilter, sriStatusFilter]);
 
+  const handleOpenEditQuote = (quote: Invoice) => {
+    setEditingQuote(quote);
+    setEditCustomer(quote.customer);
+    setEditCustomerId(quote.customer?.id || '');
+    setEditItems(quote.items.map(item => ({ ...item })));
+    setEditNotes(quote.notes || '');
+    setEditAddProductId('');
+    setEditAddQty('');
+  };
+
+  const handleAddEditQuoteItem = () => {
+    const p = products.find(prod => prod.id === editAddProductId);
+    if (!p) return;
+    const qty = parseFloat(editAddQty) || 1;
+    const taxRate = typeof p.taxRate === 'number' ? p.taxRate : 15;
+    const subtotal = p.price * qty;
+    const tax = subtotal * (taxRate / 100);
+    const newItem: InvoiceItem = {
+      productId: p.id,
+      sku: p.sku,
+      productName: p.name,
+      unit: p.unit || 'UND',
+      quantity: qty,
+      unitPrice: p.price,
+      discountPercent: 0,
+      subtotal: subtotal,
+      taxRate: taxRate,
+      taxAmount: tax,
+      total: subtotal + tax
+    };
+    setEditItems(prev => [...prev, newItem]);
+    setEditAddProductId('');
+    setEditAddQty('');
+  };
+
+  const handleSaveEditQuote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingQuote) return;
+    if (editItems.length === 0) {
+      showToast('La cotización debe contener al menos un producto.', 'warning');
+      return;
+    }
+
+    const matchedCustomer = customers.find(c => c.id === editCustomerId) || editCustomer || editingQuote.customer;
+    const subtotal = editItems.reduce((acc, item) => acc + (item.subtotal || 0), 0);
+    const taxTotal = editItems.reduce((acc, item) => acc + (item.total - item.subtotal), 0);
+    const total = subtotal + taxTotal;
+
+    const updatedQuote: Invoice = {
+      ...editingQuote,
+      customer: matchedCustomer,
+      items: editItems,
+      subtotal,
+      taxTotal,
+      total,
+      notes: editNotes,
+    };
+
+    if (onUpdateInvoice) {
+      onUpdateInvoice(updatedQuote);
+    }
+    setEditingQuote(null);
+    showToast(`Cotización #${updatedQuote.fullNumber} actualizada exitosamente.`, 'success');
+  };
+
   const handleDelete = (inv: Invoice) => {
     showConfirm(
-      `¿Está seguro de eliminar el comprobante ${inv.fullNumber}? Esta acción no se puede deshacer.`,
+      `¿Está seguro de eliminar ${inv.documentType === 'COTIZACION' ? 'la cotización' : 'el comprobante'} ${inv.fullNumber}? Esta acción no se puede deshacer.`,
       () => {
         if (onDeleteInvoice) {
           onDeleteInvoice(inv.id);
         }
       },
-      '¿Eliminar Comprobante?'
+      `¿Eliminar ${inv.documentType === 'COTIZACION' ? 'Cotización' : 'Comprobante'}?`
     );
   };
 
@@ -387,49 +469,69 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                       </td>
                       
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center space-x-1.5">
-                          {inv.documentType !== 'COTIZACION' && (
+                        <div className="flex items-center justify-center space-x-1">
+                          {/* 1. Ver */}
+                          <button
+                            onClick={() => onOpenViewer(inv)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-950 rounded-lg transition cursor-pointer"
+                            title="Ver Detalle"
+                          >
+                            <Eye className="w-4 h-4 text-slate-600" />
+                          </button>
+
+                          {/* 2. Imprimir */}
+                          <button
+                            onClick={() => {
+                              onOpenViewer(inv);
+                              setTimeout(() => window.print(), 300);
+                            }}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-950 rounded-lg transition cursor-pointer"
+                            title="Imprimir Comprobante"
+                          >
+                            <Printer className="w-4 h-4 text-slate-600" />
+                          </button>
+
+                          {/* 3. Editar (para Cotizaciones) */}
+                          {inv.documentType === 'COTIZACION' && (
                             <button
-                              onClick={() => onOpenViewer(inv)}
-                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition inline-flex items-center gap-1 cursor-pointer"
-                              title="Ver / Imprimir Comprobante"
+                              onClick={() => handleOpenEditQuote(inv)}
+                              className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg border border-amber-200 transition cursor-pointer"
+                              title="Editar Cotización"
                             >
-                              <Eye className="w-3.5 h-3.5 text-orange-600" />
-                              <span>Ver</span>
+                              <Edit3 className="w-4 h-4 text-amber-600" />
                             </button>
                           )}
 
-                          {/* Botón Transmitir SRI para Facturas No Autorizadas */}
-                          {isFactura && !isAutorizado && (
-                            <button
-                              onClick={() => setSelectedInvoiceForSri(inv)}
-                              className="p-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1 cursor-pointer shadow-xs"
-                              title="Transmitir o Reintentar Autorización con el SRI"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>Transmitir SRI</span>
-                            </button>
-                          )}
-
+                          {/* 4. Facturar (para Cotizaciones) */}
                           {inv.documentType === 'COTIZACION' && (
                             <button
                               onClick={() => onConvertQuoteToInvoice(inv)}
-                              className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold border border-emerald-200 transition inline-flex items-center gap-1 cursor-pointer"
+                              className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 transition cursor-pointer"
                               title="Facturar Cotización en Punto de Venta"
                             >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                              <span>Facturar</span>
+                              <RefreshCw className="w-4 h-4 text-emerald-600" />
                             </button>
                           )}
 
-                          {/* Botón Eliminar Borrador */}
+                          {/* Transmitir SRI para Facturas No Autorizadas */}
+                          {isFactura && !isAutorizado && (
+                            <button
+                              onClick={() => setSelectedInvoiceForSri(inv)}
+                              className="p-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg transition cursor-pointer shadow-xs"
+                              title="Transmitir o Reintentar Autorización SRI"
+                            >
+                              <Send className="w-4 h-4 text-white" />
+                            </button>
+                          )}
+
+                          {/* 5. Eliminar */}
                           {onDeleteInvoice && (!isAutorizado || inv.documentType === 'COTIZACION') && (
                             <button
                               onClick={() => handleDelete(inv)}
-                              className="p-1.5 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition inline-flex items-center cursor-pointer"
-                              title="Eliminar borrador no autorizado"
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                              title={`Eliminar ${inv.documentType === 'COTIZACION' ? 'Cotización' : 'Comprobante'}`}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4 text-rose-600" />
                             </button>
                           )}
                         </div>
@@ -442,6 +544,215 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
           </table>
         </div>
       </div>
+
+      {/* ── MODAL: EDITAR COTIZACIÓN ────────────────────────────────────────── */}
+      {editingQuote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl">
+                  <Edit3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-950">
+                    Editar Cotización #{editingQuote.fullNumber}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Modifique el cliente, productos, cantidades, precios y notas de la cotización
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingQuote(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditQuote} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Cliente / Receptor *</label>
+                  <Select
+                    value={editCustomerId}
+                    onChange={(e: any) => setEditCustomerId(e.target.value)}
+                    className="w-full bg-slate-50 border-slate-200 font-bold"
+                  >
+                    <option value="">Consumidor Final (9999999999999)</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.docNumber})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Notas / Condiciones de Validez</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Precios válidos por 15 días calendario..."
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Agregar producto a la cotización */}
+              <div className="p-4 bg-amber-50/50 border border-amber-200/80 rounded-2xl space-y-3">
+                <h4 className="font-black text-amber-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-amber-600" />
+                  <span>Agregar / Modificar Artículos a la Cotización</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <div className="sm:col-span-2">
+                    <Select
+                      value={editAddProductId}
+                      onChange={(e: any) => setEditAddProductId(e.target.value)}
+                      className="bg-white border-slate-200 text-xs font-bold"
+                    >
+                      <option value="">Seleccionar Producto...</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.sku} - {p.name} (${p.price.toFixed(2)})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Cantidad"
+                      value={editAddQty}
+                      onChange={(e) => setEditAddQty(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleAddEditQuoteItem}
+                      className="w-full px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                    >
+                      + Agregar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla de ítems editables */}
+              {editItems.length > 0 && (
+                <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-white font-bold text-[10px] uppercase">
+                      <tr>
+                        <th className="py-2.5 px-3">Producto</th>
+                        <th className="py-2.5 px-3 text-center w-24">Cant.</th>
+                        <th className="py-2.5 px-3 text-right w-28">Precio ($)</th>
+                        <th className="py-2.5 px-3 text-right">Total ($)</th>
+                        <th className="py-2.5 px-3 text-center w-12">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                      {editItems.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3">
+                            <span className="font-mono text-orange-600 text-[10px] block">{item.sku}</span>
+                            <span className="font-bold text-slate-800">{item.productName}</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const newQty = parseFloat(e.target.value) || 1;
+                                const sub = item.unitPrice * newQty;
+                                const tax = sub * ((item.taxRate || 15) / 100);
+                                setEditItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  quantity: newQty,
+                                  subtotal: sub,
+                                  taxAmount: tax,
+                                  total: sub + tax
+                                } : it));
+                              }}
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-mono font-bold"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.unitPrice}
+                              onChange={(e) => {
+                                const newPrice = parseFloat(e.target.value) || 0;
+                                const sub = newPrice * item.quantity;
+                                const tax = sub * ((item.taxRate || 15) / 100);
+                                setEditItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  unitPrice: newPrice,
+                                  subtotal: sub,
+                                  taxAmount: tax,
+                                  total: sub + tax
+                                } : it));
+                              }}
+                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono text-emerald-600 font-bold"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                            {formatCurrency(item.total, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setEditItems(editItems.filter((_, i) => i !== idx))}
+                              className="text-rose-500 hover:text-rose-700 cursor-pointer p-1"
+                            >
+                              <Trash2 className="w-4 h-4 mx-auto" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Total Summary */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-2xl font-mono">
+                <span className="font-bold text-slate-700 text-xs">Total de la Cotización:</span>
+                <span className="text-base font-black text-emerald-600">
+                  {formatCurrency(editItems.reduce((acc, item) => acc + item.total, 0), settings.currencySymbol)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingQuote(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={editItems.length === 0}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl text-xs transition shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Live SRI Emission */}
       {selectedInvoiceForSri && (

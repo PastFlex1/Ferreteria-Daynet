@@ -76,6 +76,9 @@ export interface Customer {
   name: string; // Nombre o Razon Social
   email?: string;
   phone?: string;
+  country?: string;
+  province?: string;
+  city?: string;
   address?: string;
   creditLimit: number;
   currentBalance: number; // Deuda actual acumulada

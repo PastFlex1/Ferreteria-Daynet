@@ -1,15 +1,31 @@
 import React from 'react';
 import { useModal } from '../../context/ModalContext';
-import { X, PackageCheck, User, MapPin, Calendar, FileText, CheckCircle2, AlertCircle, Clock, Trash2, Printer } from 'lucide-react';
+import { 
+  X, 
+  PackageCheck, 
+  User, 
+  MapPin, 
+  Calendar, 
+  FileText, 
+  CheckCircle2, 
+  AlertCircle, 
+  Clock, 
+  Trash2, 
+  Printer, 
+  Download, 
+  Pencil 
+} from 'lucide-react';
 import { Order } from './CreateOrderModal';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { StoreSettings } from '../../types';
+import { printOrderDocument, downloadOrderPdf } from '../../utils/orderPdfGenerator';
 
 interface OrderDetailModalProps {
   order: Order | null;
   onClose: () => void;
   onUpdateStatus: (orderId: string, newStatus: Order['status']) => void;
   onDeleteOrder: (orderId: string) => void;
+  onEditOrder?: (order: Order) => void;
   onInvoiceOrder?: (order: Order) => void;
   settings: StoreSettings;
 }
@@ -19,6 +35,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onClose,
   onUpdateStatus,
   onDeleteOrder,
+  onEditOrder,
   onInvoiceOrder,
   settings,
 }) => {
@@ -42,6 +59,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   order.status === 'DESPACHADO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
                   order.status === 'EN PREPARACION' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
                   order.status === 'ANULADO' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                  order.status === 'FACTURADO' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
                   'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                 }`}>
                   {order.status}
@@ -52,12 +70,46 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => printOrderDocument(order, settings)}
+              className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-slate-900 border border-slate-700"
+              title="Imprimir Pedido"
+            >
+              <Printer className="w-4 h-4 text-orange-400" />
+              <span className="hidden sm:inline">Imprimir</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadOrderPdf(order, settings)}
+              className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-slate-900 border border-slate-700"
+              title="Descargar en PDF"
+            >
+              <Download className="w-4 h-4 text-orange-400" />
+              <span className="hidden sm:inline">PDF</span>
+            </button>
+            {onEditOrder && order.status !== 'FACTURADO' && order.status !== 'ANULADO' && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEditOrder(order);
+                }}
+                className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer flex items-center gap-1.5 text-xs font-bold bg-slate-900 border border-slate-700"
+                title="Editar Pedido"
+              >
+                <Pencil className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Editar</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer ml-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}

@@ -32,6 +32,9 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [country, setCountry] = useState('Ecuador');
+  const [province, setProvince] = useState('');
+  const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
   const [creditLimit, setCreditLimit] = useState('');
 
@@ -78,6 +81,9 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
       name: name.trim(),
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
+      country: country.trim() || 'Ecuador',
+      province: province.trim() || undefined,
+      city: city.trim() || undefined,
       address: address.trim() || undefined,
       creditLimit: parseFloat(creditLimit) || 0,
       currentBalance: 0,
@@ -190,12 +196,15 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
             /* Create Customer Form */
             <form onSubmit={handleCreateSubmit} className="space-y-4">
               <DocumentCustomerForm
-                data={{ docNumber, name, email, phone, address, creditLimit }}
+                data={{ docNumber, name, email, phone, country, province, city, address, creditLimit }}
                 onChange={(field, value) => {
                   if (field === 'docNumber') setDocNumber(value);
                   if (field === 'name') setName(value);
                   if (field === 'email') setEmail(value);
                   if (field === 'phone') setPhone(value);
+                  if (field === 'country') setCountry(value);
+                  if (field === 'province') setProvince(value);
+                  if (field === 'city') setCity(value);
                   if (field === 'address') setAddress(value);
                   if (field === 'creditLimit') setCreditLimit(value);
                 }}
@@ -205,6 +214,9 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
                   setName('CONSUMIDOR FINAL');
                   setEmail('consumidor@final.com');
                   setPhone('9999999999');
+                  setCountry('Ecuador');
+                  setProvince('Pichincha');
+                  setCity('Quito');
                   setAddress('S/N');
                   setCreditLimit('0');
                 }}

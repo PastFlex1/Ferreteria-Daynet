@@ -1,7 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 
-export const Select = (props: any) => {
+export interface SelectProps {
+  value?: string | number;
+  onChange?: (e: { target: { value: string } }) => void;
+  children?: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
+  required?: boolean;
+  searchable?: boolean;
+}
+
+export const Select: React.FC<SelectProps> = (props) => {
   const { value, onChange, children, className = '', disabled, required, searchable = true } = props;
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

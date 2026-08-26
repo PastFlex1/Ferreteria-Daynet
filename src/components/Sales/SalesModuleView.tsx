@@ -29,12 +29,14 @@ import {
   ShieldCheck,
   Check,
   RefreshCw,
-  Eye
+  Eye,
+  Pencil
 } from 'lucide-react';
 import { Customer, Invoice, Product, SalesSubTab, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { CreateOrderModal, Order } from './CreateOrderModal';
 import { OrderDetailModal } from './OrderDetailModal';
+import { printOrderDocument, downloadOrderPdf } from '../../utils/orderPdfGenerator';
 import { CreateGuiaRemisionModal, GuiaRemisionData } from './CreateGuiaRemisionModal';
 import { CreateCreditNoteModal } from './CreateCreditNoteModal';
 import { CreateMedicalPrescriptionModal } from './CreateMedicalPrescriptionModal';
@@ -69,13 +71,20 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
+  const [orderToEdit, setOrderToEdit] = useState<Order | null>(null);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
 
   // Pedidos state initialized from firestore
   const [orders, setOrders] = useFirestoreSync<Order[]>('ferreteria_orders', []);
 
-  const handleSaveOrder = (newOrder: Order) => {
-    setOrders((prev) => [newOrder, ...prev]);
+  const handleSaveOrder = (savedOrder: Order) => {
+    setOrders((prev) => {
+      const exists = prev.some((o) => o.id === savedOrder.id);
+      if (exists) {
+        return prev.map((o) => (o.id === savedOrder.id ? savedOrder : o));
+      }
+      return [savedOrder, ...prev];
+    });
   };
 
   const handleUpdateOrderStatus = (orderId: string, newStatus: Order['status']) => {
@@ -165,7 +174,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
           </div>
           <button
             type="button"
-            onClick={() => setIsCreateOrderOpen(true)}
+            onClick={() => {
+              setOrderToEdit(null);
+              setIsCreateOrderOpen(true);
+            }}
             className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md shadow-orange-500/20 flex items-center space-x-2 cursor-pointer transition"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -199,7 +211,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
               {!searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setIsCreateOrderOpen(true)}
+                  onClick={() => {
+                    setOrderToEdit(null);
+                    setIsCreateOrderOpen(true);
+                  }}
                   className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs rounded-xl shadow-md inline-flex items-center space-x-2 cursor-pointer hover:from-orange-600 hover:to-amber-600"
                 >
                   <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -258,32 +273,81 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                       <td className="py-3 px-4 text-right font-mono font-extrabold text-orange-600">
                         {formatCurrency(ord.total, settings.currencySymbol)}
                       </td>
-                      <td className="py-3 px-4 text-center space-x-1.5">
-                        {ord.status === 'FACTURADO' ? (
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          {/* 1. Ver */}
                           <button
                             type="button"
                             onClick={() => setSelectedOrderForDetail(ord)}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-[11px] font-bold transition cursor-pointer"
-                            title="Ver Detalle del Pedido Facturado"
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            title="Ver Detalle del Pedido"
                           >
-                            Ver Detalle
+                            <Eye className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="hidden lg:inline">Ver</span>
                           </button>
-                        ) : (
+
+                          {/* 2. Editar */}
                           <button
                             type="button"
+                            disabled={ord.status === 'FACTURADO' || ord.status === 'ANULADO'}
                             onClick={() => {
-                              if (onInvoiceOrder) {
-                                onInvoiceOrder(ord);
-                              } else {
-                                onNavigateToTab('CAJA');
-                              }
+                              setOrderToEdit(ord);
+                              setIsCreateOrderOpen(true);
                             }}
-                            className="px-2.5 py-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg text-[11px] font-black transition cursor-pointer shadow-xs"
-                            title="Facturar Pedido en POS"
+                            className="p-1.5 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed text-amber-800 border border-amber-200 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            title={
+                              ord.status === 'FACTURADO'
+                                ? 'No se puede editar un pedido ya facturado'
+                                : ord.status === 'ANULADO'
+                                ? 'No se puede editar un pedido anulado'
+                                : 'Editar Pedido'
+                            }
                           >
-                            Facturar
+                            <Pencil className="w-3.5 h-3.5 text-amber-600" />
+                            <span className="hidden lg:inline">Editar</span>
                           </button>
-                        )}
+
+                          {/* 3. Imprimir */}
+                          <button
+                            type="button"
+                            onClick={() => printOrderDocument(ord, settings)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            title="Imprimir Pedido"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-slate-700" />
+                            <span className="hidden lg:inline">Imprimir</span>
+                          </button>
+
+                          {/* 4. Descargar PDF */}
+                          <button
+                            type="button"
+                            onClick={() => downloadOrderPdf(ord, settings)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                            title="Descargar en PDF"
+                          >
+                            <Download className="w-3.5 h-3.5 text-rose-600" />
+                            <span className="hidden lg:inline">PDF</span>
+                          </button>
+
+                          {/* 5. Facturar */}
+                          {ord.status !== 'FACTURADO' && ord.status !== 'ANULADO' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onInvoiceOrder) {
+                                  onInvoiceOrder(ord);
+                                } else {
+                                  onNavigateToTab('CAJA');
+                                }
+                              }}
+                              className="px-2 py-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-lg text-[11px] font-black transition cursor-pointer shadow-xs flex items-center gap-1"
+                              title="Facturar Pedido en POS"
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                              <span>Facturar</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -296,11 +360,15 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
         {/* Modals */}
         <CreateOrderModal
           isOpen={isCreateOrderOpen}
-          onClose={() => setIsCreateOrderOpen(false)}
+          onClose={() => {
+            setIsCreateOrderOpen(false);
+            setOrderToEdit(null);
+          }}
           onSave={handleSaveOrder}
           customers={customers}
           products={products}
           settings={settings}
+          orderToEdit={orderToEdit}
         />
 
         <OrderDetailModal
@@ -308,6 +376,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
           onClose={() => setSelectedOrderForDetail(null)}
           onUpdateStatus={handleUpdateOrderStatus}
           onDeleteOrder={handleDeleteOrder}
+          onEditOrder={(ord) => {
+            setOrderToEdit(ord);
+            setIsCreateOrderOpen(true);
+          }}
           onInvoiceOrder={onInvoiceOrder}
           settings={settings}
         />

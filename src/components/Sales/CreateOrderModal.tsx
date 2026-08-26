@@ -50,6 +50,7 @@ interface CreateOrderModalProps {
   customers: Customer[];
   products: Product[];
   settings: StoreSettings;
+  orderToEdit?: Order | null;
 }
 
 export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
@@ -59,6 +60,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   customers,
   products,
   settings,
+  orderToEdit,
 }) => {
   const { showAlert, showToast } = useModal();
 
@@ -72,6 +74,33 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
   // Product selection state
   const [productSearch, setProductSearch] = useState('');
+
+  // Reset or initialize state based on orderToEdit
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (orderToEdit) {
+      const matchCustomer = customers.find(
+        (c) => (orderToEdit.customerRuc && c.docNumber === orderToEdit.customerRuc) || 
+               c.name.toLowerCase() === orderToEdit.customerName.toLowerCase()
+      );
+      setSelectedCustomerId(matchCustomer ? matchCustomer.id : '');
+      setCustomCustomerName(orderToEdit.customerName || '');
+      setCustomCustomerRuc(orderToEdit.customerRuc || '');
+      setOrderItems(orderToEdit.items ? JSON.parse(JSON.stringify(orderToEdit.items)) : []);
+      setNotes(orderToEdit.notes || '');
+      setDeliveryAddress(orderToEdit.deliveryAddress || '');
+      setInitialStatus(orderToEdit.status === 'EN PREPARACION' ? 'EN PREPARACION' : 'PENDIENTE');
+    } else {
+      setSelectedCustomerId('');
+      setCustomCustomerName('');
+      setCustomCustomerRuc('');
+      setOrderItems([]);
+      setNotes('');
+      setDeliveryAddress('');
+      setInitialStatus('PENDIENTE');
+    }
+  }, [isOpen, orderToEdit, customers]);
 
   // Global Barcode Scanner Listener for Create Order Modal
   useEffect(() => {
@@ -239,26 +268,31 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       return;
     }
 
-    const orderId = `PED-${Math.floor(1000 + Math.random() * 9000)}`;
+    const orderId = orderToEdit ? orderToEdit.id : `PED-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const newOrder: Order = {
+    const savedOrder: Order = {
       id: orderId,
       customerName,
       customerRuc,
-      date: new Date().toISOString(),
+      date: orderToEdit ? orderToEdit.date : new Date().toISOString(),
       subtotal: rawSubtotal,
       tax: taxAmount,
       total: totalAmount,
-      status: initialStatus,
+      status: orderToEdit ? orderToEdit.status : initialStatus,
       itemsCount: totalItemsCount,
       items: orderItems,
       notes,
       deliveryAddress,
     };
 
-    onSave(newOrder);
+    onSave(savedOrder);
     onClose();
-    showToast(`Pedido ${newOrder.id} registrado correctamente.`, 'success');
+    showToast(
+      orderToEdit
+        ? `Pedido ${savedOrder.id} actualizado correctamente.`
+        : `Pedido ${savedOrder.id} registrado correctamente.`,
+      'success'
+    );
   };
 
   return (
@@ -271,9 +305,13 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               <ShoppingCart className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <h3 className="text-base font-black text-white">Crear Nuevo Pedido de Cliente</h3>
+              <h3 className="text-base font-black text-white">
+                {orderToEdit ? `Editar Pedido: ${orderToEdit.id}` : 'Crear Nuevo Pedido de Cliente'}
+              </h3>
               <p className="text-xs text-slate-400 font-medium">
-                Genere una orden formal de venta previa a facturación
+                {orderToEdit
+                  ? 'Modifique los productos, cliente o detalles del pedido'
+                  : 'Genere una orden formal de venta previa a facturación'}
               </p>
             </div>
           </div>
@@ -614,7 +652,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                   }`}
                 >
                   <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-                  <span>Guardar Pedido Formal</span>
+                  <span>{orderToEdit ? 'Guardar Cambios del Pedido' : 'Guardar Pedido Formal'}</span>
                 </button>
               </div>
             </div>

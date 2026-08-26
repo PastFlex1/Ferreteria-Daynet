@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { CreditCard, X, AlertCircle, FileText, User } from 'lucide-react';
 import { Invoice, StoreSettings } from '../../types';
 import { Select } from '../Shared/Select';
@@ -28,7 +28,12 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
     amount: '',
   });
 
-  const selectedInvoice = invoices.find(inv => inv.id === formData.invoiceRef || inv.fullNumber === formData.invoiceRef);
+  // Filtrar estrictamente solo Facturas (excluyendo cotizaciones, proformas y anuladas)
+  const facturasOnly = useMemo(() => {
+    return invoices.filter(inv => inv.documentType === 'FACTURA' && inv.paymentStatus !== 'ANULADA');
+  }, [invoices]);
+
+  const selectedInvoice = facturasOnly.find(inv => inv.id === formData.invoiceRef || inv.fullNumber === formData.invoiceRef);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +42,7 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
     onSave({
       id: `${establishment}-${emissionPoint}-${secCreditNote}`,
       invoiceRef: selectedInvoice.fullNumber || selectedInvoice.id,
-      customer: selectedInvoice.customer.name,
+      customer: selectedInvoice.customer?.name || 'Consumidor Final',
       reason: formData.reason,
       amount: parseFloat(formData.amount) || selectedInvoice.total,
       date: new Date().toISOString(),
@@ -55,7 +60,7 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-black text-white">Generar Nota de Crédito</h2>
-              <p className="text-slate-400 text-xs font-medium">Anulación y devolución sobre factura</p>
+              <p className="text-slate-400 text-xs font-medium">Anulación y devolución sobre factura emitida</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors cursor-pointer">
@@ -75,10 +80,12 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
                 onChange={(e) => setFormData({ ...formData, invoiceRef: e.target.value })}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
               >
-                <option value="">Seleccione una factura emitida...</option>
-                {invoices.map(inv => (
+                <option value="">
+                  {facturasOnly.length === 0 ? 'No hay facturas emitidas disponibles' : 'Seleccione una factura emitida...'}
+                </option>
+                {facturasOnly.map(inv => (
                   <option key={inv.id} value={inv.id}>
-                    {inv.fullNumber} - {inv.customer.name} - ${inv.total.toFixed(4)}
+                    {inv.fullNumber} - {inv.customer?.name || 'Consumidor Final'} - ${inv.total.toFixed(2)}
                   </option>
                 ))}
               </Select>
@@ -87,10 +94,10 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
             {selectedInvoice && (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
                 <p className="font-bold text-slate-800 flex items-center gap-1.5 mb-1">
-                  <User className="w-4 h-4 text-slate-400" /> {selectedInvoice.customer.name}
+                  <User className="w-4 h-4 text-slate-400" /> {selectedInvoice.customer?.name || 'Consumidor Final'}
                 </p>
-                <p className="text-slate-500">Monto Original: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(4)}</span></p>
-                <p className="text-slate-500">Fecha: {new Date(selectedInvoice.createdAt).toLocaleDateString()}</p>
+                <p className="text-slate-500">Monto Original Factura: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(2)}</span></p>
+                <p className="text-slate-500">Fecha de Emisión: {new Date(selectedInvoice.createdAt).toLocaleDateString()}</p>
               </div>
             )}
 

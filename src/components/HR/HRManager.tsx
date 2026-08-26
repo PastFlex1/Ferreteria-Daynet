@@ -28,6 +28,7 @@ import { useModal } from '../../context/ModalContext';
 import { formatCurrency } from '../../utils/formatters';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { Select } from '../Shared/Select';
+import { LocationSelectSection } from '../Shared/LocationSelectSection';
 
 interface HRManagerProps {
   subTab: HRSubTab;
@@ -41,6 +42,10 @@ export interface Employee {
   fullName: string;
   email: string;
   phone: string;
+  country?: string;
+  province?: string;
+  city?: string;
+  address?: string;
   departmentId: string;
   departmentName: string;
   positionId: string;
@@ -224,6 +229,10 @@ export const HRManager: React.FC<HRManagerProps> = ({
     fullName: '',
     email: '',
     phone: '',
+    country: 'Ecuador',
+    province: '',
+    city: '',
+    address: '',
     departmentId: 'dep-1',
     positionId: 'pos-1',
     hireDate: new Date().toISOString().split('T')[0],
@@ -297,6 +306,10 @@ export const HRManager: React.FC<HRManagerProps> = ({
       fullName: newEmp.fullName,
       email: newEmp.email || '',
       phone: newEmp.phone || '',
+      country: newEmp.country || 'Ecuador',
+      province: newEmp.province || '',
+      city: newEmp.city || '',
+      address: newEmp.address || '',
       departmentId: dep.id,
       departmentName: dep.name,
       positionId: pos.id,
@@ -325,6 +338,10 @@ export const HRManager: React.FC<HRManagerProps> = ({
       fullName: '',
       email: '',
       phone: '',
+      country: 'Ecuador',
+      province: '',
+      city: '',
+      address: '',
       departmentId: departments[0]?.id || '',
       positionId: positions[0]?.id || '',
       hireDate: new Date().toISOString().split('T')[0],
@@ -343,6 +360,10 @@ export const HRManager: React.FC<HRManagerProps> = ({
       fullName: emp.fullName,
       email: emp.email,
       phone: emp.phone,
+      country: emp.country || 'Ecuador',
+      province: emp.province || '',
+      city: emp.city || '',
+      address: emp.address || '',
       departmentId: emp.departmentId,
       positionId: emp.positionId,
       hireDate: emp.hireDate,
@@ -1320,7 +1341,14 @@ export const HRManager: React.FC<HRManagerProps> = ({
                       </td>
                       <td className="py-3 px-4 font-sans font-bold text-slate-900">
                         {emp.fullName}
-                        <div className="text-[10px] text-slate-400">{emp.email} | {emp.phone}</div>
+                        <div className="text-[10px] text-slate-400">
+                          {[emp.email, emp.phone].filter(Boolean).join(' | ')}
+                        </div>
+                        {(emp.city || emp.province) && (
+                          <div className="text-[10px] text-orange-600 font-bold">
+                            📍 {[emp.city, emp.province, emp.country].filter(Boolean).join(' • ')}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4 font-sans">
                         <div className="font-bold text-slate-800">{emp.positionName}</div>
@@ -1531,6 +1559,27 @@ export const HRManager: React.FC<HRManagerProps> = ({
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+              </div>
+              <div className="pt-1">
+                <LocationSelectSection
+                  country={newEmp.country || 'Ecuador'}
+                  province={newEmp.province || ''}
+                  city={newEmp.city || ''}
+                  onCountryChange={(val) => setNewEmp({ ...newEmp, country: val })}
+                  onProvinceChange={(val) => setNewEmp({ ...newEmp, province: val })}
+                  onCityChange={(val) => setNewEmp({ ...newEmp, city: val })}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Dirección Domiciliaria</label>
+                <input
+                  type="text"
+                  placeholder="Calle, N° y Sector de residencia"
+                  value={newEmp.address}
+                  onChange={(e) => setNewEmp({ ...newEmp, address: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-indigo-500 text-xs"
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t">

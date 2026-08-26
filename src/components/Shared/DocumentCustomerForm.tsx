@@ -2,12 +2,16 @@ import React from 'react';
 import { UserCheck, CheckCircle2, AlertCircle, Search, Loader2, User, Mail, Phone, MapPin } from 'lucide-react';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { useCedulaSearch } from '../../hooks/useCedulaSearch';
+import { LocationSelectSection } from './LocationSelectSection';
 
 export interface DocumentCustomerData {
   docNumber: string;
   name: string;
   email: string;
   phone: string;
+  country?: string;
+  province?: string;
+  city?: string;
   address: string;
   creditLimit?: string;
 }
@@ -174,10 +178,22 @@ export const DocumentCustomerForm: React.FC<DocumentCustomerFormProps> = ({ data
         </div>
       </div>
 
-      {/* Row 3 - Full width */}
-      <div className="space-y-1.5 pt-2">
+      {/* Row 3 - Ubicación Geográfica (País, Provincia, Ciudad) */}
+      <div className="pt-2">
+        <LocationSelectSection
+          country={data.country || 'Ecuador'}
+          province={data.province || ''}
+          city={data.city || ''}
+          onCountryChange={(val) => onChange('country', val)}
+          onProvinceChange={(val) => onChange('province', val)}
+          onCityChange={(val) => onChange('city', val)}
+        />
+      </div>
+
+      {/* Row 4 - Full width Dirección */}
+      <div className="space-y-1.5 pt-1">
         <label className="text-xs font-black text-slate-800 uppercase tracking-wider block mb-1">
-          DIRECCIÓN:
+          DIRECCIÓN (CALLES / REFERENCIA):
         </label>
         <div className="relative">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -186,7 +202,7 @@ export const DocumentCustomerForm: React.FC<DocumentCustomerFormProps> = ({ data
             value={data.address}
             onChange={(e) => onChange('address', e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-slate-300 focus:outline-none"
-            placeholder="Calle, Número, Ciudad"
+            placeholder="Calle principal, secundaria y número de casa"
           />
         </div>
       </div>

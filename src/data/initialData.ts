@@ -225,3 +225,77 @@ export const defaultEmployees = [
   }
 ];
 
+export const defaultCountries = [
+  'Ecuador',
+  'Colombia',
+  'Perú',
+  'Estados Unidos',
+  'España',
+  'México',
+  'Chile',
+  'Argentina',
+  'Panamá',
+  'Venezuela',
+  'Brasil'
+];
+
+export const defaultProvinces = [
+  'Pichincha',
+  'Guayas',
+  'Azuay',
+  'Manabí',
+  'El Oro',
+  'Tungurahua',
+  'Loja',
+  'Imbabura',
+  'Chimborazo',
+  'Cotopaxi',
+  'Esmeraldas',
+  'Los Ríos',
+  'Santo Domingo de los Tsáchilas',
+  'Santa Elena',
+  'Cañar',
+  'Bolívar',
+  'Carchi',
+  'Sucumbíos',
+  'Orellana',
+  'Napo',
+  'Pastaza',
+  'Morona Santiago',
+  'Zamora Chinchipe',
+  'Galápagos'
+];
+
+export const defaultCities = [
+  'Quito',
+  'Guayaquil',
+  'Cuenca',
+  'Santo Domingo',
+  'Machala',
+  'Durán',
+  'Manta',
+  'Portoviejo',
+  'Loja',
+  'Ambato',
+  'Esmeraldas',
+  'Quevedo',
+  'Riobamba',
+  'Milagro',
+  'Ibarra',
+  'Latacunga',
+  'Babahoyo',
+  'Tulcán',
+  'Daule',
+  'Samborondón',
+  'Cayambe',
+  'Rumiñahui (Sangolquí)',
+  'Otavalo',
+  'Nueva Loja (Lago Agrio)',
+  'El Coca',
+  'Puyo',
+  'Tena',
+  'Macas',
+  'Zamora',
+  'Puerto Baquerizo Moreno',
+  'Puerto Ayora'
+];
