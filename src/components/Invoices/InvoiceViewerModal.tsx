@@ -433,13 +433,22 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   <tbody>
                     {activeInvoice.items.map((item, idx) => {
                       const discountAmount = item.discountPercent > 0 ? (item.unitPrice * item.quantity * item.discountPercent) / 100 : 0;
+                      const itemTaxRate = typeof item.taxRate === 'number'
+                        ? item.taxRate
+                        : ('product' in item && (item as any).product && typeof (item as any).product.taxRate === 'number')
+                        ? (item as any).product.taxRate
+                        : (item.taxAmount > 0 ? settings.defaultTaxRate : 0);
+
                       return (
                         <tr key={idx} className="border-b border-black">
                           <td className="border-r border-black p-1.5 font-mono">{item.sku || '0101'}</td>
                           <td className="border-r border-black p-1.5 font-mono">{item.sku || '0101'}</td>
                           <td className="border-r border-black p-1.5 font-bold font-mono">{item.quantity.toFixed(2)}</td>
                           <td className="border-r border-black p-1.5 text-left uppercase font-semibold">{item.productName}</td>
-                          <td className="border-r border-black p-1.5 text-slate-500 uppercase">{item.unit || ''}</td>
+                          <td className="border-r border-black p-1.5 text-center uppercase font-mono text-[9.5px]">
+                            {item.unit && <span>{item.unit} • </span>}
+                            <span className="font-bold">IVA {itemTaxRate}%</span>
+                          </td>
                           <td className="border-r border-black p-1.5 font-mono">${item.unitPrice.toFixed(2)}</td>
                           <td className="border-r border-black p-1.5 font-mono">0.00</td>
                           <td className="border-r border-black p-1.5 font-mono">0.00</td>
@@ -519,13 +528,26 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     <div className="space-y-2">
                       <table className="w-full text-[10.5px] border border-black border-collapse">
                         <tbody>
-                          <tr className="border-b border-black">
-                            <td className="p-1.5 border-r border-black font-bold">SUBTOTAL {settings.defaultTaxRate}%</td>
-                            <td className="p-1.5 text-right font-mono font-bold">${sriBreakdown.subtotal15.toFixed(2)}</td>
-                          </tr>
+                          {/* Subtotales gravados por cada tarifa presente */}
+                          {sriBreakdown.rateBreakdowns && Object.keys(sriBreakdown.rateBreakdowns).length > 0 ? (
+                            Object.entries(sriBreakdown.rateBreakdowns)
+                              .filter(([rateStr]) => parseFloat(rateStr) > 0)
+                              .map(([rateStr, data]) => (
+                                <tr key={`subtotal-${rateStr}`} className="border-b border-black">
+                                  <td className="p-1.5 border-r border-black font-bold">SUBTOTAL {rateStr}%</td>
+                                  <td className="p-1.5 text-right font-mono font-bold">${data.base.toFixed(2)}</td>
+                                </tr>
+                              ))
+                          ) : (
+                            <tr className="border-b border-black">
+                              <td className="p-1.5 border-r border-black font-bold">SUBTOTAL {settings.defaultTaxRate}%</td>
+                              <td className="p-1.5 text-right font-mono font-bold">${sriBreakdown.subtotal15.toFixed(2)}</td>
+                            </tr>
+                          )}
+
                           <tr className="border-b border-black">
                             <td className="p-1.5 border-r border-black font-bold">SUBTOTAL 0%</td>
-                            <td className="p-1.5 text-right font-mono">${sriBreakdown.subtotal0.toFixed(2)}</td>
+                            <td className="p-1.5 text-right font-mono font-bold">${sriBreakdown.subtotal0.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 border-r border-black font-bold">SUBTOTAL NO OBJETO DE IVA</td>
@@ -535,7 +557,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                             <td className="p-1.5 border-r border-black font-bold">SUBTOTAL EXENTO DE IVA</td>
                             <td className="p-1.5 text-right font-mono">$0.00</td>
                           </tr>
-                          <tr className="border-b border-black">
+                          <tr className="border-b border-black bg-slate-50/50">
                             <td className="p-1.5 border-r border-black font-bold">SUBTOTAL SIN IMPUESTOS</td>
                             <td className="p-1.5 text-right font-mono font-bold">${sriBreakdown.subtotalSinImpuestos.toFixed(2)}</td>
                           </tr>
@@ -551,13 +573,27 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                             <td className="p-1.5 border-r border-black font-bold">IRBPNR</td>
                             <td className="p-1.5 text-right font-mono">$0.00</td>
                           </tr>
-                          <tr className="border-b border-black">
-                            <td className="p-1.5 border-r border-black font-bold">IVA {settings.defaultTaxRate}%</td>
-                            <td className="p-1.5 text-right font-mono font-bold">${sriBreakdown.iva15.toFixed(2)}</td>
-                          </tr>
+
+                          {/* IVA por cada tarifa presente */}
+                          {sriBreakdown.rateBreakdowns && Object.keys(sriBreakdown.rateBreakdowns).length > 0 ? (
+                            Object.entries(sriBreakdown.rateBreakdowns)
+                              .filter(([rateStr]) => parseFloat(rateStr) > 0)
+                              .map(([rateStr, data]) => (
+                                <tr key={`iva-${rateStr}`} className="border-b border-black bg-orange-50/20">
+                                  <td className="p-1.5 border-r border-black font-bold">IVA {rateStr}%</td>
+                                  <td className="p-1.5 text-right font-mono font-bold text-slate-950">${data.tax.toFixed(2)}</td>
+                                </tr>
+                              ))
+                          ) : (
+                            <tr className="border-b border-black bg-orange-50/20">
+                              <td className="p-1.5 border-r border-black font-bold">IVA {settings.defaultTaxRate}%</td>
+                              <td className="p-1.5 text-right font-mono font-bold text-slate-950">${(sriBreakdown.iva15 || activeInvoice.taxTotal || 0).toFixed(2)}</td>
+                            </tr>
+                          )}
+
                           <tr className="border-b border-black">
                             <td className="p-1.5 border-r border-black font-bold">PROPINA</td>
-                            <td className="p-1.5 text-right font-mono">$0.00</td>
+                            <td className="p-1.5 text-right font-mono">${sriBreakdown.propina10Amount.toFixed(2)}</td>
                           </tr>
                           <tr className="bg-slate-100 border-b border-black font-black">
                             <td className="p-2 border-r border-black text-xs">VALOR TOTAL</td>
@@ -621,20 +657,63 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 ))}
               </div>
 
-              <div className="py-2 border-b border-dashed border-slate-400 space-y-1 font-bold">
-                <div className="flex justify-between">
-                  <span>SUBTOTAL:</span>
-                  <span>{formatCurrency(activeInvoice.subtotal, settings.currencySymbol)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>IVA ({settings.defaultTaxRate}%):</span>
-                  <span>{formatCurrency(activeInvoice.taxTotal, settings.currencySymbol)}</span>
-                </div>
-                <div className="flex justify-between text-sm pt-1 border-t border-slate-400">
-                  <span>TOTAL:</span>
-                  <span>{formatCurrency(activeInvoice.total, settings.currencySymbol)}</span>
-                </div>
-              </div>
+              {(() => {
+                const thermalBreakdown = calculateSriTotals(activeInvoice.items, settings.defaultTaxRate);
+                return (
+                  <div className="py-2 border-b border-dashed border-slate-400 space-y-1 font-bold">
+                    {thermalBreakdown.rateBreakdowns && Object.keys(thermalBreakdown.rateBreakdowns).length > 0 ? (
+                      Object.entries(thermalBreakdown.rateBreakdowns)
+                        .filter(([rateStr, d]) => parseFloat(rateStr) > 0 && d.base > 0)
+                        .map(([rateStr, d]) => (
+                          <div key={`th-sub-${rateStr}`} className="flex justify-between text-[10.5px]">
+                            <span>SUBTOTAL ({rateStr}%):</span>
+                            <span>{formatCurrency(d.base, settings.currencySymbol)}</span>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL:</span>
+                        <span>{formatCurrency(activeInvoice.subtotal, settings.currencySymbol)}</span>
+                      </div>
+                    )}
+
+                    {thermalBreakdown.subtotal0 > 0 && (
+                      <div className="flex justify-between text-[10.5px]">
+                        <span>SUBTOTAL 0%:</span>
+                        <span>{formatCurrency(thermalBreakdown.subtotal0, settings.currencySymbol)}</span>
+                      </div>
+                    )}
+
+                    {thermalBreakdown.totalDescuento > 0 && (
+                      <div className="flex justify-between text-[10.5px] text-slate-600">
+                        <span>DESCUENTO:</span>
+                        <span>-{formatCurrency(thermalBreakdown.totalDescuento, settings.currencySymbol)}</span>
+                      </div>
+                    )}
+
+                    {thermalBreakdown.rateBreakdowns && Object.keys(thermalBreakdown.rateBreakdowns).length > 0 ? (
+                      Object.entries(thermalBreakdown.rateBreakdowns)
+                        .filter(([rateStr, d]) => parseFloat(rateStr) > 0 && d.tax > 0)
+                        .map(([rateStr, d]) => (
+                          <div key={`th-iva-${rateStr}`} className="flex justify-between text-[10.5px]">
+                            <span>IVA ({rateStr}%):</span>
+                            <span>{formatCurrency(d.tax, settings.currencySymbol)}</span>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="flex justify-between">
+                        <span>IVA ({settings.defaultTaxRate}%):</span>
+                        <span>{formatCurrency(activeInvoice.taxTotal, settings.currencySymbol)}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between text-sm pt-1 border-t border-slate-400">
+                      <span>TOTAL:</span>
+                      <span>{formatCurrency(activeInvoice.total, settings.currencySymbol)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-1 text-[10px]">
                 <p>FORMA PAGO: {getPaymentMethodLabel(activeInvoice.paymentMethod)}</p>

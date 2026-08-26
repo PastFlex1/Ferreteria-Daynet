@@ -43,7 +43,9 @@ import {
   ChevronRight,
   PieChart as PieChartIcon,
   Sparkles,
-  Layers
+  Layers,
+  Store,
+  X
 } from 'lucide-react';
 
 interface ReportsManagerProps {
@@ -118,6 +120,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   const [endDate, setEndDate] = useState(lastDayOfMonth);
   const [selectedBranch, setSelectedBranch] = useState('TODAS');
   const [selectedCategory, setSelectedCategory] = useState('TODAS');
+  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
 
   // Quick Date Presets
   const handleSetPreset = (preset: 'HOY' | 'MES_ACTUAL' | 'MES_ANTERIOR' | 'ANIO_ACTUAL') => {
@@ -470,11 +473,12 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   };
 
   const handlePrint = () => {
-    window.print();
+    setIsPrintPreviewOpen(true);
   };
 
   return (
     <div className="space-y-6">
+      <div className="space-y-6 no-print">
       {/* ── SVG GRADIENTS DEFINITION FOR CHARTS ─────────────────────────────────── */}
       <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none' }}>
         <defs>
@@ -1455,6 +1459,408 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
+
+      {/* ── MODAL: REPORTE FORMAL IMPRIMIBLE / PDF ────────────────────────── */}
+      {isPrintPreviewOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-5xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+            {/* Modal Actions Header (Hidden in Print) */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4 no-print">
+              <div className="flex items-center space-x-3">
+                <div className={`p-2.5 bg-gradient-to-br ${currentMeta.color} text-white rounded-2xl shadow-sm`}>
+                  <FileText className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
+                    <span>Vista Previa de Impresión / PDF</span>
+                    <span className="px-2.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black rounded-full uppercase">
+                      Documento Oficial A4
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {currentMeta.title} • Período: {startDate} al {endDate}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 cursor-pointer shadow-md"
+                >
+                  <Printer className="w-4 h-4 text-orange-400" />
+                  <span>Imprimir / Guardar PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPrintPreviewOpen(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Documento Imprimible Formal */}
+            <div id="printable-report-document" className="bg-white p-4 sm:p-6 space-y-6 text-slate-900 text-xs">
+              {/* Membrete Corporativo */}
+              <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="w-16 h-16 object-contain border border-slate-200 rounded-xl p-1" />
+                  ) : (
+                    <div className="p-3 bg-slate-900 text-white rounded-xl font-black text-lg">
+                      <Store className="w-8 h-8 text-orange-400" />
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-lg font-black text-slate-950 uppercase tracking-tight">
+                      {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                    </h1>
+                    <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                    <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong></p>
+                    <p className="text-[11px] text-slate-600">{settings.address} • Tel: {settings.phone}</p>
+                    <p className="text-[10px] text-slate-500">
+                      Régimen: {settings.rimpe || 'General'} • Obligado a Contabilidad: {settings.accountingRequired ? 'SÍ' : 'NO'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right sm:border-l sm:border-slate-200 sm:pl-6 space-y-1">
+                  <span className="px-3 py-1 bg-slate-900 text-white font-black text-[10px] rounded-lg uppercase tracking-wider block text-center">
+                    INFORME GERENCIAL
+                  </span>
+                  <p className="text-[11px] font-bold text-slate-900">{currentMeta.title}</p>
+                  <p className="text-[10px] text-slate-600 font-mono">
+                    Período: <strong>{startDate}</strong> al <strong>{endDate}</strong>
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    Emisión: {new Date().toLocaleString('es-EC')}
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Establecimiento: <strong>{selectedBranch === 'TODAS' ? 'Matriz & Sucursales' : selectedBranch}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Tarjetas de Resumen Ejecutivo */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
+                {subTab === 'REP_INVENTARIO' ? (
+                  <>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Productos</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">{filteredProducts.length} ítems</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Stock Físico Total</span>
+                      <strong className="text-sm font-black text-blue-600 font-mono">
+                        {filteredProducts.reduce((acc, p) => acc + (p.stock || 0), 0)} u.
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Inversión Costo Total</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">
+                        {formatCurrency(totalValorInventarioCosto, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Valorización Total PVP</span>
+                      <strong className="text-sm font-black text-emerald-600 font-mono">
+                        {formatCurrency(totalValorInventarioPVP, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                  </>
+                ) : subTab === 'REP_VENTAS' ? (
+                  <>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Comprobantes</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">{totalFacturasCount} docs</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Subtotal Neto</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">
+                        {formatCurrency(subtotalVentasPeriodo, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">IVA 15% Total</span>
+                      <strong className="text-sm font-black text-orange-600 font-mono">
+                        {formatCurrency(totalIvaVentas, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Facturado</span>
+                      <strong className="text-sm font-black text-emerald-600 font-mono">
+                        {formatCurrency(totalVentasPeriodo, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                  </>
+                ) : subTab === 'REP_PRODUCTOS' ? (
+                  <>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Ítems Vendidos</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">{topProductsList.length} prod.</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Unidades Totales</span>
+                      <strong className="text-sm font-black text-blue-600 font-mono">
+                        {topProductsList.reduce((acc, p) => acc + p.units, 0)} u.
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Ingresos Generados</span>
+                      <strong className="text-sm font-black text-emerald-600 font-mono">
+                        {formatCurrency(topProductsList.reduce((acc, p) => acc + p.revenue, 0), settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Margen Bruto Total</span>
+                      <strong className="text-sm font-black text-purple-600 font-mono">
+                        {formatCurrency(topProductsList.reduce((acc, p) => acc + (p.revenue - (p.cost * p.units)), 0), settings.currencySymbol)}
+                      </strong>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Registros Totales</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">{filteredInvoices.length}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Ventas Período</span>
+                      <strong className="text-sm font-black text-emerald-600 font-mono">
+                        {formatCurrency(totalVentasPeriodo, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Compras Período</span>
+                      <strong className="text-sm font-black text-indigo-600 font-mono">
+                        {formatCurrency(totalComprasPeriodo, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Retenciones</span>
+                      <strong className="text-sm font-black text-slate-900 font-mono">
+                        {formatCurrency(totalRetencionesPeriodo, settings.currencySymbol)}
+                      </strong>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Tabla de Detalle Contable */}
+              <div className="overflow-x-auto rounded-xl border border-slate-300">
+                <table className="w-full text-left text-xs text-slate-800">
+                  <thead className="bg-slate-900 text-white text-[10px] uppercase font-black tracking-wider">
+                    {subTab === 'REP_INVENTARIO' ? (
+                      <tr>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">SKU</th>
+                        <th className="py-2.5 px-3">Descripción de Producto</th>
+                        <th className="py-2.5 px-3">Categoría</th>
+                        <th className="py-2.5 px-3 text-center">Stock</th>
+                        <th className="py-2.5 px-3 text-right">Costo Unit.</th>
+                        <th className="py-2.5 px-3 text-right">PVP Unit.</th>
+                        <th className="py-2.5 px-3 text-right">Total Costo</th>
+                        <th className="py-2.5 px-3 text-right">Total PVP</th>
+                        <th className="py-2.5 px-3 text-right">Margen</th>
+                      </tr>
+                    ) : subTab === 'REP_VENTAS' ? (
+                      <tr>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">N° Factura</th>
+                        <th className="py-2.5 px-3">Fecha</th>
+                        <th className="py-2.5 px-3">Cliente / Razón Social</th>
+                        <th className="py-2.5 px-3">RUC / Cédula</th>
+                        <th className="py-2.5 px-3 text-center">Pago</th>
+                        <th className="py-2.5 px-3 text-right">Subtotal</th>
+                        <th className="py-2.5 px-3 text-right">IVA 15%</th>
+                        <th className="py-2.5 px-3 text-right">Total</th>
+                      </tr>
+                    ) : subTab === 'REP_PRODUCTOS' ? (
+                      <tr>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">SKU</th>
+                        <th className="py-2.5 px-3">Producto</th>
+                        <th className="py-2.5 px-3">Categoría</th>
+                        <th className="py-2.5 px-3 text-center">Cant. Vendida</th>
+                        <th className="py-2.5 px-3 text-right">Ingresos Totales</th>
+                        <th className="py-2.5 px-3 text-right">Costo Estimado</th>
+                        <th className="py-2.5 px-3 text-right">Margen Bruto</th>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">Documento / Ref</th>
+                        <th className="py-2.5 px-3">Fecha</th>
+                        <th className="py-2.5 px-3">Detalle / Concepto</th>
+                        <th className="py-2.5 px-3 text-right">Monto ($)</th>
+                        <th className="py-2.5 px-3 text-center">Estado</th>
+                      </tr>
+                    )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white font-medium text-[11px]">
+                    {subTab === 'REP_INVENTARIO' ? (
+                      filteredProducts.map((p, idx) => {
+                        const cost = (p.costPrice || 0) * (p.stock || 0);
+                        const pvp = (p.price || 0) * (p.stock || 0);
+                        const margin = pvp - cost;
+                        return (
+                          <tr key={p.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-3 font-mono text-slate-400 text-[10px]">{idx + 1}</td>
+                            <td className="py-2 px-3 font-mono font-bold text-orange-600">{p.sku || '-'}</td>
+                            <td className="py-2 px-3 font-bold text-slate-900">{p.name}</td>
+                            <td className="py-2 px-3 text-slate-600">{p.category || 'General'}</td>
+                            <td className="py-2 px-3 text-center font-mono font-black text-slate-900">{p.stock || 0}</td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-700">{formatCurrency(p.costPrice || 0, settings.currencySymbol)}</td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-700">{formatCurrency(p.price || 0, settings.currencySymbol)}</td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">{formatCurrency(cost, settings.currencySymbol)}</td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">{formatCurrency(pvp, settings.currencySymbol)}</td>
+                            <td className="py-2 px-3 text-right font-mono font-black text-slate-900">{formatCurrency(margin, settings.currencySymbol)}</td>
+                          </tr>
+                        );
+                      })
+                    ) : subTab === 'REP_VENTAS' ? (
+                      filteredInvoices.map((inv, idx) => (
+                        <tr key={inv.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono text-slate-400 text-[10px]">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-orange-600">{inv.fullNumber || inv.number}</td>
+                          <td className="py-2 px-3 font-mono text-slate-600">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
+                          <td className="py-2 px-3 font-bold text-slate-900">{inv.customer?.name || 'Consumidor Final'}</td>
+                          <td className="py-2 px-3 font-mono text-slate-600">{inv.customer?.docNumber || '9999999999999'}</td>
+                          <td className="py-2 px-3 text-center font-mono text-[10px] font-bold text-slate-700">{inv.paymentMethod || 'EFECTIVO'}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-700">{formatCurrency(inv.subtotal || 0, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right font-mono text-orange-600">{formatCurrency(inv.taxTotal || 0, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-slate-900">{formatCurrency(inv.total || 0, settings.currencySymbol)}</td>
+                        </tr>
+                      ))
+                    ) : subTab === 'REP_PRODUCTOS' ? (
+                      topProductsList.map((p, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono text-slate-400 text-[10px]">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-blue-600">{p.sku}</td>
+                          <td className="py-2 px-3 font-bold text-slate-900">{p.name}</td>
+                          <td className="py-2 px-3 text-slate-600">{p.category}</td>
+                          <td className="py-2 px-3 text-center font-mono font-black text-slate-900">{p.units}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-700">{formatCurrency(p.revenue, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-700">{formatCurrency(p.cost * p.units, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-purple-700">{formatCurrency(p.revenue - (p.cost * p.units), settings.currencySymbol)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      filteredInvoices.map((inv, idx) => (
+                        <tr key={inv.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-mono text-slate-400 text-[10px]">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-slate-900">{inv.fullNumber || inv.number}</td>
+                          <td className="py-2 px-3 font-mono text-slate-600">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
+                          <td className="py-2 px-3 font-medium text-slate-800">{currentMeta.title}: {inv.customer?.name || 'Consumidor Final'}</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-slate-900">{formatCurrency(inv.total || 0, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-center font-mono text-[10px]">{inv.paymentStatus || 'ACTIVA'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+
+                  {/* Fila de Totales Generales */}
+                  <tfoot className="bg-slate-100 text-slate-950 font-black border-t-2 border-slate-900 text-xs">
+                    {subTab === 'REP_INVENTARIO' ? (
+                      <tr>
+                        <td colSpan={4} className="py-3 px-3 uppercase tracking-wider text-right font-black">
+                          TOTALES GENERALES:
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono font-black">
+                          {filteredProducts.reduce((acc, p) => acc + (p.stock || 0), 0)} u.
+                        </td>
+                        <td colSpan={2} />
+                        <td className="py-3 px-3 text-right font-mono font-black">
+                          {formatCurrency(totalValorInventarioCosto, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-emerald-700">
+                          {formatCurrency(totalValorInventarioPVP, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-slate-900">
+                          {formatCurrency(gananciaPotencialInventario, settings.currencySymbol)}
+                        </td>
+                      </tr>
+                    ) : subTab === 'REP_VENTAS' ? (
+                      <tr>
+                        <td colSpan={6} className="py-3 px-3 uppercase tracking-wider text-right font-black">
+                          TOTALES CONSOLIDADOS ({totalFacturasCount} COMPROBANTES):
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black">
+                          {formatCurrency(subtotalVentasPeriodo, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-orange-600">
+                          {formatCurrency(totalIvaVentas, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-emerald-700">
+                          {formatCurrency(totalVentasPeriodo, settings.currencySymbol)}
+                        </td>
+                      </tr>
+                    ) : subTab === 'REP_PRODUCTOS' ? (
+                      <tr>
+                        <td colSpan={4} className="py-3 px-3 uppercase tracking-wider text-right font-black">
+                          TOTALES:
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono font-black">
+                          {topProductsList.reduce((acc, p) => acc + p.units, 0)} u.
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-emerald-700">
+                          {formatCurrency(topProductsList.reduce((acc, p) => acc + p.revenue, 0), settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black">
+                          {formatCurrency(topProductsList.reduce((acc, p) => acc + (p.cost * p.units), 0), settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-purple-700">
+                          {formatCurrency(topProductsList.reduce((acc, p) => acc + (p.revenue - (p.cost * p.units)), 0), settings.currencySymbol)}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Firmas de Responsabilidad */}
+              <div className="grid grid-cols-3 gap-8 pt-10 text-center text-xs">
+                <div className="border-t-2 border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Elaborado por</p>
+                  <p className="text-slate-500 text-[10px]">Responsable de Operaciones</p>
+                </div>
+                <div className="border-t-2 border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Revisado por</p>
+                  <p className="text-slate-500 text-[10px]">Contabilidad / Auditoría</p>
+                </div>
+                <div className="border-t-2 border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Aprobado por</p>
+                  <p className="text-slate-500 text-[10px]">Gerencia General</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer (Hidden in Print) */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-200 no-print">
+              <button
+                type="button"
+                onClick={() => setIsPrintPreviewOpen(false)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Cerrar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black rounded-xl text-xs transition shadow-lg shadow-orange-500/20 flex items-center gap-2 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir / Descargar PDF</span>
+              </button>
             </div>
           </div>
         </div>

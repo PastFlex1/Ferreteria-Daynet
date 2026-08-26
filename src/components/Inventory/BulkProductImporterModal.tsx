@@ -176,11 +176,14 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
       const category = findVal('categoria', 'category', 'rubro', 'grupo') || 'Herramientas Manuales';
       const unit = findVal('unidad', 'unit', 'medida', 'um') || 'UND';
       const costPrice = parseFloat(findVal('costo', 'preciocosto', 'costprice', 'cost') || '0') || 0;
-      const price = parseFloat(findVal('precio', 'precioventa', 'pvp', 'price', 'valor') || '0') || 0;
-      const taxRate = parseFloat(findVal('tarifaiva', 'iva', 'taxrate', 'tax') || String(settings.defaultTaxRate || 15)) || 0;
+      const price = parseFloat(findVal('precio', 'pvp', 'precioventa', 'price', 'valor') || '0') || 0;
+      const taxValStr = findVal('tarifaiva', 'iva', 'taxrate', 'tax');
+      const taxRate = taxValStr !== '' && !isNaN(parseFloat(taxValStr))
+        ? parseFloat(taxValStr)
+        : (typeof settings.defaultTaxRate === 'number' ? settings.defaultTaxRate : 15);
       const stock = parseFloat(findVal('stock', 'cantidad', 'stockactual', 'qty') || '0') || 0;
       const minStock = parseFloat(findVal('stockminimo', 'minstock', 'minimo', 'alerta') || '5') || 5;
-      const location = findVal('ubicacion', 'pasillo', 'estante', 'location') || 'Pasillo 1';
+      const location = findVal('ubicacion', 'pasillo', 'estante', 'location') || '';
 
       if (!name) {
         errors.push('Falta el nombre del producto');

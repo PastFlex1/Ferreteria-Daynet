@@ -56,15 +56,39 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     return opt.label.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
+  const isDark =
+    className.includes('bg-slate-8') ||
+    className.includes('bg-slate-9') ||
+    className.includes('bg-gray-8') ||
+    className.includes('bg-gray-9') ||
+    className.includes('bg-zinc-8') ||
+    className.includes('bg-zinc-9') ||
+    className.includes('text-white') ||
+    className.includes('text-slate-100') ||
+    className.includes('text-slate-200');
+
+  const baseBgClass = className.includes('bg-') ? '' : 'bg-slate-50';
+  const baseBorderClass = className.includes('border-') ? '' : 'border border-slate-200 hover:border-slate-300';
+
   return (
     <div className={`relative text-xs ${className}`} ref={wrapperRef}>
       <div
-        className={`w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-medium text-xs flex items-center justify-between cursor-pointer transition-all ${
-          isOpen ? 'ring-2 ring-orange-500 border-orange-500 shadow-2xs' : 'hover:border-slate-300'
+        className={`w-full px-3 py-2 ${baseBgClass} ${baseBorderClass} rounded-xl font-medium text-xs flex items-center justify-between cursor-pointer transition-all ${
+          isOpen ? 'ring-2 ring-orange-500 border-orange-500 shadow-2xs' : ''
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         onClick={() => !disabled && setIsOpen(!isOpen)}
       >
-        <span className={`truncate mr-2 ${selectedOption ? 'text-slate-900 font-bold' : 'text-slate-500'}`}>
+        <span
+          className={`truncate mr-2 ${
+            selectedOption
+              ? isDark
+                ? 'text-white font-bold'
+                : 'text-slate-900 font-bold'
+              : isDark
+              ? 'text-slate-400 font-medium'
+              : 'text-slate-500 font-medium'
+          }`}
+        >
           {selectedOption ? selectedOption.label : placeholder}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 text-orange-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />

@@ -37,7 +37,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   
   // Quick Stock Adjust State
   const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null);
-  const [adjustQty, setAdjustQty] = useState('10');
+  const [adjustQty, setAdjustQty] = useState('');
   const [adjustType, setAdjustType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA');
 
   const filteredProducts = useMemo(() => {

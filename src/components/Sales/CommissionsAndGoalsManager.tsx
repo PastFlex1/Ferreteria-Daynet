@@ -72,9 +72,9 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
   const [viewingEmployeeSales, setViewingEmployeeSales] = useState<{ id: string; name: string } | null>(null);
 
   // Form State for Editing Goal
-  const [targetInput, setTargetInput] = useState('5000');
-  const [rateInput, setRateInput] = useState('2');
-  const [bonusInput, setBonusInput] = useState('50');
+  const [targetInput, setTargetInput] = useState('');
+  const [rateInput, setRateInput] = useState('');
+  const [bonusInput, setBonusInput] = useState('');
 
   // ── Combine real employees and users without duplicates ───────────────────
   const allStaff = useMemo(() => {

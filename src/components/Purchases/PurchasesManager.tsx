@@ -52,6 +52,7 @@ interface PurchasesManagerProps {
   settings: StoreSettings;
   onSaveProduct: (product: Product) => void;
   onStockAdjust: (productId: string, adjustmentQty: number) => void;
+  onSelectSubTab?: (tab: PurchasesSubTab) => void;
 }
 
 export interface Supplier {
@@ -112,6 +113,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   settings,
   onSaveProduct,
   onStockAdjust,
+  onSelectSubTab,
 }) => {
   const { showAlert, showConfirm, showToast } = useModal();
   // Sync with the same collection used in SuppliersManager
@@ -141,23 +143,17 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [preOrderNotes, setPreOrderNotes] = useState('');
   const [preOrderItems, setPreOrderItems] = useState<PreOrderItem[]>([]);
   const [preOrderAddProductId, setPreOrderAddProductId] = useState('');
-  const [preOrderAddQty, setPreOrderAddQty] = useState('10');
+  const [preOrderAddQty, setPreOrderAddQty] = useState('');
   const [preOrderSearchFilter, setPreOrderSearchFilter] = useState('');
-
-
-
-
-
-
 
   // -------------------------------------------------------------------------
   // FORM STATES FOR REGISTRAR COMPRA (COMPRAS)
   // -------------------------------------------------------------------------
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>(suppliers[0]?.id || '');
-  const [invoiceNumberInput, setInvoiceNumberInput] = useState('001-001-0000' + Math.floor(1000 + Math.random() * 9000));
+  const [invoiceNumberInput, setInvoiceNumberInput] = useState('');
   const [purchaseDateInput, setPurchaseDateInput] = useState(new Date().toISOString().split('T')[0]);
   const [paymentCondition, setPaymentCondition] = useState<'CONTADO' | 'CREDITO'>('CONTADO');
-  const [creditDaysInput, setCreditDaysInput] = useState('30');
+  const [creditDaysInput, setCreditDaysInput] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
 
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
@@ -165,33 +161,53 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [newOrderExpectedDate, setNewOrderExpectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [newOrderItems, setNewOrderItems] = useState<PurchaseItem[]>([]);
   const [newOrderProductId, setNewOrderProductId] = useState('');
-  const [newOrderQty, setNewOrderQty] = useState('10');
+  const [newOrderQty, setNewOrderQty] = useState('');
+
+  // Purchase Order View & Edit State
+  const [selectedOrderView, setSelectedOrderView] = useState<PurchaseOrder | null>(null);
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null);
+  const [editOrderSupplierId, setEditOrderSupplierId] = useState('');
+  const [editOrderExpectedDate, setEditOrderExpectedDate] = useState('');
+  const [editOrderStatus, setEditOrderStatus] = useState<PurchaseOrder['status']>('BORRADOR');
+  const [editOrderNotes, setEditOrderNotes] = useState('');
+  const [editOrderItems, setEditOrderItems] = useState<PurchaseItem[]>([]);
+  const [editOrderProductId, setEditOrderProductId] = useState('');
+  const [editOrderQty, setEditOrderQty] = useState('');
 
   const handleAddOrderProduct = () => {
     const p = products.find(prod => prod.id === newOrderProductId) || products[0];
     if(!p) return;
     const qty = parseFloat(newOrderQty) || 1;
     const sub = p.costPrice * qty;
-    const tax = sub * (p.taxRate / 100);
+    const tax = sub * ((typeof p.taxRate === 'number' ? p.taxRate : 15) / 100);
     const newItem: PurchaseItem = {
       productId: p.id,
       sku: p.sku,
       productName: p.name,
       quantity: qty,
       costPrice: p.costPrice,
-      taxPercent: p.taxRate,
+      taxPercent: typeof p.taxRate === 'number' ? p.taxRate : 15,
       subtotal: sub,
       total: sub + tax
     };
     setNewOrderItems([...newOrderItems, newItem]);
     setNewOrderProductId('');
-    setNewOrderQty('10');
+    setNewOrderQty('');
   };
 
   const handleCreatePurchaseOrder = (e: React.FormEvent) => {
     e.preventDefault();
     if(newOrderItems.length === 0) return;
-    const supplier = suppliers.find(s => s.id === newOrderSupplierId) || suppliers[0];
+    const supplier = suppliers.find(s => s.id === newOrderSupplierId) || suppliers[0] || {
+      id: `sup-${Date.now()}`,
+      name: 'Proveedor General',
+      taxId: '9999999999001',
+      contactPerson: '',
+      phone: '',
+      email: '',
+      address: '',
+      paymentDays: 30
+    };
     const newOrder: PurchaseOrder = {
       id: `oc-${Date.now()}`,
       orderNumber: `OC-${new Date().getFullYear()}-${String(purchaseOrders.length + 1).padStart(4, '0')}`,
@@ -205,6 +221,120 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setPurchaseOrders([newOrder, ...purchaseOrders]);
     setIsNewOrderModalOpen(false);
     setNewOrderItems([]);
+    showToast(`Orden de Compra #${newOrder.orderNumber} creada exitosamente.`, 'success');
+  };
+
+  // Open View Modal
+  const handleOpenViewOrder = (oc: PurchaseOrder) => {
+    setSelectedOrderView(oc);
+  };
+
+  // Open Edit Modal
+  const handleOpenEditOrder = (oc: PurchaseOrder) => {
+    setEditingOrder(oc);
+    setEditOrderSupplierId(oc.supplier.id || suppliers[0]?.id || '');
+    setEditOrderExpectedDate(oc.expectedDelivery || new Date().toISOString().split('T')[0]);
+    setEditOrderStatus(oc.status || 'BORRADOR');
+    setEditOrderNotes(oc.notes || '');
+    setEditOrderItems(oc.items.map(item => ({ ...item })));
+    setEditOrderProductId('');
+    setEditOrderQty('');
+  };
+
+  // Add Item to Edit Order
+  const handleAddEditOrderItem = () => {
+    const p = products.find(prod => prod.id === editOrderProductId) || products[0];
+    if (!p) return;
+    const qty = parseFloat(editOrderQty) || 1;
+    const sub = p.costPrice * qty;
+    const tax = sub * ((typeof p.taxRate === 'number' ? p.taxRate : 15) / 100);
+    const newItem: PurchaseItem = {
+      productId: p.id,
+      sku: p.sku,
+      productName: p.name,
+      quantity: qty,
+      costPrice: p.costPrice,
+      taxPercent: typeof p.taxRate === 'number' ? p.taxRate : 15,
+      subtotal: sub,
+      total: sub + tax
+    };
+    setEditOrderItems(prev => [...prev, newItem]);
+    setEditOrderProductId('');
+    setEditOrderQty('');
+  };
+
+  // Save Edit Order
+  const handleSaveEditOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+    if (editOrderItems.length === 0) {
+      showAlert('La orden de compra debe contener al menos un producto.', 'Orden Vacía', 'warning');
+      return;
+    }
+
+    const supplier = suppliers.find(s => s.id === editOrderSupplierId) || editingOrder.supplier;
+    const totalAmount = editOrderItems.reduce((acc, item) => acc + item.total, 0);
+
+    const updatedOrder: PurchaseOrder = {
+      ...editingOrder,
+      supplier,
+      expectedDelivery: editOrderExpectedDate,
+      status: editOrderStatus,
+      notes: editOrderNotes,
+      items: editOrderItems,
+      totalAmount,
+    };
+
+    setPurchaseOrders(prev => prev.map(o => o.id === editingOrder.id ? updatedOrder : o));
+    if (selectedOrderView && selectedOrderView.id === editingOrder.id) {
+      setSelectedOrderView(updatedOrder);
+    }
+    setEditingOrder(null);
+    showToast(`Orden de Compra #${updatedOrder.orderNumber} actualizada exitosamente.`, 'success');
+  };
+
+  // Convert Order to Purchase Invoice
+  const handleConvertOrderToPurchase = (oc: PurchaseOrder) => {
+    setSelectedSupplierId(oc.supplier.id);
+    setPurchaseItems(oc.items.map(item => ({ ...item })));
+    setInvoiceNumberInput(`FAC-${oc.orderNumber.replace(/[^0-9]/g, '') || Date.now().toString().slice(-6)}`);
+    
+    // Update order status to RECIBIDA
+    const updated = purchaseOrders.map(o => o.id === oc.id ? { ...o, status: 'RECIBIDA' as const } : o);
+    setPurchaseOrders(updated);
+    if (selectedOrderView && selectedOrderView.id === oc.id) {
+      setSelectedOrderView({ ...selectedOrderView, status: 'RECIBIDA' });
+    }
+
+    if (onSelectSubTab) {
+      onSelectSubTab('COMPRAS');
+    }
+
+    showToast(`¡Orden #${oc.orderNumber} cargada en Registrar Compra! Verifique los datos y guarde la factura.`, 'success');
+  };
+
+  // Delete Order
+  const handleDeletePurchaseOrder = (oc: PurchaseOrder) => {
+    showConfirm(
+      `¿Está seguro de eliminar la Orden de Compra #${oc.orderNumber}? Esta acción no se puede deshacer.`,
+      () => {
+        setPurchaseOrders(prev => prev.filter(o => o.id !== oc.id));
+        if (selectedOrderView && selectedOrderView.id === oc.id) {
+          setSelectedOrderView(null);
+        }
+        showToast(`Orden de Compra #${oc.orderNumber} eliminada.`, 'info');
+      },
+      'Eliminar Orden de Compra',
+      'Sí, Eliminar'
+    );
+  };
+
+  // Print Order
+  const handlePrintOrder = (oc: PurchaseOrder) => {
+    setSelectedOrderView(oc);
+    setTimeout(() => {
+      window.print();
+    }, 300);
   };
 
 
@@ -393,7 +523,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
     setPurchasesHistory([newInvoice, ...purchasesHistory]);
     setPurchaseItems([]);
-    setInvoiceNumberInput('001-001-0000' + Math.floor(1000 + Math.random() * 9000));
+    setInvoiceNumberInput('');
     setPurchaseSuccessMsg(`¡Factura de Compra #${newInvoice.invoiceNumber} registrada exitosamente! Se actualizó el inventario.`);
   };
 
@@ -430,7 +560,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     const items: PreOrderItem[] = prods.map(p => {
       const qty = Math.max(10, p.minStock * 2 - p.stock);
       const sub = qty * (p.costPrice || 0);
-      const tax = sub * ((p.taxRate || 15) / 100);
+      const itemTaxRate = typeof p.taxRate === 'number' ? p.taxRate : 15;
+      const tax = sub * (itemTaxRate / 100);
       return {
         productId: p.id,
         sku: p.sku,
@@ -439,7 +570,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
         minStock: p.minStock,
         quantity: qty > 0 ? qty : 10,
         costPrice: p.costPrice || 0,
-        taxPercent: p.taxRate || 15,
+        taxPercent: itemTaxRate,
         subtotal: sub,
         total: sub + tax,
       };
@@ -465,7 +596,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const handleOpenCreatePreOrderForSingleProduct = (product: Product) => {
     const qty = Math.max(10, product.minStock * 2 - product.stock);
     const sub = qty * (product.costPrice || 0);
-    const tax = sub * ((product.taxRate || 15) / 100);
+    const itemTaxRate = typeof product.taxRate === 'number' ? product.taxRate : 15;
+    const tax = sub * (itemTaxRate / 100);
     const singleItem: PreOrderItem = {
       productId: product.id,
       sku: product.sku,
@@ -474,7 +606,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       minStock: product.minStock,
       quantity: qty > 0 ? qty : 10,
       costPrice: product.costPrice || 0,
-      taxPercent: product.taxRate || 15,
+      taxPercent: itemTaxRate,
       subtotal: sub,
       total: sub + tax,
     };
@@ -509,7 +641,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       setPreOrderItems(updated);
     } else {
       const sub = qty * (prod.costPrice || 0);
-      const tax = sub * ((prod.taxRate || 15) / 100);
+      const itemTaxRate = typeof prod.taxRate === 'number' ? prod.taxRate : 15;
+      const tax = sub * (itemTaxRate / 100);
       setPreOrderItems([
         ...preOrderItems,
         {
@@ -520,7 +653,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
           minStock: prod.minStock,
           quantity: qty,
           costPrice: prod.costPrice || 0,
-          taxPercent: prod.taxRate || 15,
+          taxPercent: itemTaxRate,
           subtotal: sub,
           total: sub + tax,
         }
@@ -742,6 +875,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 <input
                   type="text"
                   required
+                  placeholder="Ej: 001-001-00004589"
                   value={invoiceNumberInput}
                   onChange={(e) => setInvoiceNumberInput(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
@@ -1215,14 +1349,69 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                       {formatCurrency(oc.totalAmount, settings.currencySymbol)}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black border bg-blue-50 border-blue-200 text-blue-700">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                        oc.status === 'RECIBIDA' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+                        oc.status === 'APROBADA' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' :
+                        oc.status === 'ENVIADA' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                        oc.status === 'CANCELADA' ? 'bg-rose-50 border-rose-200 text-rose-700' :
+                        'bg-amber-50 border-amber-200 text-amber-700'
+                      }`}>
                         {oc.status}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <button className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-lg text-[11px] cursor-pointer">
-                        Imprimir OC
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        {/* 1. Ver */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenViewOrder(oc)}
+                          title="Ver Detalle de Orden"
+                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs transition cursor-pointer"
+                        >
+                          <Eye className="w-4 h-4 text-slate-600" />
+                        </button>
+
+                        {/* 2. Imprimir */}
+                        <button
+                          type="button"
+                          onClick={() => handlePrintOrder(oc)}
+                          title="Imprimir Orden de Compra"
+                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs transition cursor-pointer"
+                        >
+                          <Printer className="w-4 h-4 text-slate-600" />
+                        </button>
+
+                        {/* 3. Editar */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditOrder(oc)}
+                          title="Editar Orden de Compra"
+                          className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs transition cursor-pointer"
+                        >
+                          <Edit3 className="w-4 h-4 text-amber-600" />
+                        </button>
+
+                        {/* 4. Convertir a Compra */}
+                        <button
+                          type="button"
+                          onClick={() => handleConvertOrderToPurchase(oc)}
+                          title="Convertir a Factura de Compra"
+                          className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                        >
+                          <ShoppingCart className="w-3.5 h-3.5" />
+                          <span>Convertir a Compra</span>
+                        </button>
+
+                        {/* 5. Eliminar */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePurchaseOrder(oc)}
+                          title="Eliminar Orden"
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs transition cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-600" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -2334,6 +2523,425 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL: VIEW & PRINT PURCHASE ORDER (ORDEN DE COMPRA)
+         --------------------------------------------------------------------- */}
+      {selectedOrderView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4 no-print">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-purple-50 border border-purple-200 text-purple-600 rounded-2xl">
+                  <ListOrdered className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
+                    <span>Orden de Compra #{selectedOrderView.orderNumber}</span>
+                    <span
+                      className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border ${
+                        selectedOrderView.status === 'RECIBIDA'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : selectedOrderView.status === 'APROBADA'
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                          : selectedOrderView.status === 'ENVIADA'
+                          ? 'bg-blue-50 border-blue-200 text-blue-700'
+                          : selectedOrderView.status === 'CANCELADA'
+                          ? 'bg-rose-50 border-rose-200 text-rose-700'
+                          : 'bg-amber-50 border-amber-200 text-amber-700'
+                      }`}
+                    >
+                      {selectedOrderView.status}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Emitida el {selectedOrderView.createdAt} • Entrega esperada: {selectedOrderView.expectedDelivery || 'Inmediata'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditOrder(selectedOrderView)}
+                  className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit3 className="w-4 h-4 text-amber-600" />
+                  <span>Editar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrderView(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Voucher Body */}
+            <div id="printable-order-voucher" className="space-y-6 text-xs text-slate-800">
+              {/* Header Info: Store & Supplier Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Store Header */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                  <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Comprador (Empresa)</span>
+                  <h4 className="text-sm font-black text-slate-900">{settings.storeName || 'FERRETERÍA INDUSTRIAL'}</h4>
+                  <p className="text-slate-600">RUC: <strong className="text-slate-900 font-mono">{settings.taxId || '1790012345001'}</strong></p>
+                  <p className="text-slate-600">Dirección: {settings.address || 'Matriz Principal'}</p>
+                  <p className="text-slate-600">Tel: {settings.phone || '0990000000'} • Email: {settings.email || 'compras@ferreteria.com'}</p>
+                </div>
+
+                {/* Supplier Header */}
+                <div className="p-4 bg-purple-50/50 border border-purple-200/80 rounded-2xl space-y-1.5">
+                  <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Proveedor (Emisor)</span>
+                  <h4 className="text-sm font-black text-slate-900">{selectedOrderView.supplier.name}</h4>
+                  <p className="text-slate-600">RUC / CI: <strong className="text-slate-900 font-mono">{selectedOrderView.supplier.taxId}</strong></p>
+                  {selectedOrderView.supplier.contactPerson && (
+                    <p className="text-slate-600">Contacto: {selectedOrderView.supplier.contactPerson}</p>
+                  )}
+                  <p className="text-slate-600">Teléfono: {selectedOrderView.supplier.phone || 'S/N'} • Email: {selectedOrderView.supplier.email || 'S/N'}</p>
+                  <p className="text-slate-600">Dirección: {selectedOrderView.supplier.address || 'S/N'}</p>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">SKU</th>
+                      <th className="py-2.5 px-3">Descripción de Producto</th>
+                      <th className="py-2.5 px-3 text-center">Cant.</th>
+                      <th className="py-2.5 px-3 text-right">Costo Unit.</th>
+                      <th className="py-2.5 px-3 text-center">IVA</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                    {selectedOrderView.items.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/80 transition">
+                        <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
+                        <td className="py-2.5 px-3 font-mono text-purple-600 font-bold">{item.sku}</td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{item.productName}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900">{item.quantity}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-600">{formatCurrency(item.costPrice, settings.currencySymbol)}</td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-500">{item.taxPercent}%</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-700">{formatCurrency(item.subtotal, settings.currencySymbol)}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">{formatCurrency(item.total, settings.currencySymbol)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals and Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Observaciones / Condiciones</span>
+                  <p className="text-xs text-slate-700">{selectedOrderView.notes || 'Sin observaciones registradas.'}</p>
+                  <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-200">
+                    Condición de Pago: <strong>{selectedOrderView.supplier.paymentDays ? `${selectedOrderView.supplier.paymentDays} días de crédito` : 'Contado'}</strong>
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-2 font-mono text-xs">
+                  <div className="flex justify-between text-slate-300">
+                    <span>Subtotal Neto:</span>
+                    <span>{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + i.subtotal, 0), settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-300">
+                    <span>IVA Estimado:</span>
+                    <span>{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + (i.total - i.subtotal), 0), settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-black text-emerald-400 pt-2 border-t border-slate-800">
+                    <span>Total Estimado:</span>
+                    <span>{formatCurrency(selectedOrderView.totalAmount, settings.currencySymbol)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Signature Blocks for Printing */}
+              <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Firma Autorizada</p>
+                  <p className="text-slate-500 text-[11px]">Departamento de Compras / Gerencia</p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Recibido Conforme</p>
+                  <p className="text-slate-500 text-[11px]">Proveedor / Representante Comercial</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200 no-print">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <Printer className="w-4 h-4 text-purple-300" />
+                <span>Imprimir / Guardar PDF</span>
+              </button>
+
+              <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrderView(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cerrar
+                </button>
+
+                {selectedOrderView.status !== 'RECIBIDA' && (
+                  <button
+                    type="button"
+                    onClick={() => handleConvertOrderToPurchase(selectedOrderView)}
+                    className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs transition shadow-lg shadow-purple-600/20 flex items-center gap-2 cursor-pointer"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>Convertir a Factura de Compra</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL: EDIT PURCHASE ORDER (ORDEN DE COMPRA)
+         --------------------------------------------------------------------- */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl">
+                  <Edit3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-950">
+                    Editar Orden de Compra #{editingOrder.orderNumber}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Modifique proveedores, fechas de entrega, ítems y estado de la orden
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingOrder(null)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditOrder} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Proveedor *</label>
+                  <Select
+                    value={editOrderSupplierId}
+                    onChange={(e: any) => setEditOrderSupplierId(e.target.value)}
+                    className="w-full bg-slate-50 border-slate-200 font-bold"
+                  >
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.taxId})</option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Fecha Entrega Esperada</label>
+                  <CustomDatePicker
+                    value={editOrderExpectedDate}
+                    onChange={setEditOrderExpectedDate}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Estado de la Orden *</label>
+                  <Select
+                    value={editOrderStatus}
+                    onChange={(e: any) => setEditOrderStatus(e.target.value as any)}
+                    className="w-full bg-slate-50 border-slate-200 font-bold"
+                  >
+                    <option value="BORRADOR">BORRADOR</option>
+                    <option value="ENVIADA">ENVIADA</option>
+                    <option value="APROBADA">APROBADA</option>
+                    <option value="RECIBIDA">RECIBIDA</option>
+                    <option value="CANCELADA">CANCELADA</option>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-black text-slate-800 mb-1">Notas / Observaciones</label>
+                <input
+                  type="text"
+                  placeholder="Ej: Entregar en bodega norte en horario matutino..."
+                  value={editOrderNotes}
+                  onChange={(e) => setEditOrderNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Add items to order */}
+              <div className="p-4 bg-purple-50/50 border border-purple-200/80 rounded-2xl space-y-3">
+                <h4 className="font-black text-purple-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-purple-600" />
+                  <span>Agregar / Modificar Artículos a la Orden</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <div className="sm:col-span-2">
+                    <Select
+                      value={editOrderProductId}
+                      onChange={(e: any) => setEditOrderProductId(e.target.value)}
+                      className="bg-white border-slate-200 text-xs font-bold"
+                    >
+                      <option value="">Seleccionar Producto...</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.sku} - {p.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Cantidad"
+                      value={editOrderQty}
+                      onChange={(e) => setEditOrderQty(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleAddEditOrderItem}
+                      className="w-full px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                    >
+                      + Agregar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Items Table with inline quantity/cost edits */}
+              {editOrderItems.length > 0 && (
+                <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-white font-bold text-[10px] uppercase">
+                      <tr>
+                        <th className="py-2.5 px-3">Producto</th>
+                        <th className="py-2.5 px-3 text-center w-24">Cant.</th>
+                        <th className="py-2.5 px-3 text-right w-28">Costo Unit.</th>
+                        <th className="py-2.5 px-3 text-right">Subtotal</th>
+                        <th className="py-2.5 px-3 text-center w-12">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                      {editOrderItems.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3">
+                            <span className="font-mono text-purple-600 text-[10px] block">{item.sku}</span>
+                            <span className="font-bold text-slate-800">{item.productName}</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const newQty = parseFloat(e.target.value) || 1;
+                                const sub = item.costPrice * newQty;
+                                const tax = sub * (item.taxPercent / 100);
+                                setEditOrderItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  quantity: newQty,
+                                  subtotal: sub,
+                                  total: sub + tax
+                                } : it));
+                              }}
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-mono font-bold"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              step="0.0001"
+                              min="0"
+                              value={item.costPrice}
+                              onChange={(e) => {
+                                const newCost = parseFloat(e.target.value) || 0;
+                                const sub = newCost * item.quantity;
+                                const tax = sub * (item.taxPercent / 100);
+                                setEditOrderItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  costPrice: newCost,
+                                  subtotal: sub,
+                                  total: sub + tax
+                                } : it));
+                              }}
+                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono text-emerald-600 font-bold"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                            {formatCurrency(item.total, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setEditOrderItems(editOrderItems.filter((_, i) => i !== idx))}
+                              className="text-rose-500 hover:text-rose-700 cursor-pointer p-1"
+                            >
+                              <Trash2 className="w-4 h-4 mx-auto" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Total Summary */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-2xl font-mono">
+                <span className="font-bold text-slate-700 text-xs">Total Estimado de la Orden:</span>
+                <span className="text-base font-black text-emerald-600">
+                  {formatCurrency(editOrderItems.reduce((acc, item) => acc + item.total, 0), settings.currencySymbol)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={editOrderItems.length === 0}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl text-xs transition shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  Guardar Cambios de la Orden
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

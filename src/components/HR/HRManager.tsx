@@ -287,16 +287,16 @@ export const HRManager: React.FC<HRManagerProps> = ({
       return;
     }
 
-    const dep = departments.find(d => d.id === newEmp.departmentId) || departments[0];
-    const pos = positions.find(p => p.id === newEmp.positionId) || positions[0];
+    const dep = departments.find(d => d.id === newEmp.departmentId) || departments[0] || { id: '', name: 'General' };
+    const pos = positions.find(p => p.id === newEmp.positionId) || positions[0] || { id: '', title: 'General' };
 
     const item: Employee = {
       id: editingEmpId || `emp-${Date.now()}`,
       code: newEmp.code || `EMP-00${employees.length + 1}`,
       idNumber: newEmp.idNumber,
       fullName: newEmp.fullName,
-      email: newEmp.email || `${newEmp.fullName.toLowerCase().replace(/\s+/g, '.')}@ferreteria.com`,
-      phone: newEmp.phone || '0990000000',
+      email: newEmp.email || '',
+      phone: newEmp.phone || '',
       departmentId: dep.id,
       departmentName: dep.name,
       positionId: pos.id,
@@ -304,8 +304,8 @@ export const HRManager: React.FC<HRManagerProps> = ({
       hireDate: newEmp.hireDate,
       baseSalary: parseFloat(newEmp.baseSalary.toString()) || 460,
       contractType: newEmp.contractType,
-      iessAffiliationNumber: newEmp.iessAffiliationNumber || `${newEmp.idNumber}001`,
-      bankAccount: newEmp.bankAccount || 'Banco Pichincha Ahorros',
+      iessAffiliationNumber: newEmp.iessAffiliationNumber || '',
+      bankAccount: newEmp.bankAccount || '',
       status: 'ACTIVO'
     };
 
@@ -325,8 +325,8 @@ export const HRManager: React.FC<HRManagerProps> = ({
       fullName: '',
       email: '',
       phone: '',
-      departmentId: 'dep-1',
-      positionId: 'pos-1',
+      departmentId: departments[0]?.id || '',
+      positionId: positions[0]?.id || '',
       hireDate: new Date().toISOString().split('T')[0],
       baseSalary: 460,
       contractType: 'INDEFINIDO',

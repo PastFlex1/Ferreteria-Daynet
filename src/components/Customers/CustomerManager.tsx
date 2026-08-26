@@ -65,12 +65,12 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
     email: '',
     phone: '',
     address: '',
-    creditLimit: '500',
+    creditLimit: '',
   });
 
   // Payment to Account Modal State
   const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState<Customer | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState('100');
+  const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'CHEQUE'>('EFECTIVO');
   const [paymentNote, setPaymentNote] = useState('');
 
@@ -125,7 +125,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
         email: '',
         phone: '',
         address: '',
-        creditLimit: '500',
+        creditLimit: '',
       });
     }
     setIsCustomerModalOpen(true);
@@ -184,7 +184,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
     onUpdateCustomerBalance(selectedCustomerForPayment.id, amount);
     setSelectedCustomerForPayment(null);
     showToast('Pago registrado correctamente.', 'success');
-    setPaymentAmount('100');
+    setPaymentAmount('');
     setPaymentNote('');
   };
 
@@ -849,6 +849,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                   max={selectedCustomerForPayment.currentBalance}
                   required
                   value={paymentAmount}
+                  placeholder="0.00"
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-sm rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />

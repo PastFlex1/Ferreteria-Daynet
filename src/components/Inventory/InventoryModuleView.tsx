@@ -284,12 +284,12 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   // 5. Cambio de Precio Masivo State
   const [selectedCategoryForPrice, setSelectedCategoryForPrice] = useState('TODAS');
   const [priceAdjustType, setPriceAdjustType] = useState<'PORCENTAJE_AUMENTO' | 'PORCENTAJE_DESCUENTO' | 'FIJO'>('PORCENTAJE_AUMENTO');
-  const [priceAdjustValue, setPriceAdjustValue] = useState('5');
+  const [priceAdjustValue, setPriceAdjustValue] = useState('');
   const [priceChangeSuccessMsg, setPriceChangeSuccessMsg] = useState<string | null>(null);
 
   // 6. Ajuste de Stock Formal State
   const [adjustProductId, setAdjustProductId] = useState(products[0]?.id || '');
-  const [adjustQtyVal, setAdjustQtyVal] = useState('10');
+  const [adjustQtyVal, setAdjustQtyVal] = useState('');
   const [adjustTypeReason, setAdjustTypeReason] = useState<'ENTRADA_COMPRA' | 'ENTRADA_DEVOLUCION' | 'SALIDA_MERMA' | 'SALIDA_ROBO' | 'CORRECCION'>('SALIDA_MERMA');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustHistory, setAdjustHistory] = useState<{ id: string; date: string; product: string; qty: number; reason: string; user: string; }[]>([]);

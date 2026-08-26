@@ -278,7 +278,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       {/* ── Top Topbar ───────────────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-slate-950 border-b border-slate-800/80 shadow-xl h-14 flex items-center px-4 gap-4">
+      <header className="fixed top-0 left-0 right-0 z-40 bg-slate-950 border-b border-slate-800/80 shadow-xl h-14 flex items-center px-4 gap-4 no-print">
         {/* Brand */}
         <div className="flex items-center gap-3 shrink-0">
           {settings.logoUrl ? (
@@ -363,7 +363,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* ── Left Sidebar (accordion) ─────────────────────────────────────────── */}
       <aside
-        className={`fixed top-14 left-0 bottom-0 z-30 bg-slate-950 border-r border-slate-800/80 flex flex-col shadow-2xl transition-all duration-200 ${
+        className={`fixed top-14 left-0 bottom-0 z-30 bg-slate-950 border-r border-slate-800/80 flex flex-col shadow-2xl transition-all duration-200 no-print ${
           sidebarCollapsed ? 'w-14' : 'w-52'
         }`}
       >

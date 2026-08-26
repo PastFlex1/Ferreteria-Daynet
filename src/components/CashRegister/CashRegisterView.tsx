@@ -29,8 +29,8 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
   onOpenRegister,
   onCloseRegister,
 }) => {
-  const [initialCashInput, setInitialCashInput] = useState('500');
-  const [actualCountInput, setActualCountInput] = useState('0');
+  const [initialCashInput, setInitialCashInput] = useState('');
+  const [actualCountInput, setActualCountInput] = useState('');
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
 
   // Calculate live sales breakdown for active session

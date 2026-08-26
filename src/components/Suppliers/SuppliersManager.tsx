@@ -119,7 +119,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
     email: '',
     address: '',
     paymentDays: 30,
-    bankName: 'Banco Pichincha',
+    bankName: '',
     accountType: 'Corriente',
     accountNumber: '',
     status: 'ACTIVO',
@@ -206,15 +206,15 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
         id: `sup-${Date.now()}`,
         taxId: supplierFormData.taxId!,
         name: supplierFormData.name!,
-        contactPerson: supplierFormData.contactPerson || 'Agente Comercial',
+        contactPerson: supplierFormData.contactPerson || '',
         phone: supplierFormData.phone || '',
         email: supplierFormData.email || '',
         address: supplierFormData.address || '',
         paymentDays: supplierFormData.paymentDays || 30,
-        bankName: supplierFormData.bankName || 'Banco Pichincha',
+        bankName: supplierFormData.bankName || '',
         accountType: supplierFormData.accountType || 'Corriente',
         accountNumber: supplierFormData.accountNumber || '',
-        status: 'ACTIVO',
+        status: supplierFormData.status || 'ACTIVO',
         currentBalance: 0,
         notes: supplierFormData.notes || ''
       };
@@ -231,7 +231,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       email: '',
       address: '',
       paymentDays: 30,
-      bankName: 'Banco Pichincha',
+      bankName: '',
       accountType: 'Corriente',
       accountNumber: '',
       status: 'ACTIVO',
@@ -352,7 +352,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                   email: '',
                   address: '',
                   paymentDays: 30,
-                  bankName: 'Banco Pichincha',
+                  bankName: '',
                   accountType: 'Corriente',
                   accountNumber: '',
                   status: 'ACTIVO',
@@ -718,7 +718,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                 setIsSupplierModalOpen(false);
                 setEditingSupplier(null);
                 setSupplierFormData({
-                  taxId: '', name: '', contactPerson: '', phone: '', email: '', address: '', paymentDays: 30, bankName: 'Banco Pichincha', accountType: 'Corriente', accountNumber: '', status: 'ACTIVO', notes: ''
+                  taxId: '', name: '', contactPerson: '', phone: '', email: '', address: '', paymentDays: 30, bankName: '', accountType: 'Corriente', accountNumber: '', status: 'ACTIVO', notes: ''
                 });
               }} className="p-1 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5" />

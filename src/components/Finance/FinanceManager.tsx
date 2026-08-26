@@ -186,7 +186,7 @@ export const FinanceManager: React.FC<FinanceManagerProps> = ({
     category: 'EQUIPO_COMPUTACION',
     acquisitionCost: 0,
     usefulLifeYears: 3,
-    location: 'Local Principal',
+    location: '',
     serialNumber: ''
   });
 

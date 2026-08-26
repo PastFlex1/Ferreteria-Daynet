@@ -706,6 +706,7 @@ export default function App() {
             settings={settings}
             onSaveProduct={handleSaveProduct}
             onStockAdjust={handleStockAdjust}
+            onSelectSubTab={(tab) => setActiveTab(tab)}
           />
         )}
 

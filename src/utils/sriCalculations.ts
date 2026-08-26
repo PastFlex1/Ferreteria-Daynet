@@ -25,15 +25,15 @@ export function calculateSriTotals(
     const itemDiscount = (itemSubtotal * (item.discountPercent || 0)) / 100;
     const baseAfterDiscount = itemSubtotal - itemDiscount;
 
-    subtotalSinImpuestos += itemSubtotal;
+    subtotalSinImpuestos += baseAfterDiscount;
     totalDescuento += itemDiscount;
 
     // Check product or item tax rate
     let taxRate = defaultTaxRate;
-    if ('product' in item && item.product && typeof item.product.taxRate === 'number') {
-      taxRate = item.product.taxRate;
-    } else if ('taxRate' in item && typeof (item as any).taxRate === 'number') {
+    if ('taxRate' in item && typeof (item as any).taxRate === 'number') {
       taxRate = (item as any).taxRate;
+    } else if ('product' in item && item.product && typeof item.product.taxRate === 'number') {
+      taxRate = item.product.taxRate;
     } else if ('taxPercent' in item && typeof (item as any).taxPercent === 'number') {
       taxRate = (item as any).taxPercent;
     } else if (item.taxAmount === 0 && itemSubtotal > 0) {
@@ -43,7 +43,9 @@ export function calculateSriTotals(
       taxRate = calcPct;
     }
 
-    const calculatedTax = item.taxAmount !== undefined ? item.taxAmount : (baseAfterDiscount * (taxRate / 100));
+    const calculatedTax = item.taxAmount !== undefined && item.taxAmount >= 0
+      ? item.taxAmount
+      : (taxRate > 0 ? baseAfterDiscount * (taxRate / 100) : 0);
 
     if (!rateBreakdowns[taxRate]) {
       rateBreakdowns[taxRate] = { base: 0, tax: 0 };

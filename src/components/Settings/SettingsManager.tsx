@@ -47,11 +47,17 @@ import {
   ExternalLink,
   Tag,
   Star,
-  CheckCircle
+  CheckCircle,
+  X,
+  User,
+  Mail,
+  Shield,
+  AlertCircle
 } from 'lucide-react';
 
 import { SriBackendService } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
+import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 
 interface SettingsManagerProps {
   subTab: SettingsSubTab | 'SETTINGS';
@@ -126,6 +132,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   // Users Management State
   const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
 
   // Payment Methods State
@@ -1565,85 +1572,168 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </table>
           </div>
 
-          {/* ADD USER MODAL */}
+          {/* ADD USER MODAL (MODERNO & ELEGANTE) */}
           {showAddUserModal && (
-            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                  <UserPlus className="w-4 h-4 text-cyan-400" />
-                  <span>Crear Nuevo Usuario</span>
-                </h3>
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-slate-750/90 ring-1 ring-white/10 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative animate-in zoom-in-95 duration-200">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
+                  <div className="flex items-center gap-3.5">
+                    <div className="p-3 bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/30 rounded-2xl text-cyan-400 shadow-inner">
+                      <UserPlus className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-white tracking-wide">
+                        Crear Nuevo Usuario
+                      </h3>
+                      <p className="text-[11px] text-slate-400 font-medium">
+                        Asigne credenciales y roles de acceso para el personal
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddUserModal(false)}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-                <form onSubmit={handleAddUser} className="space-y-4">
+                <form onSubmit={handleAddUser} className="space-y-4 text-xs">
+                  {/* Nombre Completo */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Nombre Completo</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newUser.name}
-                      onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    />
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
+                      <User className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Nombre Completo *</span>
+                    </label>
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        required
+                        placeholder="ej: Alexander Palma"
+                        value={newUser.name}
+                        onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Cédula o RUC</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newUser.username}
-                      onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono"
-                    />
+                  {/* Grid: Cédula/RUC + Rol */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Cédula o RUC *</span>
+                      </label>
+                      <input 
+                        type="text"
+                        required
+                        placeholder="1725389454"
+                        value={newUser.username}
+                        onChange={(e) => setNewUser({ ...newUser, username: e.target.value.trim() })}
+                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                      />
+                      {newUser.username && (() => {
+                        const val = validateEcuadorianDocument('AUTO', newUser.username);
+                        return (
+                          <div className={`mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 border ${
+                            val.isValid 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                              : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                          }`}>
+                            {val.isValid ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <span>{val.type} Válido</span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>{val.message}</span>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
+                        <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Rol Asignado *</span>
+                      </label>
+                      <Select
+                        value={newUser.role}
+                        onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-cyan-500 transition [color-scheme:dark]"
+                      >
+                        <option value="Administrador">👑 Administrador</option>
+                        <option value="Cajero">💳 Cajero</option>
+                        <option value="Vendedor">🛍️ Vendedor</option>
+                      </Select>
+                    </div>
                   </div>
 
+                  {/* Correo Electrónico */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Correo Electrónico</label>
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
+                      <Mail className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Correo Electrónico *</span>
+                    </label>
                     <input 
                       type="email"
                       required
+                      autoComplete="new-email"
+                      placeholder="usuario@empresa.com"
                       value={newUser.email}
                       onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono"
+                      className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
                     />
                   </div>
 
+                  {/* Contraseña */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Rol</label>
-                    <Select
-                      value={newUser.role}
-                      onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    >
-                      <option value="Administrador">Administrador</option>
-                      <option value="Cajero">Cajero</option>
-                      <option value="Vendedor">Vendedor</option>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Contraseña</label>
-                    <input 
-                      type="password"
-                      required
-                      value={newUser.password}
-                      onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    />
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
+                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Contraseña de Acceso *</span>
+                    </label>
+                    <div className="relative">
+                      <input 
+                        type={showNewUserPassword ? 'text' : 'password'}
+                        required
+                        autoComplete="new-password"
+                        placeholder="••••••••"
+                        value={newUser.password}
+                        onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl pl-3.5 pr-10 py-2.5 text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                        title={showNewUserPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                      >
+                        {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-2">
+                  {/* Botones de Acción */}
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800/80">
                     <button 
                       type="button"
                       onClick={() => setShowAddUserModal(false)}
-                      className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl"
+                      className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700/80 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
                     >
                       Cancelar
                     </button>
                     <button 
                       type="submit"
-                      className="px-4 py-2 bg-cyan-600 text-white text-xs font-bold rounded-xl"
+                      className="px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black rounded-xl shadow-lg shadow-cyan-500/25 transition active:scale-95 flex items-center gap-2 cursor-pointer"
                     >
-                      Guardar Usuario
+                      <Save className="w-4 h-4" />
+                      <span>Guardar Usuario</span>
                     </button>
                   </div>
                 </form>

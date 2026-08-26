@@ -204,12 +204,12 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
     targetLocation: 'loc-1',
     newCustodian: '',
     reason: '',
-    authorizedBy: 'Gerencia'
+    authorizedBy: ''
   });
 
   const [newArea, setNewArea] = useState({ code: '', name: '', responsiblePerson: '' });
-  const [newClass, setNewClass] = useState({ code: '', name: '', depreciationRatePercent: 10, usefulLifeYears: 10, accountingAccount: '1.2.01.01.01' });
-  const [newLoc, setNewLoc] = useState({ code: '', name: '', address: '', city: 'Quito' });
+  const [newClass, setNewClass] = useState({ code: '', name: '', depreciationRatePercent: '' as any, usefulLifeYears: '' as any, accountingAccount: '' });
+  const [newLoc, setNewLoc] = useState({ code: '', name: '', address: '', city: '' });
 
   // -------------------------------------------------------------------------
   // HANDLERS

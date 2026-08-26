@@ -33,7 +33,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
-  const [creditLimit, setCreditLimit] = useState('0');
+  const [creditLimit, setCreditLimit] = useState('');
 
   if (!isOpen) return null;
 

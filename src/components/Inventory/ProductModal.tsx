@@ -53,11 +53,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [category, setCategory] = useState<Category>(categoryOptions[0] || 'General');
   const [description, setDescription] = useState('');
   const [unit, setUnit] = useState<string>('UND');
-  const [price, setPrice] = useState('0');
-  const [priceWithTax, setPriceWithTax] = useState('0');
-  const [costPrice, setCostPrice] = useState('0');
-  const [stock, setStock] = useState('0');
-  const [minStock, setMinStock] = useState('5');
+  const [price, setPrice] = useState('');
+  const [priceWithTax, setPriceWithTax] = useState('');
+  const [costPrice, setCostPrice] = useState('');
+  const [stock, setStock] = useState('');
+  const [minStock, setMinStock] = useState('');
   const [location, setLocation] = useState('');
   const [allowFractional, setAllowFractional] = useState(false);
   const [taxRate, setTaxRate] = useState(defaultTaxRate.toString());
@@ -93,7 +93,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setCostPrice('');
       setStock('');
       setMinStock('');
-      setLocation('Pasillo 1');
+      setLocation('');
       setAllowFractional(false);
       setTaxRate(defaultTaxRate.toString());
       setPriceWithTax('');
@@ -111,6 +111,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handlePriceChange = (val: string) => {
     setPrice(val);
+    if (!val || val.trim() === '') {
+      setPriceWithTax('');
+      return;
+    }
     const p = parseFloat(val) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
@@ -119,6 +123,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handlePriceWithTaxChange = (val: string) => {
     setPriceWithTax(val);
+    if (!val || val.trim() === '') {
+      setPrice('');
+      return;
+    }
     const pWithTax = parseFloat(val) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
@@ -127,6 +135,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleTaxRateChange = (val: string) => {
     setTaxRate(val);
+    if (!price || price.trim() === '') {
+      setPriceWithTax('');
+      return;
+    }
     const p = parseFloat(price) || 0;
     const t = parseFloat(val);
     const finalT = isNaN(t) ? defaultTaxRate : t;
@@ -182,7 +194,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       stock: parseFloat(stock) || 0,
       minStock: parseFloat(minStock) || 0,
       location: location.trim() || undefined,
-      taxRate: parseFloat(taxRate) || defaultTaxRate,
+      taxRate: !isNaN(parseFloat(taxRate)) ? parseFloat(taxRate) : defaultTaxRate,
       allowFractional,
       priceScales: priceScales.filter(s => s.minQty > 0 && s.price > 0),
     };
@@ -519,7 +531,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 {priceScales.map((scale, index) => {
                   const scalePrice = parseFloat(scale.price.toString()) || 0;
                   const currentCost = parseFloat(costPrice) || 0;
-                  const currentTax = parseFloat(taxRate) || defaultTaxRate;
+                  const parsedTax = parseFloat(taxRate);
+                  const currentTax = !isNaN(parsedTax) ? parsedTax : defaultTaxRate;
                   const scalePriceWithTax = scalePrice * (1 + currentTax / 100);
                   const marginPct = currentCost > 0 ? (((scalePrice - currentCost) / currentCost) * 100) : 0;
 
