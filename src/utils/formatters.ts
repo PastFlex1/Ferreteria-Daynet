@@ -82,13 +82,23 @@ export const getDocumentTypeName = (docType: DocumentType): string => {
 export const getPaymentMethodLabel = (method: string): string => {
   switch (method) {
     case 'EFECTIVO':
+    case '01':
       return 'Efectivo';
     case 'TARJETA_DEBITO':
+    case '16':
       return 'Tarjeta de Débito';
     case 'TARJETA_CREDITO':
+    case '19':
       return 'Tarjeta de Crédito';
     case 'TRANSFERENCIA':
+    case '20':
       return 'Transferencia Bancaria';
+    case 'COMPENSACION':
+    case '15':
+      return 'Compensación de Deudas';
+    case 'ENDOSO':
+    case '21':
+      return 'Endoso de Títulos';
     case 'CREDITO_CLIENTE':
       return 'Crédito / Cta. Corriente';
     default:

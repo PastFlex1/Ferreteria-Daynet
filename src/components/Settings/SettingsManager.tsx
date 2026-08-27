@@ -137,6 +137,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   // Payment Methods State
   const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
+  const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
+  const [editingPaymentMethod, setEditingPaymentMethod] = useState<any | null>(null);
+  const [paymentMethodForm, setPaymentMethodForm] = useState({
+    code: '20',
+    name: '',
+    shortName: '',
+    active: true,
+    default: false
+  });
 
   // Printing Format State
   const [printFormat, setPrintFormat] = useFirestoreSync<'TICKET_80MM' | 'TICKET_58MM' | 'RIDE_A4'>('ferreteria_settings_print_format', 'TICKET_80MM');
@@ -273,6 +282,117 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     );
     setTaxRates(updated);
     showToast(`Tarifa "${tax.name}" ${tax.active ? 'desactivada' : 'activada'}.`, 'info');
+  };
+
+  // Payment Methods Handlers
+  const handleTogglePaymentMethod = (id: string) => {
+    const target = paymentMethods.find((pm) => pm.id === id);
+    if (target?.default && target.active) {
+      showAlert('No puede desactivar la forma de pago establecida por defecto. Primero establezca otra como predeterminada.', 'Forma de Pago Predeterminada', 'warning');
+      return;
+    }
+    const updated = paymentMethods.map((pm) =>
+      pm.id === id ? { ...pm, active: !pm.active } : pm
+    );
+    setPaymentMethods(updated);
+    const updatedTarget = updated.find((pm) => pm.id === id);
+    showToast(`Forma de pago "${updatedTarget?.shortName || updatedTarget?.name}" ${updatedTarget?.active ? 'habilitada' : 'deshabilitada'} para facturación.`, 'info');
+  };
+
+  const handleSetDefaultPaymentMethod = (id: string) => {
+    const updated = paymentMethods.map((pm) => ({
+      ...pm,
+      active: pm.id === id ? true : pm.active,
+      default: pm.id === id,
+    }));
+    setPaymentMethods(updated);
+    const target = updated.find((pm) => pm.id === id);
+    showToast(`"${target?.shortName || target?.name}" establecida como forma de pago predeterminada en caja.`, 'success');
+  };
+
+  const handleOpenAddPaymentMethod = () => {
+    setEditingPaymentMethod(null);
+    setPaymentMethodForm({
+      code: '20',
+      name: '',
+      shortName: '',
+      active: true,
+      default: false,
+    });
+    setShowPaymentMethodModal(true);
+  };
+
+  const handleOpenEditPaymentMethod = (pm: any) => {
+    setEditingPaymentMethod(pm);
+    setPaymentMethodForm({
+      code: pm.code || '20',
+      name: pm.name || '',
+      shortName: pm.shortName || '',
+      active: pm.active !== false,
+      default: !!pm.default,
+    });
+    setShowPaymentMethodModal(true);
+  };
+
+  const handleSavePaymentMethodForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentMethodForm.name.trim()) {
+      showAlert('Por favor ingrese el nombre de la forma de pago.', 'Campo Requerido', 'warning');
+      return;
+    }
+
+    let updated: any[];
+    if (editingPaymentMethod) {
+      updated = paymentMethods.map((pm) =>
+        pm.id === editingPaymentMethod.id
+          ? {
+              ...pm,
+              code: paymentMethodForm.code,
+              name: paymentMethodForm.name.trim(),
+              shortName: paymentMethodForm.shortName.trim() || paymentMethodForm.name.trim(),
+              active: paymentMethodForm.active,
+              default: paymentMethodForm.default,
+            }
+          : paymentMethodForm.default
+          ? { ...pm, default: false }
+          : pm
+      );
+    } else {
+      const newPm = {
+        id: `pm-${Date.now()}`,
+        code: paymentMethodForm.code,
+        name: paymentMethodForm.name.trim(),
+        shortName: paymentMethodForm.shortName.trim() || paymentMethodForm.name.trim(),
+        active: paymentMethodForm.active,
+        default: paymentMethodForm.default,
+      };
+      if (paymentMethodForm.default) {
+        updated = paymentMethods.map((pm) => ({ ...pm, default: false }));
+        updated.push(newPm);
+      } else {
+        updated = [...paymentMethods, newPm];
+      }
+    }
+
+    setPaymentMethods(updated);
+    setShowPaymentMethodModal(false);
+    showToast(editingPaymentMethod ? 'Forma de pago actualizada.' : 'Nueva forma de pago registrada.', 'success');
+  };
+
+  const handleDeletePaymentMethod = (pm: any) => {
+    if (pm.default) {
+      showAlert('No puede eliminar la forma de pago establecida por defecto.', 'Operación No Permitida', 'warning');
+      return;
+    }
+    showConfirm(
+      `¿Está seguro de eliminar la forma de pago "${pm.shortName || pm.name}"?`,
+      () => {
+        const filtered = paymentMethods.filter((p) => p.id !== pm.id);
+        setPaymentMethods(filtered);
+        showToast('Forma de pago eliminada.', 'info');
+      },
+      'Eliminar Forma de Pago'
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1480,37 +1600,225 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       {/* 5. FORMAS DE PAGO */}
       {currentTab === 'CFG_FORMAS_PAGO' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div className="flex items-center space-x-3.5">
               <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20">
                 <CreditCard className="w-6 h-6" />
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">Catálogo de Formas de Pago SRI</h2>
-                <p className="text-xs text-slate-400 font-medium">Métodos de cobro homologados con la ficha técnica del SRI Ecuador</p>
+                <p className="text-xs text-slate-400 font-medium">
+                  Habilite o deshabilite los métodos de pago que se mostrarán en la caja y punto de facturación
+                </p>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleOpenAddPaymentMethod}
+              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs rounded-xl shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 shrink-0"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>NUEVA FORMA DE PAGO</span>
+            </button>
           </div>
 
           <div className="space-y-3">
             {paymentMethods.map((pm) => (
-              <div key={pm.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <span className="font-mono text-xs font-black text-orange-400 bg-slate-900 px-2 py-1 rounded border border-slate-800">
+              <div
+                key={pm.id}
+                className={`p-4 bg-slate-950 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  pm.active ? 'border-slate-800 hover:border-slate-700' : 'border-slate-850 opacity-60 bg-slate-950/60'
+                }`}
+              >
+                <div className="flex items-start sm:items-center space-x-3">
+                  <span className="font-mono text-xs font-black text-orange-400 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 shrink-0">
                     [{pm.code}]
                   </span>
-                  <span className="text-xs font-bold text-white">{pm.name}</span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-white">{pm.name}</span>
+                      {pm.shortName && (
+                        <span className="text-[10px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                          Etiqueta: {pm.shortName}
+                        </span>
+                      )}
+                      {pm.default && (
+                        <span className="text-[10px] font-black text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30 flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-amber-400" />
+                          <span>PREDETERMINADA EN CAJA</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {pm.active ? 'Visible en el modal de cobro de facturación' : 'Oculto en el punto de venta'}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <span className={`px-2 py-0.5 text-[10px] font-black rounded ${
-                    pm.active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500'
-                  }`}>
-                    {pm.active ? 'HABILITADO' : 'INACTIVO'}
-                  </span>
+
+                <div className="flex items-center space-x-2 shrink-0 self-end md:self-auto">
+                  {!pm.default && pm.active && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetDefaultPaymentMethod(pm.id)}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-amber-500/10 text-slate-400 hover:text-amber-400 border border-slate-800 hover:border-amber-500/30 rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                      title="Establecer como método preseleccionado en caja"
+                    >
+                      <Star className="w-3.5 h-3.5" />
+                      <span>Hacer Predeterminada</span>
+                    </button>
+                  )}
+
+                  {/* Toggle Switch */}
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePaymentMethod(pm.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 border cursor-pointer ${
+                      pm.active
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-850'
+                    }`}
+                  >
+                    {pm.active ? (
+                      <>
+                        <ToggleRight className="w-4 h-4 text-emerald-400" />
+                        <span>HABILITADO</span>
+                      </>
+                    ) : (
+                      <>
+                        <ToggleLeft className="w-4 h-4 text-slate-500" />
+                        <span>INACTIVO</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditPaymentMethod(pm)}
+                    className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl border border-slate-800 transition cursor-pointer"
+                    title="Editar"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+
+                  {!['01', '16', '19', '20'].includes(pm.code) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePaymentMethod(pm)}
+                      className="p-2 bg-slate-900 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 rounded-xl border border-slate-800 hover:border-rose-500/30 transition cursor-pointer"
+                      title="Eliminar"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Modal Agregar / Editar Forma de Pago */}
+          {showPaymentMethodModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-5 animate-scaleUp">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center space-x-2">
+                    <CreditCard className="w-5 h-5 text-indigo-400" />
+                    <h3 className="text-base font-black text-white">
+                      {editingPaymentMethod ? 'Editar Forma de Pago' : 'Nueva Forma de Pago'}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentMethodModal(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSavePaymentMethodForm} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Código SRI</label>
+                    <Select
+                      value={paymentMethodForm.code}
+                      onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, code: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-orange-400"
+                    >
+                      <option value="01">[01] SIN UTILIZACION DEL SISTEMA FINANCIERO (EFECTIVO)</option>
+                      <option value="16">[16] TARJETA DE DEBITO</option>
+                      <option value="19">[19] TARJETA DE CREDITO</option>
+                      <option value="20">[20] OTROS CON UTILIZACION DEL SISTEMA FINANCIERO (TRANSFERENCIA/DEPOSITO)</option>
+                      <option value="15">[15] COMPENSACION DE DEUDAS</option>
+                      <option value="21">[21] ENDOSO DE TITULOS</option>
+                      <option value="17">[17] DINERO ELECTRONICO</option>
+                      <option value="18">[18] TARJETA PREPAGO</option>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Nombre Completo SRI *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: TRANSFERENCIA BANCARIA DIRECTA"
+                      value={paymentMethodForm.name}
+                      onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, name: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Nombre Corto (Botón en Caja)</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Transferencia"
+                      value={paymentMethodForm.shortName}
+                      onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, shortName: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={paymentMethodForm.active}
+                        onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, active: e.target.checked })}
+                        className="w-4 h-4 rounded text-indigo-500 focus:ring-indigo-500 border-slate-700 bg-slate-950"
+                      />
+                      <span>Habilitado para cobro en caja y facturación</span>
+                    </label>
+
+                    <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={paymentMethodForm.default}
+                        onChange={(e) => setPaymentMethodForm({ ...paymentMethodForm, default: e.target.checked })}
+                        className="w-4 h-4 rounded text-indigo-500 focus:ring-indigo-500 border-slate-700 bg-slate-950"
+                      />
+                      <span>Establecer como método predeterminado en caja</span>
+                    </label>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPaymentMethodModal(false)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black transition shadow-lg shadow-indigo-600/20 cursor-pointer"
+                    >
+                      {editingPaymentMethod ? 'Guardar Cambios' : 'Registrar Método'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

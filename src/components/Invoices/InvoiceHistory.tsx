@@ -413,7 +413,12 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-slate-600">
-                        {getPaymentMethodLabel(inv.paymentMethod)}
+                        <span className="font-bold text-slate-800">{getPaymentMethodLabel(inv.paymentMethod)}</span>
+                        {inv.paymentReference && (
+                          <span className="block text-[10px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 mt-1 max-w-[180px] truncate" title={`Comprobante: ${inv.paymentReference}`}>
+                            N°: {inv.paymentReference}
+                          </span>
+                        )}
                       </td>
                       
                       {/* Estado Pago */}

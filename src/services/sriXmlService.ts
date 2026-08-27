@@ -103,9 +103,17 @@ export function getSriPaymentCode(method: PaymentMethod | string): string {
       return '16'; // Tarjeta de Débito
     case 'TRANSFERENCIA':
       return '20'; // Otros con utilización del sistema financiero
+    case 'COMPENSACION':
+      return '15'; // Compensación de deudas
+    case 'ENDOSO':
+      return '21'; // Endoso de títulos
     case 'CREDITO':
+    case 'CREDITO_CLIENTE':
       return '20';
     default:
+      if (typeof method === 'string' && /^\d{2}$/.test(method)) {
+        return method;
+      }
       return '01';
   }
 }

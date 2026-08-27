@@ -85,8 +85,18 @@ export interface Customer {
 }
 
 export type DocumentType = 'FACTURA' | 'BOLETA' | 'COTIZACION';
-export type PaymentMethod = 'EFECTIVO' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'CREDITO_CLIENTE';
+export type PaymentMethod = 'EFECTIVO' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'CREDITO_CLIENTE' | 'COMPENSACION' | 'ENDOSO' | 'CHEQUE' | string;
 export type InvoiceStatus = 'PAGADA' | 'PENDIENTE' | 'ANULADA';
+
+export interface PaymentMethodItem {
+  id: string;
+  code: string;
+  name: string;
+  shortName?: string;
+  methodKey?: string;
+  active: boolean;
+  default?: boolean;
+}
 
 export interface InvoiceItem {
   productId: string;
@@ -119,6 +129,7 @@ export interface Invoice {
   paymentStatus: InvoiceStatus;
   amountTendered?: number; // Monto entregado (si fue efectivo)
   changeGiven?: number; // Vuelto / Cambio entregado
+  paymentReference?: string; // Número de comprobante o referencia de transferencia / tarjeta
   notes?: string;
   sellerName: string;
   // SRI Ecuador Electronic Invoicing fields

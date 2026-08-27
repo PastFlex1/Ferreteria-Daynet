@@ -140,9 +140,26 @@ export default function App() {
     }
   }, [usersList, setUsersList]);
 
+  // Synchronize browser tab title with configured store settings and preserve the orange wrench SVG favicon
+  useEffect(() => {
+    if (settings?.storeName) {
+      document.title = `${settings.storeName} | Facturación & ERP Ferretero`;
+    }
+
+    const wrenchSvgFavicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f97316' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E";
+    let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.href = wrenchSvgFavicon;
+  }, [settings?.storeName]);
+
   const [units, setUnits] = useFirestoreSync<any[]>('ferreteria_units', []);
   const [categories, setCategories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', []);
   const [promotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
+  const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
   const [products, setProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
   const [customers, setCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
   const dbCustomers = customers.filter(c => c.id !== 'cust-general');
@@ -573,6 +590,7 @@ export default function App() {
               initialDocumentType={posDocumentType}
               initialCartItems={posInitialCart}
               initialCustomer={posInitialCustomer}
+              paymentMethods={paymentMethods}
             />
           ) : (
             <div className="bg-white border border-slate-200/90 rounded-3xl p-8 max-w-lg mx-auto mt-12 text-center space-y-6 shadow-lg ring-1 ring-slate-900/5 animate-slideUp">

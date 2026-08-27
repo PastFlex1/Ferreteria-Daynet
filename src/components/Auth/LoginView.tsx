@@ -77,13 +77,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin, storeName,
             
             <div className="space-y-1 pt-1.5">
               <h2 className="text-xl font-black tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
-                {storeName.toUpperCase().includes('DAYNET') ? (
-                  <span>
-                    FERRETERÍA <span className="text-orange-500 font-extrabold">DAYNET</span>
-                  </span>
-                ) : (
-                  <span>{storeName}</span>
-                )}
+                {storeName || 'Ferretería'}
               </h2>
               <p className="text-xs text-slate-400 font-semibold tracking-wider uppercase">
                 Control de Acceso • Punto de Venta

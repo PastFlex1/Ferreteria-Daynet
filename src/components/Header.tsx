@@ -295,11 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
           <div>
             <h1 className="text-base font-black tracking-tight text-white">
-              {settings.storeName.toUpperCase().includes('DAYNET') ? (
-                <span>FERRETERÍA <span className="text-orange-500">DAYNET</span></span>
-              ) : (
-                <span>{settings.storeName}</span>
-              )}
+              {settings.storeName || 'Ferretería'}
             </h1>
             <p className="text-[10px] text-slate-500 font-mono leading-none mt-0.5">{settings.taxId}</p>
           </div>

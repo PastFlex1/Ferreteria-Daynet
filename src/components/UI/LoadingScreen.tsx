@@ -67,7 +67,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
             <span>SISTEMA DE FACTURACIÓN & POS</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            FERRETERÍA <span className="text-orange-500">DAYNET</span>
+            {storeName || 'FERRETERÍA DAYNET'}
           </h1>
           <p className="text-xs text-slate-400 font-medium">
             Control de Inventario, Ventas, Caja & Comprobantes SRI

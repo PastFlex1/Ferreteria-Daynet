@@ -130,12 +130,12 @@ export const defaultAssetLocations = [
 ];
 
 export const defaultPaymentMethods = [
-  { id: '01', code: '01', name: 'SIN UTILIZACION DEL SISTEMA FINANCIERO (EFECTIVO)', active: true, default: true },
-  { id: '20', code: '20', name: 'CON UTILIZACION DEL SISTEMA FINANCIERO (TRANSFERENCIA / DEPOSITO)', active: true, default: false },
-  { id: '19', code: '19', name: 'TARJETA DE CREDITO', active: true, default: false },
-  { id: '16', code: '16', name: 'TARJETA DE DEBITO', active: true, default: false },
-  { id: '15', code: '15', name: 'COMPENSACION DE DEUDAS', active: true, default: false },
-  { id: '21', code: '21', name: 'ENDOSO DE TITULOS', active: false, default: false }
+  { id: '01', code: '01', name: 'SIN UTILIZACION DEL SISTEMA FINANCIERO (EFECTIVO)', shortName: 'Efectivo', methodKey: 'EFECTIVO', active: true, default: true },
+  { id: '16', code: '16', name: 'TARJETA DE DEBITO', shortName: 'T. Débito', methodKey: 'TARJETA_DEBITO', active: true, default: false },
+  { id: '19', code: '19', name: 'TARJETA DE CREDITO', shortName: 'T. Crédito', methodKey: 'TARJETA_CREDITO', active: true, default: false },
+  { id: '20', code: '20', name: 'CON UTILIZACION DEL SISTEMA FINANCIERO (TRANSFERENCIA / DEPOSITO)', shortName: 'Transferencia', methodKey: 'TRANSFERENCIA', active: true, default: false },
+  { id: '15', code: '15', name: 'COMPENSACION DE DEUDAS', shortName: 'Compensación', methodKey: 'COMPENSACION', active: false, default: false },
+  { id: '21', code: '21', name: 'ENDOSO DE TITULOS', shortName: 'Endoso Títulos', methodKey: 'ENDOSO', active: false, default: false }
 ];
 
 export const defaultUsersList = [

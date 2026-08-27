@@ -516,6 +516,11 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                                   : activeInvoice.paymentMethod === 'TRANSFERENCIA'
                                   ? '20 - OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO'
                                   : getPaymentMethodLabel(activeInvoice.paymentMethod)}
+                                {activeInvoice.paymentReference && (
+                                  <span className="block text-[9px] font-mono text-slate-700 mt-0.5 normal-case font-bold">
+                                    Ref / Comprobante: {activeInvoice.paymentReference}
+                                  </span>
+                                )}
                               </td>
                               <td className="p-1.5 text-right font-mono font-bold">${activeInvoice.total.toFixed(2)}</td>
                             </tr>
@@ -717,6 +722,9 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-1 text-[10px]">
                 <p>FORMA PAGO: {getPaymentMethodLabel(activeInvoice.paymentMethod)}</p>
+                {activeInvoice.paymentReference && (
+                  <p className="font-mono font-bold">N° COMPROBANTE: {activeInvoice.paymentReference}</p>
+                )}
                 {activeInvoice.amountTendered !== undefined && (
                   <>
                     <p>ENTREGADO: {formatCurrency(activeInvoice.amountTendered, settings.currencySymbol)}</p>

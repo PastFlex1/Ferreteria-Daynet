@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   DollarSign, 
@@ -11,9 +11,12 @@ import {
   AlertCircle,
   Table,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Scale,
+  FileText
 } from 'lucide-react';
-import { CartItem, Customer, DocumentType, PaymentMethod, StoreSettings } from '../../types';
+import { CartItem, Customer, DocumentType, PaymentMethod, PaymentMethodItem, StoreSettings } from '../../types';
+import { defaultPaymentMethods } from '../../data/initialData';
 import { formatCurrency, getDocumentTypeName } from '../../utils/formatters';
 import { SriTotalsTable } from './SriTotalsTable';
 import { calculateSriTotals } from '../../utils/sriCalculations';
@@ -29,11 +32,13 @@ interface PaymentModalProps {
   taxTotal: number;
   total: number;
   settings: StoreSettings;
+  paymentMethods?: PaymentMethodItem[];
   onCompleteSale: (
     paymentMethod: PaymentMethod,
     amountTendered?: number,
     changeGiven?: number,
-    notes?: string
+    notes?: string,
+    paymentReference?: string
   ) => void;
 }
 
@@ -50,12 +55,91 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   taxTotal,
   total,
   settings,
+  paymentMethods,
   onCompleteSale,
 }) => {
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('EFECTIVO');
+  // Normalize and filter active payment methods
+  const availableMethods = useMemo(() => {
+    const rawList = paymentMethods && paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods;
+    const activeList = rawList.filter((pm) => pm.active !== false);
+
+    if (activeList.length === 0) {
+      return [{
+        id: '01',
+        code: '01',
+        key: 'EFECTIVO' as PaymentMethod,
+        label: 'Efectivo',
+        icon: <DollarSign className="w-4 h-4" />,
+        isDefault: true,
+      }];
+    }
+
+    return activeList.map((pm) => {
+      let key: PaymentMethod = (pm.methodKey || pm.id) as PaymentMethod;
+      let label = pm.shortName || pm.name;
+      let icon = <CreditCard className="w-4 h-4" />;
+
+      if (pm.code === '01' || pm.name.toUpperCase().includes('EFECTIVO') || key === 'EFECTIVO') {
+        key = 'EFECTIVO';
+        label = pm.shortName || 'Efectivo';
+        icon = <DollarSign className="w-4 h-4" />;
+      } else if (pm.code === '16' || pm.name.toUpperCase().includes('DEBITO') || key === 'TARJETA_DEBITO') {
+        key = 'TARJETA_DEBITO';
+        label = pm.shortName || 'T. Débito';
+        icon = <CreditCard className="w-4 h-4" />;
+      } else if (pm.code === '19' || (pm.name.toUpperCase().includes('CREDITO') && !pm.name.toUpperCase().includes('CLIENTE')) || key === 'TARJETA_CREDITO') {
+        key = 'TARJETA_CREDITO';
+        label = pm.shortName || 'T. Crédito';
+        icon = <CreditCard className="w-4 h-4" />;
+      } else if (pm.code === '20' || pm.name.toUpperCase().includes('TRANSFERENCIA') || key === 'TRANSFERENCIA') {
+        key = 'TRANSFERENCIA';
+        label = pm.shortName || 'Transferencia';
+        icon = <ArrowLeftRight className="w-4 h-4" />;
+      } else if (pm.code === '15' || pm.name.toUpperCase().includes('COMPENSACION') || key === 'COMPENSACION') {
+        key = 'COMPENSACION';
+        label = pm.shortName || 'Compensación';
+        icon = <Scale className="w-4 h-4" />;
+      } else if (pm.code === '21' || pm.name.toUpperCase().includes('ENDOSO') || key === 'ENDOSO') {
+        key = 'ENDOSO';
+        label = pm.shortName || 'Endoso';
+        icon = <FileText className="w-4 h-4" />;
+      } else if (pm.code === 'CREDITO' || pm.name.toUpperCase().includes('CLIENTE') || key === 'CREDITO_CLIENTE') {
+        key = 'CREDITO_CLIENTE';
+        label = pm.shortName || 'Crédito Directo';
+        icon = <Users className="w-4 h-4" />;
+      }
+
+      return {
+        id: pm.id,
+        code: pm.code,
+        key,
+        label,
+        icon,
+        isDefault: !!pm.default,
+      };
+    });
+  }, [paymentMethods]);
+
+  const defaultKey = useMemo(() => {
+    const def = availableMethods.find((m) => m.isDefault) || availableMethods[0];
+    return def ? def.key : 'EFECTIVO';
+  }, [availableMethods]);
+
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(defaultKey);
   const [amountTenderedStr, setAmountTenderedStr] = useState<string>(total.toFixed(4));
+  const [transferReference, setTransferReference] = useState('');
   const [notes, setNotes] = useState('');
   const [propinaEnabled, setPropinaEnabled] = useState(false);
+
+  // Sync selected method when modal opens or available methods change
+  useEffect(() => {
+    if (isOpen) {
+      setPaymentMethod(defaultKey);
+      setAmountTenderedStr(total.toFixed(4));
+      setTransferReference('');
+      setNotes('');
+    }
+  }, [isOpen, defaultKey, total]);
 
   if (!isOpen) return null;
 
@@ -88,7 +172,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       paymentMethod,
       paymentMethod === 'EFECTIVO' ? amountTendered : undefined,
       paymentMethod === 'EFECTIVO' ? Math.max(0, changeGiven) : undefined,
-      notes.trim() || undefined
+      notes.trim() || undefined,
+      (paymentMethod === 'TRANSFERENCIA' || paymentMethod === '20') ? transferReference.trim() || undefined : undefined
     );
   };
 
@@ -146,34 +231,40 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
           {/* Payment Method Selector */}
           <div>
-            <label className="block text-xs font-black text-slate-800 uppercase tracking-wider mb-2">
-              Seleccionar Forma de Pago
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {[
-                { id: 'EFECTIVO', label: 'Efectivo', icon: <DollarSign className="w-4 h-4" /> },
-                { id: 'TARJETA_DEBITO', label: 'T. Débito', icon: <CreditCard className="w-4 h-4" /> },
-                { id: 'TARJETA_CREDITO', label: 'T. Crédito', icon: <CreditCard className="w-4 h-4" /> },
-                { id: 'TRANSFERENCIA', label: 'Transferencia', icon: <ArrowLeftRight className="w-4 h-4" /> },
-              ].map((m) => (
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-black text-slate-800 uppercase tracking-wider">
+                Seleccionar Forma de Pago
+              </label>
+              <span className="text-[10px] text-slate-500 font-bold">
+                {availableMethods.length} método(s) habilitado(s)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {availableMethods.map((m) => (
                 <button
-                  key={m.id}
+                  key={m.id || m.key}
                   type="button"
-                  onClick={() => setPaymentMethod(m.id as PaymentMethod)}
+                  onClick={() => setPaymentMethod(m.key)}
                   className={`flex flex-col items-center justify-center p-3.5 rounded-xl border text-xs font-black transition cursor-pointer ${
-                    paymentMethod === m.id
+                    paymentMethod === m.key
                       ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white border-orange-500 shadow-md shadow-orange-500/20'
                       : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200/90'
                   }`}
                 >
                   <div className="mb-1">{m.icon}</div>
                   <span>{m.label}</span>
+                  {m.code && (
+                    <span className={`text-[9px] font-mono mt-0.5 ${paymentMethod === m.key ? 'text-white/80' : 'text-slate-400'}`}>
+                      SRI [{m.code}]
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
 
-            {/* Contractor Credit Method Button if customer has credit limit */}
-            {customer.creditLimit > 0 && (
+            {/* Contractor Credit Method Button if customer has credit limit and not already in grid */}
+            {customer.creditLimit > 0 && !availableMethods.some(m => m.key === 'CREDITO_CLIENTE') && (
               <button
                 type="button"
                 onClick={() => setPaymentMethod('CREDITO_CLIENTE')}
@@ -255,6 +346,34 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   {formatCurrency(Math.abs(changeGiven), settings.currencySymbol)}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Transfer / Bank Voucher Reference Input */}
+          {(paymentMethod === 'TRANSFERENCIA' || paymentMethod === '20' || paymentMethod.toLowerCase().includes('transf')) && (
+            <div className="bg-indigo-50/80 p-4 rounded-2xl border border-indigo-200/90 space-y-2.5 animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
+                  <ArrowLeftRight className="w-4 h-4 text-indigo-600" />
+                  <span>Número de Comprobante / Referencia Bancaria</span>
+                </label>
+                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/90 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                  Transferencia / Depósito
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Ej: Transf. #0098412, N° Comprobante 847291, Depósito..."
+                  value={transferReference}
+                  onChange={(e) => setTransferReference(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-white border border-indigo-200 text-slate-900 text-xs font-mono font-bold rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs placeholder:font-sans placeholder:font-normal"
+                  autoFocus
+                />
+              </div>
+              <p className="text-[11px] text-indigo-700/90 font-medium">
+                Este número quedará asociado a la factura y visible en el comprobante de venta emitido.
+              </p>
             </div>
           )}
 

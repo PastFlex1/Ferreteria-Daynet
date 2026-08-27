@@ -10,6 +10,7 @@ import {
   DocumentType, 
   Invoice, 
   PaymentMethod, 
+  PaymentMethodItem,
   Product, 
   ProductCategory,
   Promotion,
@@ -42,6 +43,7 @@ interface BillingTerminalProps {
   initialDocumentType?: DocumentType;
   initialCartItems?: CartItem[];
   initialCustomer?: Customer | null;
+  paymentMethods?: PaymentMethodItem[];
 }
 
 export const BillingTerminal: React.FC<BillingTerminalProps> = ({
@@ -63,8 +65,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   secQuote = '000001',
   setSecQuote,
   initialDocumentType = 'FACTURA',
-  initialCartItems,
-  initialCustomer,
+  initialCartItems = [],
+  initialCustomer = null,
+  paymentMethods,
 }) => {
   const { showToast } = useModal();
   const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
@@ -283,7 +286,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     paymentMethod: PaymentMethod,
     amountTendered?: number,
     changeGiven?: number,
-    notes?: string
+    notes?: string,
+    paymentReference?: string
   ) => {
     // Generate Document Number
     const docInfo = generateDocumentNumber(
@@ -326,6 +330,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       paymentStatus: documentType === 'COTIZACION' ? 'PENDIENTE' : 'PAGADA',
       amountTendered,
       changeGiven,
+      paymentReference,
       notes,
       sellerName: sellerName || 'Juan Pérez',
     };
@@ -453,6 +458,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         taxTotal={taxTotal}
         total={total}
         settings={settings}
+        paymentMethods={paymentMethods}
         onCompleteSale={handleCompleteSale}
       />
 
