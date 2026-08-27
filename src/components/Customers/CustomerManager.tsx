@@ -769,7 +769,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
       {/* 1. New / Edit Customer Modal */}
       {isCustomerModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
-          <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl ring-1 ring-slate-900/10">
+          <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl ring-1 ring-slate-900/10">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-orange-500" />

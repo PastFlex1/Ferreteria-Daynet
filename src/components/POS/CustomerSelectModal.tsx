@@ -97,7 +97,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
-      <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-slate-900/10">
+      <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-slate-900/10">
         {/* Modal Header */}
         <div className="px-6 py-4.5 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">

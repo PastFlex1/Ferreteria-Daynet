@@ -80,15 +80,29 @@ export const LocationSelectSection: React.FC<LocationSelectSectionProps> = ({
         </span>
       </div>
 
-      {/* 3 Dropdown Columns with generous spacing */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+      {/* Dropdown Columns with spacious layout */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* 1. Country */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase flex items-center gap-1">
-              <Globe className="w-3 h-3 text-slate-400" />
-              <span>País {required && <span className="text-rose-500">*</span>}</span>
-            </label>
+        <div className="space-y-1.5 min-w-0">
+          <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <Globe className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">País {required && <span className="text-rose-500">*</span>}</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <Select
+                value={country || 'Ecuador'}
+                onChange={(e) => onCountryChange(e.target.value)}
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
+              >
+                <option value="">-- Seleccionar País --</option>
+                {countryList.map((c, idx) => (
+                  <option key={`${c}-${idx}`} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <button
               type="button"
               onClick={(e) => {
@@ -97,34 +111,35 @@ export const LocationSelectSection: React.FC<LocationSelectSectionProps> = ({
                 setAddingType('country');
                 setNewItemName('');
               }}
-              className="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 font-black border border-orange-500/20 flex items-center gap-0.5 cursor-pointer transition active:scale-95"
+              className="h-[38px] px-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 hover:text-orange-700 font-bold border border-orange-500/25 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 shrink-0 shadow-2xs"
               title="Agregar nuevo país a la lista"
             >
-              <Plus className="w-2.5 h-2.5" />
-              <span>Nuevo</span>
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             </button>
           </div>
-          <Select
-            value={country || 'Ecuador'}
-            onChange={(e) => onCountryChange(e.target.value)}
-            className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
-          >
-            <option value="">-- Seleccionar País --</option>
-            {countryList.map((c, idx) => (
-              <option key={`${c}-${idx}`} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
         </div>
 
         {/* 2. Province */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase flex items-center gap-1">
-              <Map className="w-3 h-3 text-slate-400" />
-              <span>Provincia {required && <span className="text-rose-500">*</span>}</span>
-            </label>
+        <div className="space-y-1.5 min-w-0">
+          <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <Map className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">Provincia {required && <span className="text-rose-500">*</span>}</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <Select
+                value={province}
+                onChange={(e) => onProvinceChange(e.target.value)}
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
+              >
+                <option value="">-- Seleccionar --</option>
+                {provinceList.map((p, idx) => (
+                  <option key={`${p}-${idx}`} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <button
               type="button"
               onClick={(e) => {
@@ -133,34 +148,35 @@ export const LocationSelectSection: React.FC<LocationSelectSectionProps> = ({
                 setAddingType('province');
                 setNewItemName('');
               }}
-              className="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 font-black border border-orange-500/20 flex items-center gap-0.5 cursor-pointer transition active:scale-95"
+              className="h-[38px] px-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 hover:text-orange-700 font-bold border border-orange-500/25 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 shrink-0 shadow-2xs"
               title="Agregar nueva provincia a la lista"
             >
-              <Plus className="w-2.5 h-2.5" />
-              <span>Nueva</span>
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             </button>
           </div>
-          <Select
-            value={province}
-            onChange={(e) => onProvinceChange(e.target.value)}
-            className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
-          >
-            <option value="">-- Seleccionar Provincia --</option>
-            {provinceList.map((p, idx) => (
-              <option key={`${p}-${idx}`} value={p}>
-                {p}
-              </option>
-            ))}
-          </Select>
         </div>
 
         {/* 3. City */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-1">
-            <label className="text-[11px] font-bold text-slate-700 uppercase flex items-center gap-1">
-              <MapPin className="w-3 h-3 text-slate-400" />
-              <span>Ciudad {required && <span className="text-rose-500">*</span>}</span>
-            </label>
+        <div className="space-y-1.5 min-w-0">
+          <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="truncate">Ciudad {required && <span className="text-rose-500">*</span>}</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <Select
+                value={city}
+                onChange={(e) => onCityChange(e.target.value)}
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
+              >
+                <option value="">-- Seleccionar --</option>
+                {cityList.map((c, idx) => (
+                  <option key={`${c}-${idx}`} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </Select>
+            </div>
             <button
               type="button"
               onClick={(e) => {
@@ -169,25 +185,12 @@ export const LocationSelectSection: React.FC<LocationSelectSectionProps> = ({
                 setAddingType('city');
                 setNewItemName('');
               }}
-              className="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 font-black border border-orange-500/20 flex items-center gap-0.5 cursor-pointer transition active:scale-95"
+              className="h-[38px] px-2.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 hover:text-orange-700 font-bold border border-orange-500/25 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 shrink-0 shadow-2xs"
               title="Agregar nueva ciudad a la lista"
             >
-              <Plus className="w-2.5 h-2.5" />
-              <span>Nueva</span>
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
             </button>
           </div>
-          <Select
-            value={city}
-            onChange={(e) => onCityChange(e.target.value)}
-            className="w-full bg-white border border-slate-200 hover:border-slate-300 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 rounded-xl text-xs font-bold text-slate-800 shadow-2xs py-2.5"
-          >
-            <option value="">-- Seleccionar Ciudad --</option>
-            {cityList.map((c, idx) => (
-              <option key={`${c}-${idx}`} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
         </div>
       </div>
 
