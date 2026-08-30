@@ -1,5 +1,5 @@
 import { Select } from '../Shared/Select';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { defaultUsersList, defaultPaymentMethods, defaultTaxRates } from '../../data/initialData';
@@ -58,6 +58,7 @@ import {
 import { SriBackendService } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
+import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
 
 interface SettingsManagerProps {
   subTab: SettingsSubTab | 'SETTINGS';
@@ -157,6 +158,61 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [blockNoStockSales, setBlockNoStockSales] = useFirestoreSync<boolean>('ferreteria_settings_block_no_stock_sales', true);
   const [minStockAlert, setMinStockAlert] = useFirestoreSync<boolean>('ferreteria_settings_min_stock_alert', true);
   const [autoSessionTimeout, setAutoSessionTimeout] = useFirestoreSync<string>('ferreteria_settings_auto_session_timeout', '30');
+
+  // Backup & Restore State
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
+  const [pendingBackupData, setPendingBackupData] = useState<BackupPayload | null>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Export Backup
+  const handleExportBackupNow = async () => {
+    setIsExportingBackup(true);
+    try {
+      const result = await exportDatabaseBackup(settings);
+      showToast(`Copia de seguridad descargada exitosamente (${result.fileName})`, 'success');
+    } catch (err: any) {
+      console.error('Error exporting backup:', err);
+      showAlert(`Error al generar la copia de seguridad: ${err.message || err}`, 'Error de Respaldo', 'warning');
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
+  // Select file to restore
+  const handleFileSelectForRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    try {
+      const backupPayload = await inspectBackupFile(file);
+      setPendingBackupData(backupPayload);
+      setShowRestoreModal(true);
+    } catch (err: any) {
+      console.error('Error inspecting backup file:', err);
+      showAlert(`El archivo seleccionado no es válido: ${err.message || err}`, 'Archivo Inválido', 'warning');
+    }
+  };
+
+  // Execute restore
+  const handleExecuteRestore = async () => {
+    if (!pendingBackupData) return;
+    setIsRestoringBackup(true);
+    try {
+      const result = await restoreDatabaseBackup(pendingBackupData);
+      setShowRestoreModal(false);
+      showToast(`Se restauraron ${result.restoredCount} colecciones con éxito. Recargando sistema...`, 'success');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err: any) {
+      console.error('Error restoring backup:', err);
+      showAlert(`Error al restaurar los datos: ${err.message || err}`, 'Error de Restauración', 'warning');
+      setIsRestoringBackup(false);
+    }
+  };
 
   // Tax Management Handlers
   const handleOpenAddTax = () => {
@@ -2179,6 +2235,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       {/* 9. BACKUP */}
       {currentTab === 'CFG_BACKUP' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+          {/* Hidden File Input for Backup Restore */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelectForRestore}
+            accept=".json,application/json"
+            className="hidden"
+          />
+
           <div className="flex items-center justify-between pb-4 border-b border-slate-800">
             <div className="flex items-center space-x-3.5">
               <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
@@ -2186,55 +2251,88 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">Respaldo & Copia de Seguridad</h2>
-                <p className="text-xs text-slate-400 font-medium">Exportación de datos de la empresa, productos, clientes y facturas</p>
+                <p className="text-xs text-slate-400 font-medium">Exportación y restauración completa de base de datos, inventario, clientes y facturación</p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
-              <div className="flex items-center space-x-3">
-                <Download className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-xs font-bold text-white uppercase">Descargar Copia de Seguridad JSON</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Export Card */}
+            <div className="p-5 bg-slate-950 rounded-2xl border border-slate-800 space-y-4 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-white uppercase">Descargar Copia de Seguridad</h3>
+                    <span className="text-[10px] text-emerald-400 font-bold">Archivo .JSON Completo</span>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed pt-1">
+                  Genera y descarga un archivo <strong className="text-slate-200">.json</strong> con toda la información del sistema: catálogo de productos, existencias, clientes, historial de comprobantes SRI, configuración y tablas contables.
+                </p>
               </div>
-              <p className="text-[10px] text-slate-400">
-                Exporta la base de datos completa con inventario, clientes, historial de facturas y configuración en un archivo .json de respaldo.
-              </p>
+
               <button
-                onClick={() => showAlert("Descargando archivo de respaldo de base de datos (backup.json)...", "Copia de Seguridad", "success")}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                type="button"
+                disabled={isExportingBackup}
+                onClick={handleExportBackupNow}
+                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-black rounded-xl shadow-lg shadow-emerald-600/25 transition cursor-pointer flex items-center justify-center gap-2"
               >
-                EXPORTAR BACKUP AHORA
+                {isExportingBackup ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>GENERANDO RESPALDO...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    <span>EXPORTAR Y DESCARGAR BACKUP</span>
+                  </>
+                )}
               </button>
             </div>
 
-            <div className="p-5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
-              <div className="flex items-center space-x-3">
-                <Upload className="w-5 h-5 text-blue-400" />
-                <h3 className="text-xs font-bold text-white uppercase">Restaurar Copia de Seguridad</h3>
+            {/* Restore Card */}
+            <div className="p-5 bg-slate-950 rounded-2xl border border-slate-800 space-y-4 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-blue-500/10 text-blue-400 rounded-xl">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-white uppercase">Restaurar Copia de Seguridad</h3>
+                    <span className="text-[10px] text-blue-400 font-bold">Importar Archivo .JSON</span>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed pt-1">
+                  Carga un archivo de respaldo generado previamente para restaurar el sistema. Se te mostrará una vista previa de los datos antes de aplicar los cambios.
+                </p>
               </div>
-              <p className="text-[10px] text-slate-400">
-                Selecciona un archivo .json de copia de seguridad previo para restaurar los datos del sistema.
-              </p>
+
               <button
-                onClick={() => showAlert("Seleccione el archivo JSON para importar la copia de seguridad.", "Restaurar Backup", "info")}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-black rounded-xl transition cursor-pointer flex items-center justify-center gap-2"
               >
-                RESTAURAR DESDE ARCHIVO
+                <Upload className="w-4 h-4" />
+                <span>SELECCIONAR ARCHIVO Y RESTAURAR</span>
               </button>
             </div>
           </div>
 
           {/* DANGER ZONE: CLEAN ALL MOCK DATA */}
-          <div className="p-5 bg-rose-950/20 border border-rose-800/40 rounded-xl space-y-3">
+          <div className="p-5 bg-rose-950/20 border border-rose-800/40 rounded-2xl space-y-3">
             <div className="flex items-center space-x-3 text-rose-400">
               <Trash2 className="w-5 h-5" />
               <h3 className="text-xs font-bold uppercase">Limpiar Todos los Datos de Prueba</h3>
             </div>
-            <p className="text-[11px] text-slate-300">
-              Elimina permanentemente del almacenamiento local todos los clientes de prueba, productos, facturas, compras, proveedores y registros para dejar el sistema listo para producción a cero.
+            <p className="text-xs text-slate-300">
+              Elimina permanentemente del almacenamiento todos los clientes de prueba, productos, facturas, compras, proveedores y registros para dejar el sistema listo para producción a cero.
             </p>
             <button
+              type="button"
               onClick={() => {
                 showConfirm(
                   "¿Está seguro de que desea eliminar TODOS los datos de prueba del sistema? Esta acción dejará las tablas vacías.",
@@ -2256,6 +2354,121 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <Trash2 className="w-4 h-4" />
               <span>ELIMINAR TODOS LOS DATOS DE PRUEBA (RESTABLECER SISTEMA)</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CONFIRMACIÓN DE RESTAURACIÓN DE BACKUP ── */}
+      {showRestoreModal && pendingBackupData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-lg p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-2xl">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Confirmar Restauración</h3>
+                  <p className="text-xs text-slate-400">Verifique los datos del respaldo antes de continuar</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isRestoringBackup) {
+                    setShowRestoreModal(false);
+                    setPendingBackupData(null);
+                  }
+                }}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+                <div className="flex justify-between text-slate-300 font-medium">
+                  <span>Origen del Respaldo:</span>
+                  <strong className="text-white">{pendingBackupData.metadata.storeName}</strong>
+                </div>
+                <div className="flex justify-between text-slate-300 font-medium">
+                  <span>RUC / Identificación:</span>
+                  <strong className="text-white font-mono">{pendingBackupData.metadata.taxId}</strong>
+                </div>
+                <div className="flex justify-between text-slate-300 font-medium">
+                  <span>Fecha de Creación:</span>
+                  <strong className="text-white font-mono">
+                    {new Date(pendingBackupData.metadata.exportedAt).toLocaleString('es-EC')}
+                  </strong>
+                </div>
+                <div className="flex justify-between text-slate-300 font-medium">
+                  <span>Versión del Sistema:</span>
+                  <strong className="text-emerald-400">v{pendingBackupData.metadata.version}</strong>
+                </div>
+              </div>
+
+              {/* Conteo de registros */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-center">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Productos</div>
+                  <div className="text-lg font-black text-white font-mono">
+                    {pendingBackupData.metadata.summary.products}
+                  </div>
+                </div>
+                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-center">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Clientes</div>
+                  <div className="text-lg font-black text-white font-mono">
+                    {pendingBackupData.metadata.summary.customers}
+                  </div>
+                </div>
+                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-center">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Facturas</div>
+                  <div className="text-lg font-black text-white font-mono">
+                    {pendingBackupData.metadata.summary.invoices}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-300 flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" />
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Atención:</strong> La restauración sobreescribirá la base de datos actual con la información contenida en este archivo de respaldo.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isRestoringBackup}
+                onClick={() => {
+                  setShowRestoreModal(false);
+                  setPendingBackupData(null);
+                }}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isRestoringBackup}
+                onClick={handleExecuteRestore}
+                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-600/30 transition cursor-pointer flex items-center gap-2"
+              >
+                {isRestoringBackup ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Restaurando Base de Datos...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Confirmar y Restaurar Datos</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
