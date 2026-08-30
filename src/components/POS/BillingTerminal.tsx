@@ -42,7 +42,7 @@ import {
 import { formatCurrency, generateDocumentNumber } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { defaultEmployees, defaultUsersList } from '../../data/initialData';
+import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
 import { calculateSriTotals } from '../../utils/sriCalculations';
 import { CustomerSelectModal } from './CustomerSelectModal';
 import { PaymentModal } from './PaymentModal';
@@ -103,6 +103,57 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const { showToast, showAlert } = useModal();
   const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
   const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [syncedPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
+
+  // Dynamic payment methods list connected in real-time to Settings
+  const activePaymentMethodsList = useMemo(() => {
+    const rawList = (paymentMethods && paymentMethods.length > 0) 
+      ? paymentMethods 
+      : (syncedPaymentMethods && syncedPaymentMethods.length > 0) 
+      ? syncedPaymentMethods 
+      : defaultPaymentMethods;
+
+    const activeList = rawList.filter((pm: any) => pm.active !== false);
+
+    if (activeList.length === 0) {
+      return [{ key: 'EFECTIVO' as PaymentMethod, label: 'Efectivo', isDefault: true, code: '01' }];
+    }
+
+    return activeList.map((pm: any) => {
+      let key: PaymentMethod = (pm.methodKey || pm.id) as PaymentMethod;
+      let label = pm.shortName || pm.name;
+
+      if (pm.code === '01' || pm.name?.toUpperCase().includes('EFECTIVO') || key === 'EFECTIVO') {
+        key = 'EFECTIVO';
+        label = pm.shortName || 'Efectivo';
+      } else if (pm.code === '16' || pm.name?.toUpperCase().includes('DEBITO') || key === 'TARJETA_DEBITO') {
+        key = 'TARJETA_DEBITO';
+        label = pm.shortName || 'Tarjeta Débito';
+      } else if (pm.code === '19' || (pm.name?.toUpperCase().includes('CREDITO') && !pm.name?.toUpperCase().includes('CLIENTE')) || key === 'TARJETA_CREDITO') {
+        key = 'TARJETA_CREDITO';
+        label = pm.shortName || 'Tarjeta Crédito';
+      } else if (pm.code === '20' || pm.name?.toUpperCase().includes('TRANSFERENCIA') || key === 'TRANSFERENCIA') {
+        key = 'TRANSFERENCIA';
+        label = pm.shortName || 'Transferencia';
+      } else if (pm.code === '15' || pm.name?.toUpperCase().includes('COMPENSACION') || key === 'COMPENSACION') {
+        key = 'COMPENSACION';
+        label = pm.shortName || 'Compensación';
+      } else if (pm.code === '21' || pm.name?.toUpperCase().includes('ENDOSO') || key === 'ENDOSO') {
+        key = 'ENDOSO';
+        label = pm.shortName || 'Endoso';
+      } else if (pm.code === 'CRED' || pm.name?.toUpperCase().includes('CLIENTE') || key === 'CREDITO_CLIENTE') {
+        key = 'CREDITO_CLIENTE';
+        label = pm.shortName || 'Crédito';
+      }
+
+      return {
+        key,
+        label,
+        isDefault: !!pm.default,
+        code: pm.code || '01',
+      };
+    });
+  }, [paymentMethods, syncedPaymentMethods]);
 
   // Sellers
   const sellerOptions = useMemo(() => {
@@ -139,7 +190,10 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
 
   // Payment Selection
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('EFECTIVO');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>(() => {
+    const defaultPm = defaultPaymentMethods.find((pm: any) => pm.default);
+    return (defaultPm?.methodKey as PaymentMethod) || 'EFECTIVO';
+  });
   const [cashAmountTendered, setCashAmountTendered] = useState<string>('');
   const [paymentReference, setPaymentReference] = useState<string>('');
   const [propinaEnabled, setPropinaEnabled] = useState<boolean>(false);
@@ -427,8 +481,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCustomerSearch('');
     setProductSearch('');
     setCashAmountTendered('');
-    setPaymentReference('');
-    setSelectedPaymentMethod('EFECTIVO');
+    const defaultPm = activePaymentMethodsList.find((pm) => pm.isDefault);
+    setSelectedPaymentMethod(defaultPm ? defaultPm.key : 'EFECTIVO');
     setPropinaEnabled(false);
     setDocumentType('FACTURA');
     setIsCustomerDropdownOpen(false);
@@ -645,13 +699,6 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       );
     }
   };
-
-  const paymentMethodsList: { key: PaymentMethod; label: string }[] = [
-    { key: 'EFECTIVO', label: 'Efectivo' },
-    { key: 'TARJETA_DEBITO', label: 'Tarjeta débito' },
-    { key: 'TARJETA_CREDITO', label: 'Tarjeta crédito' },
-    { key: 'TRANSFERENCIA', label: 'Transferencia' },
-  ];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 max-w-[1920px] mx-auto pb-10">
@@ -1320,7 +1367,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
             {/* Checkbox / Pill Selectors */}
             <div className="flex flex-wrap items-center gap-2">
-              {paymentMethodsList.map((pm) => (
+              {activePaymentMethodsList.map((pm) => (
                 <button
                   key={pm.key}
                   type="button"
