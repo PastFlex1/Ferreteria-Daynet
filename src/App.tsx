@@ -300,7 +300,7 @@ export default function App() {
 
     const targetCustomer: Customer = customerMatch || {
       id: `cust-${Date.now()}`,
-      docType: order.customerRuc && order.customerRuc.length === 13 ? 'RUC' : 'DNI',
+      docType: order.customerRuc && order.customerRuc.length === 13 ? 'RUC' : 'C.I.',
       docNumber: order.customerRuc || '9999999999',
       name: order.customerName,
       creditLimit: 0,
@@ -568,77 +568,31 @@ export default function App() {
         ) : (
           <>
         {(activeTab === 'CAJA') && (
-          cashSession.status === 'ABIERTA' ? (
-            <BillingTerminal
-              products={products}
-              customers={allCustomers}
-              settings={settings}
-              categories={categories}
-              promotions={promotions}
-              onInvoiceCreated={handleInvoiceCreated}
-              onUpdateInvoice={handleUpdateInvoice}
-              onCreateCustomer={handleCreateCustomer}
-              onOpenInvoiceViewer={handleOpenInvoiceViewer}
-              establishment={establishment}
-              emissionPoint={emissionPoint}
-              secInvoice={secInvoice}
-              setSecInvoice={setSecInvoice}
-              secBoleta={secBoleta}
-              setSecBoleta={setSecBoleta}
-              secQuote={secQuote}
-              setSecQuote={setSecQuote}
-              initialDocumentType={posDocumentType}
-              initialCartItems={posInitialCart}
-              initialCustomer={posInitialCustomer}
-              paymentMethods={paymentMethods}
-            />
-          ) : (
-            <div className="bg-white border border-slate-200/90 rounded-3xl p-8 max-w-lg mx-auto mt-12 text-center space-y-6 shadow-lg ring-1 ring-slate-900/5 animate-slideUp">
-              <div className="mx-auto w-16 h-16 bg-rose-50 border border-rose-200 text-rose-500 rounded-2xl flex items-center justify-center">
-                <Lock className="w-8 h-8 stroke-[2.5]" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-black text-slate-950">Apertura de Caja Requerida</h2>
-                <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                  Para poder facturar, realizar notas de venta o registrar pagos, debe indicar el dinero en efectivo que tiene actualmente en caja.
-                </p>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                <label className="block text-xs font-black text-slate-700 text-left">
-                  Dinero en Efectivo Inicial ($):
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Efectivo en Caja ($)"
-                    value={blockerInitialCash}
-                    onChange={(e) => setBlockerInitialCash(e.target.value)}
-                    className="flex-1 px-4 py-3 bg-white border border-slate-200 text-orange-600 font-mono font-black text-sm rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none"
-                  />
-                  <button
-                    onClick={() => handleOpenCashRegister(parseFloat(blockerInitialCash) || 0)}
-                    className="px-6 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md shadow-orange-500/20 transition cursor-pointer"
-                  >
-                    Abrir Caja
-                  </button>
-                </div>
-              </div>
-
-              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                O si prefieres, ve al panel de arqueos completo:
-              </div>
-
-              <button
-                onClick={() => setActiveTab('CASH_REGISTER')}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-black text-xs rounded-xl transition cursor-pointer"
-              >
-                Ver Panel de Control de Caja
-              </button>
-            </div>
-          )
+          <BillingTerminal
+            products={products}
+            customers={allCustomers}
+            settings={settings}
+            categories={categories}
+            promotions={promotions}
+            onInvoiceCreated={handleInvoiceCreated}
+            onUpdateInvoice={handleUpdateInvoice}
+            onCreateCustomer={handleCreateCustomer}
+            onOpenInvoiceViewer={handleOpenInvoiceViewer}
+            establishment={establishment}
+            emissionPoint={emissionPoint}
+            secInvoice={secInvoice}
+            setSecInvoice={setSecInvoice}
+            secBoleta={secBoleta}
+            setSecBoleta={setSecBoleta}
+            secQuote={secQuote}
+            setSecQuote={setSecQuote}
+            initialDocumentType={posDocumentType}
+            initialCartItems={posInitialCart}
+            initialCustomer={posInitialCustomer}
+            paymentMethods={paymentMethods}
+            isCashRegisterOpen={cashSession.status === 'ABIERTA'}
+            onOpenCashRegister={handleOpenCashRegister}
+          />
         )}
 
         {(activeTab === 'FACTURAS' || activeTab === 'COTIZACIONES' || activeTab === 'HISTORIAL_FACTURAS' || activeTab === 'HISTORIAL_COTIZACIONES') && (

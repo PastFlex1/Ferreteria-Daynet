@@ -27,7 +27,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
   const [isCreating, setIsCreating] = useState(false);
 
   // New Customer Form State
-  const [docType, setDocType] = useState<'RUC' | 'DNI' | 'Pasaporte'>('RUC');
+  const [docType, setDocType] = useState<'RUC' | 'C.I.' | 'Pasaporte'>('C.I.');
   const [docNumber, setDocNumber] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -76,7 +76,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
 
     const newCustomer: Customer = {
       id: `cust-${Date.now()}`,
-      docType: valResult.type?.startsWith('RUC') ? 'RUC' : (valResult.type === 'PASAPORTE' ? 'Pasaporte' : 'DNI'),
+      docType: valResult.type?.startsWith('RUC') ? 'RUC' : (valResult.type === 'PASAPORTE' ? 'Pasaporte' : 'C.I.'),
       docNumber: cleanDoc,
       name: name.trim(),
       phone: phone.trim() || undefined,
@@ -131,7 +131,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Buscar por Nombre, RFC/RUC/DNI o Teléfono..."
+                    placeholder="Buscar por Nombre, C.I., RUC o Teléfono..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -209,7 +209,7 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
                   if (field === 'creditLimit') setCreditLimit(value);
                 }}
                 onConsumidorFinal={() => {
-                  setDocType('DNI');
+                  setDocType('C.I.');
                   setDocNumber('9999999999999');
                   setName('CONSUMIDOR FINAL');
                   setEmail('consumidor@final.com');

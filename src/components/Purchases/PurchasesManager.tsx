@@ -2384,8 +2384,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       {selectedPreOrderView && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-8 shadow-2xl my-auto space-y-6 animate-scaleUp">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200">
+            {/* Header (Hidden in print) */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 no-print">
               <div className="flex items-center space-x-3">
                 <div className="p-3 bg-purple-500/10 text-purple-600 rounded-2xl border border-purple-500/20">
                   <ClipboardList className="w-6 h-6" />
@@ -2420,85 +2420,134 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
               </button>
             </div>
 
-            {/* Info Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Proveedor Asignado</span>
-                <span className="font-bold text-slate-800 text-sm">
-                  {selectedPreOrderView.supplierName || 'Proveedor General'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Fecha Requerida</span>
-                <span className="font-bold text-slate-800 text-sm">
-                  {selectedPreOrderView.expectedDate || 'Inmediata'}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Monto Total Estimado</span>
-                <span className="font-black text-emerald-600 text-base font-mono">
-                  {formatCurrency(selectedPreOrderView.totalEstimatedCost, settings.currencySymbol)}
-                </span>
-              </div>
-              {selectedPreOrderView.notes && (
-                <div className="sm:col-span-3 pt-2 border-t border-slate-200/60">
-                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Notas</span>
-                  <p className="text-slate-700 text-xs mt-0.5">{selectedPreOrderView.notes}</p>
+            {/* Printable Document Area */}
+            <div id="printable-preorder" className="space-y-6 text-xs text-slate-850 bg-white">
+              {/* Membrete Corporativo */}
+              <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="w-16 h-16 object-contain border border-slate-200 rounded-xl p-1" />
+                  ) : (
+                    <div className="p-3 bg-purple-950 text-white rounded-xl font-black text-lg">
+                      <ClipboardList className="w-8 h-8 text-purple-400" />
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-lg font-black text-slate-950 uppercase tracking-tight">
+                      {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                    </h1>
+                    <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                    <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong></p>
+                    <p className="text-[11px] text-slate-600">{settings.address} • Tel: {settings.phone}</p>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Items Table */}
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-slate-950 text-white font-black uppercase text-[10px] tracking-wider">
-                  <tr>
-                    <th className="py-2.5 px-3">Producto / SKU</th>
-                    <th className="py-2.5 px-3 text-center">Cant. Solicitada</th>
-                    <th className="py-2.5 px-3 text-right">Costo Unit.</th>
-                    <th className="py-2.5 px-3 text-center">IVA</th>
-                    <th className="py-2.5 px-3 text-right">Subtotal</th>
-                    <th className="py-2.5 px-3 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white font-medium">
-                  {selectedPreOrderView.items.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 transition">
-                      <td className="py-2.5 px-3">
-                        <span className="font-mono text-orange-600 text-[10px] block">{item.sku}</span>
-                        <span className="font-bold text-slate-900">{item.productName}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center font-mono font-black text-slate-800">
-                        {item.quantity} u.
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-emerald-600">
-                        {formatCurrency(item.costPrice, settings.currencySymbol)}
-                      </td>
-                      <td className="py-2.5 px-3 text-center font-mono text-slate-500 text-[11px]">
-                        {item.taxPercent}%
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono text-slate-700">
-                        {formatCurrency(item.subtotal, settings.currencySymbol)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">
-                        {formatCurrency(item.total, settings.currencySymbol)}
-                      </td>
+                <div className="text-right sm:border-l sm:border-slate-200 sm:pl-6 space-y-1">
+                  <span className="px-3 py-1 bg-purple-900 text-white font-black text-[10px] rounded-lg uppercase tracking-wider block text-center">
+                    REQUISICIÓN / PRE-ORDEN
+                  </span>
+                  <p className="text-[12px] font-bold text-slate-900 font-mono">N° {selectedPreOrderView.preOrderNumber}</p>
+                  <p className="text-[10px] text-slate-600 font-mono">
+                    Fecha: <strong>{selectedPreOrderView.createdAt}</strong>
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Prioridad: <strong>{selectedPreOrderView.priority || 'MEDIA'}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {/* Info Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80 text-xs">
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Proveedor Asignado</span>
+                  <span className="font-bold text-slate-900 text-sm">
+                    {selectedPreOrderView.supplierName || 'Proveedor General'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Fecha Requerida</span>
+                  <span className="font-bold text-slate-900 text-sm">
+                    {selectedPreOrderView.expectedDate || 'Inmediata'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Monto Total Estimado</span>
+                  <span className="font-black text-emerald-700 text-base font-mono">
+                    {formatCurrency(selectedPreOrderView.totalEstimatedCost, settings.currencySymbol)}
+                  </span>
+                </div>
+                {selectedPreOrderView.notes && (
+                  <div className="sm:col-span-3 pt-2 border-t border-slate-200/60">
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Notas / Justificación</span>
+                    <p className="text-slate-800 text-xs mt-0.5">{selectedPreOrderView.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Items Table */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-300">
+                <table className="w-full text-left text-xs text-slate-800">
+                  <thead className="bg-slate-900 text-white font-black uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Producto / SKU</th>
+                      <th className="py-2.5 px-3 text-center">Cant. Solicitada</th>
+                      <th className="py-2.5 px-3 text-right">Costo Unit.</th>
+                      <th className="py-2.5 px-3 text-center">IVA</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white font-medium">
+                    {selectedPreOrderView.items.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/80 transition">
+                        <td className="py-2.5 px-3">
+                          <span className="font-mono text-orange-600 text-[10px] block">{item.sku}</span>
+                          <span className="font-bold text-slate-900">{item.productName}</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900">
+                          {item.quantity} u.
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-700">
+                          {formatCurrency(item.costPrice, settings.currencySymbol)}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-600 text-[11px]">
+                          {item.taxPercent}%
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                          {formatCurrency(item.subtotal, settings.currencySymbol)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">
+                          {formatCurrency(item.total, settings.currencySymbol)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Signatures for Printing */}
+              <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Solicitado por</p>
+                  <p className="text-slate-500 text-[11px]">Bodega / Compras</p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Aprobado por</p>
+                  <p className="text-slate-500 text-[11px]">Gerencia / Administración</p>
+                </div>
+              </div>
             </div>
 
-            {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+            {/* Modal Actions (Hidden in print) */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-200 no-print">
               <button
                 type="button"
                 onClick={() => {
                   window.print();
                 }}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md"
               >
-                <Printer className="w-4 h-4 text-slate-500" />
+                <Printer className="w-4 h-4 text-purple-300" />
                 <span>Imprimir / Exportar Requisición</span>
               </button>
 

@@ -69,7 +69,7 @@ export const initialStoreSettings: StoreSettings = {
 
 export const CONSUMIDOR_FINAL: Customer = {
   id: 'cust-general',
-  docType: 'DNI',
+  docType: 'C.I.',
   docNumber: '9999999999999',
   name: 'Público General / Consumidor Final',
   email: 'consumidor@final.com',

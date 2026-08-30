@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Trash2, 
   User, 
@@ -67,6 +67,17 @@ export const Cart: React.FC<CartProps> = ({
 }) => {
   const [propinaEnabled, setPropinaEnabled] = useState(false);
   const [showSriBreakdown, setShowSriBreakdown] = useState(false);
+  const [isSellerMenuOpen, setIsSellerMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (isSellerMenuOpen && !(e.target as HTMLElement).closest('[data-cart-seller]')) {
+        setIsSellerMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isSellerMenuOpen]);
 
   const sriBreakdown = calculateSriTotals(cartItems, settings.defaultTaxRate, propinaEnabled);
   const totalItemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -118,31 +129,49 @@ export const Cart: React.FC<CartProps> = ({
                 <span className="font-extrabold text-slate-900 truncate block text-xs mt-0.5">{customer.name}</span>
               </div>
             </div>
-            <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 shrink-0 ml-1">
-              Editar
-            </span>
+            <span className="text-orange-500 text-[10px] font-bold shrink-0 ml-1">Cambiar</span>
           </button>
 
-          {/* Seller dropdown */}
+          {/* Seller dropdown (Custom Modern Dropdown) */}
           {sellerOptions.length > 0 && setSellerName ? (
-            <div className="flex items-center space-x-2 p-2 bg-white border border-slate-200 rounded-xl shadow-2xs">
-              <div className="p-1.5 bg-blue-500/10 text-blue-600 rounded-lg shrink-0">
-                <Briefcase className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="block text-[9px] text-slate-400 font-extrabold uppercase leading-none">Vendedor</span>
-                <select
-                  value={sellerName}
-                  onChange={(e) => setSellerName(e.target.value)}
-                  className="w-full bg-transparent text-xs font-black text-slate-900 focus:outline-none cursor-pointer truncate mt-0.5"
-                >
+            <div className="relative" data-cart-seller>
+              <button
+                type="button"
+                onClick={() => setIsSellerMenuOpen(!isSellerMenuOpen)}
+                className="w-full flex items-center space-x-2 p-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-2xs text-left cursor-pointer transition"
+              >
+                <div className="p-1.5 bg-blue-500/10 text-blue-600 rounded-lg shrink-0">
+                  <Briefcase className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="block text-[9px] text-slate-400 font-extrabold uppercase leading-none">Vendedor</span>
+                  <span className="block text-xs font-black text-slate-900 truncate mt-0.5">{sellerName}</span>
+                </div>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isSellerMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isSellerMenuOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200/90 rounded-2xl shadow-2xl z-50 p-1.5 space-y-0.5 animate-fadeIn ring-1 ring-slate-900/10">
                   {sellerOptions.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        setSellerName(opt);
+                        setIsSellerMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                        sellerName === opt
+                          ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold'
+                          : 'hover:bg-orange-50/80 text-slate-700'
+                      }`}
+                    >
+                      <span className="truncate">{opt}</span>
+                      {sellerName === opt && <Check className="w-3.5 h-3.5 text-white" />}
+                    </button>
                   ))}
-                </select>
-              </div>
+                </div>
+              )}
             </div>
           ) : null}
         </div>

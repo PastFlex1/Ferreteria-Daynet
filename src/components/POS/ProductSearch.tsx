@@ -173,8 +173,9 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
           />
           {searchTerm ? (
             <button
+              type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded bg-slate-200 font-bold"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300 font-bold cursor-pointer transition"
             >
               Limpiar
             </button>

@@ -244,12 +244,14 @@ export function validateEcuadorianDocument(docType: string, docNumber: string): 
     return validatePasaporte(numClean);
   }
 
-  // Cédula / DNI / CI
+  // Cédula / C.I.
   if (
+    typeUpper === 'C.I.' ||
+    typeUpper === 'C.I' ||
+    typeUpper === 'CI' ||
     typeUpper === 'CEDULA' || 
     typeUpper === 'CÉDULA' || 
-    typeUpper === 'DNI' || 
-    typeUpper === 'CI'
+    typeUpper === 'DNI'
   ) {
     return validateCedula(numClean);
   }

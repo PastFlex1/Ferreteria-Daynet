@@ -82,7 +82,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Número de Identificación Fiscal (RFC / RUC / NIT) *
+                  Número de R.U.C. (13 dígitos) *
                 </label>
                 <input
                   type="text"

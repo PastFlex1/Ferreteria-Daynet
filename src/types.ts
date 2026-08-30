@@ -35,6 +35,7 @@ export interface Product {
   taxRate: number; // p.ej 15 para 15%
   allowFractional: boolean; // Si permite decimales (ej: 2.5 metros o 0.5 kg)
   priceScales?: PriceScale[]; // Escalas de precios por cantidad
+  isCustom?: boolean;
 }
 
 export interface PriceScale {
@@ -71,7 +72,7 @@ export interface Promotion {
 
 export interface Customer {
   id: string;
-  docType: 'DNI' | 'RUC' | 'RFC' | 'NIT' | 'Pasaporte';
+  docType: 'C.I.' | 'RUC' | 'Pasaporte' | string;
   docNumber: string;
   name: string; // Nombre o Razon Social
   email?: string;

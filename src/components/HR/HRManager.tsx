@@ -810,10 +810,10 @@ export const HRManager: React.FC<HRManagerProps> = ({
                           <Eye className="w-4 h-4" />
                         </button>
                         <button onClick={() => {
-                          showToast('Generando PDF...', 'success');
-                          setTimeout(() => window.print(), 500);
-                        }} title="Descargar PDF" className="p-1.5 bg-slate-100 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
-                          <Download className="w-4 h-4" />
+                          setViewingRole(rol);
+                          setTimeout(() => window.print(), 350);
+                        }} title="Imprimir Rol de Pago" className="p-1.5 bg-slate-100 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer">
+                          <Printer className="w-4 h-4 text-indigo-600" />
                         </button>
                         <button onClick={() => handleEditRole(rol)} title="Editar Rol" className="p-1.5 bg-slate-100 text-slate-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors cursor-pointer">
                           <Edit className="w-4 h-4" />
@@ -1608,11 +1608,11 @@ export const HRManager: React.FC<HRManagerProps> = ({
 
       {viewingRole && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl animate-fadeIn my-auto print:shadow-none print:w-full print:max-w-none print:h-auto print:rounded-none print:max-h-none">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-100 p-5 sm:p-6 pb-4 shrink-0">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl animate-fadeIn my-auto">
+            {/* Header (Hidden in Print) */}
+            <div className="flex items-center justify-between border-b border-slate-100 p-5 sm:p-6 pb-4 shrink-0 no-print">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl print:hidden">
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
@@ -1623,14 +1623,44 @@ export const HRManager: React.FC<HRManagerProps> = ({
               <button 
                 type="button" 
                 onClick={() => setViewingRole(null)} 
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer print:hidden"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Scrollable Body Content */}
-            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 custom-scrollbar text-xs">
+            {/* Printable Document Area */}
+            <div id="printable-payroll-role" className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 custom-scrollbar text-xs bg-white text-slate-900">
+              {/* Membrete Corporativo */}
+              <div className="border-b-2 border-slate-900 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="w-14 h-14 object-contain border border-slate-200 rounded-xl p-1" />
+                  ) : (
+                    <div className="p-2.5 bg-slate-900 text-white rounded-xl font-black text-base">
+                      <FileText className="w-6 h-6 text-indigo-400" />
+                    </div>
+                  )}
+                  <div>
+                    <h2 className="text-base font-black text-slate-950 uppercase tracking-tight">
+                      {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                    </h2>
+                    <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                    <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong> • Tel: {settings.phone}</p>
+                  </div>
+                </div>
+
+                <div className="text-right sm:border-l sm:border-slate-200 sm:pl-4 space-y-0.5">
+                  <span className="px-2.5 py-0.5 bg-slate-900 text-white font-black text-[9px] rounded uppercase tracking-wider block text-center">
+                    ROL DE PAGO
+                  </span>
+                  <p className="text-[11px] font-bold text-slate-900">Liquidación Individual</p>
+                  <p className="text-[10px] text-slate-600 font-mono">
+                    Período: <strong>{viewingRole.period}</strong>
+                  </p>
+                </div>
+              </div>
+
               {/* Employee Info & Status */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
                 {/* Employee Info */}
@@ -1650,7 +1680,7 @@ export const HRManager: React.FC<HRManagerProps> = ({
                   <div className="flex flex-col items-start sm:items-end gap-1.5 pt-1">
                     <span className={`px-3 py-1 rounded-xl text-[10px] font-black ${
                       viewingRole.status === 'PAGADO' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
-                    } print:border-none`}>
+                    }`}>
                       {viewingRole.status}
                     </span>
                     <div className="text-[10px] text-slate-400 font-mono">ID: {viewingRole.id}</div>
@@ -1659,11 +1689,11 @@ export const HRManager: React.FC<HRManagerProps> = ({
               </div>
 
               {/* Income & Deductions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/70 p-4 rounded-2xl border border-slate-100 print:bg-white print:border-none print:p-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/70 p-4 rounded-2xl border border-slate-100">
                 {/* Incomes */}
                 <div className="space-y-2.5">
                   <h4 className="text-[11px] font-black text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <TrendingUp className="w-3.5 h-3.5 print:hidden" />
+                    <TrendingUp className="w-3.5 h-3.5" />
                     <span>Ingresos</span>
                   </h4>
                   <div className="space-y-1.5 text-xs">
@@ -1678,7 +1708,7 @@ export const HRManager: React.FC<HRManagerProps> = ({
                 {/* Deductions */}
                 <div className="space-y-2.5">
                   <h4 className="text-[11px] font-black text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <Percent className="w-3.5 h-3.5 print:hidden" />
+                    <Percent className="w-3.5 h-3.5" />
                     <span>Deducciones</span>
                   </h4>
                   <div className="space-y-1.5 text-xs">
@@ -1692,9 +1722,9 @@ export const HRManager: React.FC<HRManagerProps> = ({
               </div>
 
               {/* Total Net */}
-              <div className="bg-slate-900 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-inner print:bg-slate-100 print:text-slate-900 print:border print:border-slate-300">
-                <div className="text-slate-300 font-bold uppercase tracking-widest text-xs print:text-slate-600">Neto a Recibir</div>
-                <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono print:text-slate-900">{formatCurrency(viewingRole.netSalary, settings.currencySymbol)}</div>
+              <div className="bg-slate-900 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-inner">
+                <div className="text-slate-300 font-bold uppercase tracking-widest text-xs">Neto a Recibir</div>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">{formatCurrency(viewingRole.netSalary, settings.currencySymbol)}</div>
               </div>
 
               {/* Signatures */}
@@ -1709,8 +1739,8 @@ export const HRManager: React.FC<HRManagerProps> = ({
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex justify-end gap-3 p-4 px-6 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl shrink-0 print:hidden">
+            {/* Actions (Hidden in Print) */}
+            <div className="flex justify-end gap-3 p-4 px-6 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl shrink-0 no-print">
               <button
                 type="button"
                 onClick={() => setViewingRole(null)}
@@ -1726,7 +1756,7 @@ export const HRManager: React.FC<HRManagerProps> = ({
                 className="px-5 py-2.5 bg-indigo-600 text-white font-black text-xs rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-600/20 transition-colors flex items-center gap-2 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                <span>Imprimir Documento</span>
+                <span>Imprimir / Descargar PDF</span>
               </button>
             </div>
           </div>

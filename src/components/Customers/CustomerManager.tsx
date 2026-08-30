@@ -170,7 +170,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
 
     const newCust: Customer = {
       id: editingCustomer ? editingCustomer.id : `cust-${Date.now()}`,
-      docType: valResult.type?.startsWith('RUC') ? 'RUC' : (valResult.type === 'PASAPORTE' ? 'Pasaporte' : 'DNI'),
+      docType: valResult.type?.startsWith('RUC') ? 'RUC' : (valResult.type === 'PASAPORTE' ? 'Pasaporte' : 'C.I.'),
       docNumber: cleanDoc,
       name: formData.name.trim(),
       email: formData.email.trim() || undefined,
@@ -207,7 +207,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
     const csvHeader = "docType,docNumber,name,email,phone,address,creditLimit\n";
     const csvRows = [
       "RUC,1792384915001,Distribuidora Daynet S.A.,ventas@daynet.com,0991234567,Av. Amazonas 1234,2000",
-      "DNI,1718293044,Juan Pérez,juan.perez@email.com,0987654321,Calle Loja N4-12,500",
+      "C.I.,1718293044,Juan Pérez,juan.perez@email.com,0987654321,Calle Loja N4-12,500",
       "RUC,0991238472001,Constructora Norte Cía Ltda,compras@constructora.ec,095554433,Av. De los Granados 400,5000"
     ].join("\n");
 
@@ -244,7 +244,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
         previewList.push({
           customer: {
             id: `temp-${i}`,
-            docType: 'DNI',
+            docType: 'C.I.',
             docNumber: cols[0] || 'S/N',
             name: line,
             creditLimit: 0,
@@ -256,9 +256,14 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
         continue;
       }
 
-      const docType = (['DNI', 'RUC', 'RFC', 'NIT', 'Pasaporte'].includes(cols[0].toUpperCase())
-        ? cols[0].toUpperCase()
-        : 'RUC') as Customer['docType'];
+      const rawType = cols[0].toUpperCase();
+      const docType = (['C.I.', 'CI', 'CEDULA', 'CÉDULA', 'DNI'].includes(rawType)
+        ? 'C.I.'
+        : rawType.startsWith('RUC')
+        ? 'RUC'
+        : rawType.startsWith('PAS')
+        ? 'Pasaporte'
+        : 'C.I.') as Customer['docType'];
 
       const docNumber = cols[1];
       const name = cols[2];
@@ -419,7 +424,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                   <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Buscar por Nombre, RUC/DNI/RFC, Teléfono o Correo..."
+                    placeholder="Buscar por Nombre, C.I., RUC, Teléfono o Correo..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 text-slate-900 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
@@ -432,10 +437,8 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                   className="px-3 py-2.5 bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 font-bold"
                 >
                   <option value="TODOS">Todos los Documentos</option>
+                  <option value="C.I.">C.I. (Cédula)</option>
                   <option value="RUC">RUC</option>
-                  <option value="DNI">DNI</option>
-                  <option value="RFC">RFC</option>
-                  <option value="NIT">NIT</option>
                   <option value="Pasaporte">Pasaporte</option>
                 </Select>
               </div>
@@ -795,7 +798,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                 onConsumidorFinal={() => {
                   setFormData(prev => ({
                     ...prev,
-                    docType: 'DNI',
+                    docType: 'C.I.',
                     docNumber: '9999999999999',
                     name: 'CONSUMIDOR FINAL',
                     email: 'consumidor@final.com',
@@ -921,59 +924,110 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
 
       {/* 3. Statement Modal */}
       {statementCustomer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
-          <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-xl p-6 space-y-4 shadow-2xl ring-1 ring-slate-900/10">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200/90 rounded-3xl w-full max-w-2xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 no-print">
               <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-orange-500" />
                 <span>Estado de Cuenta: {statementCustomer.name}</span>
               </h3>
-              <button onClick={() => setStatementCustomer(null)} className="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+              <button onClick={() => setStatementCustomer(null)} className="text-slate-400 hover:text-slate-700 font-bold p-1">✕</button>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div><strong className="text-slate-500">Identificación:</strong> <span className="font-mono font-bold text-slate-900">{statementCustomer.docType} {statementCustomer.docNumber}</span></div>
-                <div><strong className="text-slate-500">Teléfono:</strong> <span className="font-bold text-slate-900">{statementCustomer.phone || '-'}</span></div>
-                <div><strong className="text-slate-500">Límite Autorizado:</strong> <span className="font-mono font-bold text-slate-900">{formatCurrency(statementCustomer.creditLimit, settings.currencySymbol)}</span></div>
-                <div><strong className="text-slate-500">Deuda Actual:</strong> <span className="font-mono font-black text-rose-600">{formatCurrency(statementCustomer.currentBalance, settings.currencySymbol)}</span></div>
+            {/* Documento Imprimible Formal */}
+            <div id="printable-statement" className="space-y-5 text-xs text-slate-900 bg-white">
+              {/* Membrete Corporativo */}
+              <div className="border-b-2 border-slate-900 pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="w-14 h-14 object-contain border border-slate-200 rounded-xl p-1" />
+                  ) : (
+                    <div className="p-2.5 bg-slate-900 text-white rounded-xl font-black text-base">
+                      <FileText className="w-6 h-6 text-orange-400" />
+                    </div>
+                  )}
+                  <div>
+                    <h2 className="text-base font-black text-slate-950 uppercase tracking-tight">
+                      {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                    </h2>
+                    <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                    <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong> • Tel: {settings.phone}</p>
+                  </div>
+                </div>
+
+                <div className="text-right sm:border-l sm:border-slate-200 sm:pl-4 space-y-0.5">
+                  <span className="px-2.5 py-0.5 bg-slate-900 text-white font-black text-[9px] rounded uppercase tracking-wider block text-center">
+                    ESTADO DE CUENTA
+                  </span>
+                  <p className="text-[11px] font-bold text-slate-900">Cartera y Crédito</p>
+                  <p className="text-[10px] text-slate-500 font-mono">
+                    Fecha: {new Date().toLocaleString('es-EC')}
+                  </p>
+                </div>
+              </div>
+
+              {/* Datos del Cliente */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div><strong className="text-slate-500">Cliente:</strong> <span className="font-bold text-slate-900">{statementCustomer.name}</span></div>
+                  <div><strong className="text-slate-500">Identificación:</strong> <span className="font-mono font-bold text-slate-900">{statementCustomer.docType} {statementCustomer.docNumber}</span></div>
+                  <div><strong className="text-slate-500">Teléfono:</strong> <span className="font-bold text-slate-900">{statementCustomer.phone || '-'}</span></div>
+                  <div><strong className="text-slate-500">Email:</strong> <span className="font-bold text-slate-900">{statementCustomer.email || '-'}</span></div>
+                  <div><strong className="text-slate-500">Límite de Crédito:</strong> <span className="font-mono font-bold text-slate-900">{formatCurrency(statementCustomer.creditLimit, settings.currencySymbol)}</span></div>
+                  <div><strong className="text-slate-500">Saldo Pendiente:</strong> <span className="font-mono font-black text-rose-600 text-sm">{formatCurrency(statementCustomer.currentBalance, settings.currencySymbol)}</span></div>
+                </div>
+              </div>
+
+              {/* Tabla de Movimientos */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">Historial de Movimientos de Cuenta</h4>
+                <div className="border border-slate-300 rounded-xl overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-900 text-white font-black text-[10px] uppercase">
+                      <tr>
+                        <th className="p-2.5">Fecha</th>
+                        <th className="p-2.5">Concepto / Comprobante</th>
+                        <th className="p-2.5 text-right">Cargo / Factura</th>
+                        <th className="p-2.5 text-right">Abono / Pago</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      <tr>
+                        <td className="p-2.5 font-mono text-slate-600">2026-08-01</td>
+                        <td className="p-2.5 font-bold">Factura a Crédito</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-rose-600">${statementCustomer.currentBalance.toFixed(2)}</td>
+                        <td className="p-2.5 text-right font-mono text-slate-400">$0.00</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Signatures */}
+              <div className="grid grid-cols-2 gap-8 pt-6 text-center text-xs">
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Departamento de Crédito & Cobranzas</p>
+                  <p className="text-slate-500 text-[10px]">{settings.storeName}</p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Firma del Cliente</p>
+                  <p className="text-slate-500 text-[10px]">{statementCustomer.name}</p>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">Historial de Movimientos de Cuenta</h4>
-              <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-900 text-white font-black text-[10px] uppercase">
-                    <tr>
-                      <th className="p-2.5">Fecha</th>
-                      <th className="p-2.5">Concepto / Comprobante</th>
-                      <th className="p-2.5 text-right">Cargo ($)</th>
-                      <th className="p-2.5 text-right">Abono ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    <tr>
-                      <td className="p-2.5 font-mono text-slate-500">2026-08-01</td>
-                      <td className="p-2.5 font-bold">Factura F001-00000189</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-rose-600">${statementCustomer.currentBalance.toFixed(4)}</td>
-                      <td className="p-2.5 text-right font-mono text-slate-400">$0.00</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200 no-print">
               <button
+                type="button"
                 onClick={() => window.print()}
-                className="px-4 py-2 bg-slate-900 text-white font-extrabold text-xs rounded-xl hover:bg-slate-800 cursor-pointer inline-flex items-center gap-2"
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl cursor-pointer inline-flex items-center gap-2 shadow-md"
               >
-                <Printer className="w-4 h-4" />
+                <Printer className="w-4 h-4 text-orange-400" />
                 <span>Imprimir Estado de Cuenta</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setStatementCustomer(null)}
                 className="px-4 py-2 bg-slate-100 text-slate-700 font-extrabold text-xs rounded-xl hover:bg-slate-200 cursor-pointer"
               >
@@ -1083,7 +1137,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
               <span className="font-black text-orange-600 block">2. Documentos Admitidos</span>
               <p className="text-slate-600">
-                Tipos válidos: <strong className="text-slate-900">RUC, DNI, RFC, NIT, Pasaporte</strong>. El número de identificación debe ser único.
+                Tipos válidos: <strong className="text-slate-900">C.I. (Cédula), RUC, Pasaporte</strong>. El número de identificación debe ser único.
               </p>
             </div>
 
@@ -1126,7 +1180,7 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
               rows={6}
               value={rawCsvText}
               onChange={(e) => handleParseCsv(e.target.value)}
-              placeholder="docType,docNumber,name,email,phone,address,creditLimit&#10;RUC,1792384915001,Distribuidora Daynet S.A.,ventas@daynet.com,0991234567,Av. Amazonas 1234,2000&#10;DNI,1718293044,Juan Pérez,juan.perez@email.com,0987654321,Calle Loja N4-12,500"
+              placeholder="docType,docNumber,name,email,phone,address,creditLimit&#10;RUC,1792384915001,Distribuidora Daynet S.A.,ventas@daynet.com,0991234567,Av. Amazonas 1234,2000&#10;C.I.,1718293044,Juan Pérez,juan.perez@email.com,0987654321,Calle Loja N4-12,500"
               className="w-full p-4 bg-slate-50 border border-slate-200 text-slate-900 font-mono text-xs rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none"
             />
           </div>

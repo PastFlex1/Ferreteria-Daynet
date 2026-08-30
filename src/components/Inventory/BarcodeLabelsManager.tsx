@@ -558,7 +558,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 
             {/* Printable Labels Container */}
             <div className="p-6 overflow-y-auto flex-1 bg-slate-100 custom-scrollbar">
-              <div className="bg-white p-6 rounded-2xl border border-slate-300 shadow-sm mx-auto min-h-[500px]">
+              <div id="printable-labels" className="bg-white p-4 rounded-2xl border border-slate-300 shadow-sm mx-auto min-h-[500px]">
                 <div className="flex flex-wrap gap-3 items-center justify-center">
                   {Array.from({ length: quantity }).map((_, index) => (
                     renderLabelItem(index)

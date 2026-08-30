@@ -636,7 +636,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 )}
                 <h2 className="font-extrabold text-sm uppercase">{settings.storeName}</h2>
                 <p className="text-[10px]">{settings.address}</p>
-                <p className="text-[10px]">RFC/RUC: {settings.taxId}</p>
+                <p className="text-[10px]">RUC: {settings.taxId}</p>
                 <p className="text-[10px]">Tel: {settings.phone}</p>
               </div>
 

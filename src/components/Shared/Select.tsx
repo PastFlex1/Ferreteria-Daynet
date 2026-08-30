@@ -133,11 +133,15 @@ export const Select: React.FC<SelectProps> = (props) => {
       </div>
 
       {isOpen && (
-        <div className="absolute z-[9999] w-full mt-1 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl overflow-hidden animate-fadeIn">
-          {searchable !== false && (
-            <div className="p-1.5 border-b border-slate-800 bg-slate-900/60">
+        <div className={`absolute z-[9999] w-full mt-1.5 ${
+          isDark 
+            ? 'bg-slate-950 border border-slate-800 text-slate-200' 
+            : 'bg-white border border-slate-200/90 text-slate-800 ring-1 ring-slate-900/10'
+        } rounded-2xl shadow-2xl overflow-hidden animate-fadeIn`}>
+          {searchable !== false && options.length > 5 && (
+            <div className={`p-2 border-b ${isDark ? 'border-slate-800 bg-slate-900/60' : 'border-slate-100 bg-slate-50/80'}`}>
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -145,12 +149,16 @@ export const Select: React.FC<SelectProps> = (props) => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
-                  className="w-full pl-8 pr-2.5 py-1.5 bg-slate-900 text-slate-200 placeholder-slate-500 border border-slate-700/80 rounded-lg text-xs font-medium focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  className={`w-full pl-8 pr-2.5 py-1.5 ${
+                    isDark 
+                      ? 'bg-slate-900 text-slate-200 placeholder-slate-500 border-slate-700/80' 
+                      : 'bg-white text-slate-900 placeholder-slate-400 border-slate-200 focus:bg-white'
+                  } border rounded-xl text-xs font-medium focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all`}
                 />
               </div>
             </div>
           )}
-          <div className="max-h-48 overflow-y-auto custom-scrollbar flex flex-col py-1">
+          <div className="max-h-52 overflow-y-auto custom-scrollbar flex flex-col p-1 space-y-0.5">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option, idx) => {
                 const isSelected = String(value) === String(option.value);
@@ -158,18 +166,20 @@ export const Select: React.FC<SelectProps> = (props) => {
                   <div
                     key={idx}
                     onClick={() => handleSelect(String(option.value))}
-                    className={`px-3 py-1.5 mx-1 my-0.5 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center justify-between ${
                       isSelected
-                        ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold shadow-2xs'
-                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black shadow-md shadow-orange-500/20'
+                        : isDark
+                        ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        : 'text-slate-700 hover:bg-orange-50/80 hover:text-orange-950'
                     }`}
                   >
-                    {option.label}
+                    <span className="truncate">{option.label}</span>
                   </div>
                 );
               })
             ) : (
-              <div className="px-3 py-2 text-slate-500 text-xs font-medium text-center">
+              <div className="px-3 py-3 text-slate-400 text-xs font-medium text-center">
                 No se encontraron resultados
               </div>
             )}
