@@ -127,8 +127,8 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Desde</label>
                       <input
                         type="number"
-                        step={allowFractional ? "0.1" : "1"}
-                        min="1"
+                        step="any"
+                        min="0.0001"
                         value={scale.minQty}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'minQty', e.target.value)}
                         className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 font-mono rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
@@ -138,7 +138,7 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Hasta</label>
                       <input
                         type="number"
-                        step={allowFractional ? "0.1" : "1"}
+                        step="any"
                         placeholder="∞"
                         value={scale.maxQty || ''}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'maxQty', e.target.value)}

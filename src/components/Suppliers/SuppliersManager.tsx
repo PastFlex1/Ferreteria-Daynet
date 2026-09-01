@@ -439,94 +439,103 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
             />
           </div>
 
-          {/* Suppliers Grid Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {suppliers
-              .filter(
-                (s) =>
-                  s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                  s.taxId.includes(searchTerm) ||
-                  s.contactPerson.toLowerCase().includes(searchTerm.toLowerCase())
-              )
-              .map((sup) => (
-                <div
-                  key={sup.id}
-                  className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-orange-300 hover:shadow-md transition space-y-4 relative group"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-slate-950 text-orange-400 rounded-xl flex items-center justify-center font-black text-sm shrink-0 border border-slate-800">
-                        {sup.name.charAt(0)}
-                      </div>
-                      <div>
-                        <h3 className="font-black text-slate-950 text-sm">{sup.name}</h3>
-                        <span className="font-mono text-[11px] text-slate-500 block">RUC / NIT: {sup.taxId}</span>
-                        {(sup.city || sup.province) && (
-                          <span className="text-[10px] text-orange-600 font-bold block">
-                            📍 {[sup.city, sup.province, sup.country].filter(Boolean).join(' • ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleOpenEditSupplier(sup)}
-                        className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
-                        title="Editar Proveedor"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteSupplier(sup.id)}
-                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
-                        title="Eliminar Proveedor"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1.5 text-slate-600">
-                        <Phone className="w-3.5 h-3.5 text-orange-500" />
-                        <span className="font-mono font-bold text-[11px]">{sup.phone || 'N/A'}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-slate-600 truncate">
-                        <Mail className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                        <span className="truncate text-[11px] font-medium">{sup.email || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1 text-right">
-                      <div className="text-[10px] font-bold uppercase text-slate-400">Días Crédito</div>
-                      <div className="font-black text-slate-900 font-mono text-xs">{sup.paymentDays} Días</div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Saldo Pendiente</span>
-                      <span
-                        className={`font-mono font-black text-sm ${
-                          sup.currentBalance > 0 ? 'text-rose-600' : 'text-emerald-600'
-                        }`}
-                      >
-                        {formatCurrency(sup.currentBalance, settings.currencySymbol)}
-                      </span>
-                    </div>
-
-                    <button
-                      onClick={() => setViewingSupplierDetail(sup)}
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-[11px] cursor-pointer flex items-center gap-1"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-orange-400" />
-                      <span>Ficha Completa</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+          {/* Suppliers List Table */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="py-3 px-4">Proveedor</th>
+                  <th className="py-3 px-4">RUC / NIT</th>
+                  <th className="py-3 px-4">Contacto</th>
+                  <th className="py-3 px-4">Teléfono</th>
+                  <th className="py-3 px-4">Email</th>
+                  <th className="py-3 px-4 text-center">Crédito</th>
+                  <th className="py-3 px-4 text-right">Saldo</th>
+                  <th className="py-3 px-4 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                {suppliers
+                  .filter(
+                    (s) =>
+                      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      s.taxId.includes(searchTerm) ||
+                      s.contactPerson.toLowerCase().includes(searchTerm.toLowerCase())
+                  )
+                  .map((sup) => (
+                    <tr key={sup.id} className="hover:bg-orange-50/40 transition group">
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 bg-slate-950 text-orange-400 rounded-lg flex items-center justify-center font-black text-xs shrink-0 border border-slate-800">
+                            {sup.name.charAt(0)}
+                          </div>
+                          <div>
+                            <span className="font-black text-slate-950 text-xs block">{sup.name}</span>
+                            {(sup.city || sup.province) && (
+                              <span className="text-[10px] text-orange-600 font-bold">
+                                📍 {[sup.city, sup.province].filter(Boolean).join(', ')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-slate-600 text-[11px]">{sup.taxId}</td>
+                      <td className="py-3 px-4 text-slate-700 font-medium">{sup.contactPerson || '—'}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-[11px] text-slate-600">{sup.phone || 'N/A'}</td>
+                      <td className="py-3 px-4 text-[11px] text-slate-500 truncate max-w-[160px]">{sup.email || 'N/A'}</td>
+                      <td className="py-3 px-4 text-center font-mono font-black text-slate-900">{sup.paymentDays} días</td>
+                      <td className="py-3 px-4 text-right">
+                        <span
+                          className={`font-mono font-black text-xs ${
+                            sup.currentBalance > 0 ? 'text-rose-600' : 'text-emerald-600'
+                          }`}
+                        >
+                          {formatCurrency(sup.currentBalance, settings.currencySymbol)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setViewingSupplierDetail(sup)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
+                            title="Ver Ficha Completa"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditSupplier(sup)}
+                            className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg transition cursor-pointer"
+                            title="Editar Proveedor"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSupplier(sup.id)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                            title="Eliminar Proveedor"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                {suppliers.filter(
+                  (s) =>
+                    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    s.taxId.includes(searchTerm) ||
+                    s.contactPerson.toLowerCase().includes(searchTerm.toLowerCase())
+                ).length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                      <Building2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="font-bold text-slate-600 text-sm">No se encontraron proveedores</p>
+                      <p className="text-xs mt-1">Registre su primer proveedor para comenzar.</p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

@@ -137,12 +137,27 @@
     display: block !important;
     box-shadow: none !important;
     border: none !important;
-    padding: 0 !important;
+    padding: 5mm !important;
     margin: 0 auto !important;
     max-width: 100% !important;
     width: 100% !important;
     background: #ffffff !important;
     color: #000000 !important;
+  }
+
+  /* Dedicated Cash Close Print Voucher Styling */
+  #printable-cash-close {
+    padding: 8mm !important;
+    max-width: 800px !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11px !important;
+  }
+
+  #printable-cash-close * {
+    color: #000000 !important;
+    border-color: #cbd5e1 !important;
   }
 
   /* Barcode Labels Specific Grid */

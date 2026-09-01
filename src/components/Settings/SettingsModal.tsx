@@ -105,6 +105,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">País *</label>
+                <input
+                  type="text"
+                  value={formData.country ?? 'Ecuador'}
+                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs focus:ring-2 focus:ring-orange-500 font-medium"
+                  placeholder="Ej: Ecuador"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Provincia *</label>
+                <input
+                  type="text"
+                  value={formData.province ?? ''}
+                  onChange={(e) => setFormData({ ...formData, province: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs focus:ring-2 focus:ring-orange-500 font-medium"
+                  placeholder="Ej: Pichincha"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Ciudad / Cantón *</label>
+                <input
+                  type="text"
+                  value={formData.city ?? ''}
+                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs focus:ring-2 focus:ring-orange-500 font-medium"
+                  placeholder="Ej: Quito"
+                />
+              </div>
+
               <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Dirección Comercial y Fiscal *
@@ -116,6 +149,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs focus:ring-2 focus:ring-orange-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Obligado a Llevar Contabilidad *</label>
+                <select
+                  value={formData.accountingRequired ? 'SI' : 'NO'}
+                  onChange={(e) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="NO">NO</option>
+                  <option value="SI">SI</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">N° Contribuyente Especial</label>
+                <input
+                  type="text"
+                  value={formData.specialTaxpayerNumber ?? ''}
+                  onChange={(e) => setFormData({ ...formData, specialTaxpayerNumber: e.target.value })}
+                  placeholder="Escriba N° resolución..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-amber-700 font-mono font-bold rounded-xl text-xs focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+            </div>
+
+            {/* Casillas para visar */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <span className="block text-[10px] font-black uppercase text-slate-500">
+                Clasificación de Régimen (SRI):
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-bold text-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={!!formData.isMicroenterprise}
+                    onChange={(e) => setFormData({ ...formData, isMicroenterprise: e.target.checked })}
+                    className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
+                  />
+                  <span>¿Régimen Microempresas?</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={!!formData.isRimpe}
+                    onChange={(e) => setFormData({ ...formData, isRimpe: e.target.checked })}
+                    className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
+                  />
+                  <span>¿Régimen RIMPE?</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={!!formData.isRetentionAgent}
+                    onChange={(e) => setFormData({ ...formData, isRetentionAgent: e.target.checked })}
+                    className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
+                  />
+                  <span>¿Agente de Retención?</span>
+                </label>
               </div>
             </div>
           </div>

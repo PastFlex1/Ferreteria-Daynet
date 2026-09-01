@@ -39,17 +39,18 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 }) => {
   const { showAlert, showToast } = useModal();
 
-  const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id || '');
-  const [productSearch, setProductSearch] = useState('');
+  // Search & Selected Product State (blank by default as requested)
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [productSearch, setProductSearch] = useState<string>('');
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState<boolean>(false);
   
   const selectedProduct = useMemo(() => {
-    return products.find(p => p.id === selectedProductId) || products[0] || null;
+    if (!selectedProductId) return null;
+    return products.find(p => p.id === selectedProductId) || null;
   }, [products, selectedProductId]);
 
   // Barcode state
-  const [barcodeInput, setBarcodeInput] = useState<string>(
-    selectedProduct?.barcode || selectedProduct?.sku || '78610001001'
-  );
+  const [barcodeInput, setBarcodeInput] = useState<string>('');
 
   // Label settings
   const [labelFormat, setLabelFormat] = useState<LabelFormatType>('A4_24_LABELS');
@@ -64,10 +65,18 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Price with IVA Helper
+  const getPriceWithTax = (p: Product) => {
+    const taxRate = typeof p.taxRate === 'number' ? p.taxRate : (settings.defaultTaxRate || 15);
+    return p.price * (1 + taxRate / 100);
+  };
+
   // Handle product selection change
   const handleSelectProduct = (p: Product) => {
     setSelectedProductId(p.id);
+    setProductSearch(p.name);
     setBarcodeInput(p.barcode || p.sku || generateEan13Barcode('786'));
+    setIsSearchDropdownOpen(false);
   };
 
   // Generate EAN-13 (Ecuador 786)
@@ -86,7 +95,11 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 
   // Generate SKU-based Code128
   const handleGenFromSku = () => {
-    const code = generateCode128Barcode(selectedProduct?.sku);
+    if (!selectedProduct) {
+      showToast('Seleccione un producto primero.', 'warning');
+      return;
+    }
+    const code = generateCode128Barcode(selectedProduct.sku);
     setBarcodeInput(code);
     showToast('Código Alfanumérico generado basado en SKU', 'info');
   };
@@ -101,7 +114,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
   // Save barcode to product
   const handleSaveToProduct = () => {
     if (!selectedProduct) {
-      showAlert('Seleccione Producto', 'Debe seleccionar un producto primero.');
+      showAlert('Seleccione Producto', 'Debe seleccionar un producto del buscador primero.');
       return;
     }
     const cleanCode = barcodeInput.trim();
@@ -130,16 +143,32 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 
   // Filtered products for quick selector
   const filteredProducts = useMemo(() => {
-    if (!productSearch) return products;
+    if (!productSearch.trim()) return products;
     const q = productSearch.toLowerCase();
     return products.filter(p => 
       p.name.toLowerCase().includes(q) || 
       p.sku.toLowerCase().includes(q) || 
-      p.barcode.toLowerCase().includes(q)
+      (p.barcode && p.barcode.toLowerCase().includes(q))
     );
   }, [products, productSearch]);
 
   const barcodeValue = barcodeInput.trim() || selectedProduct?.sku || '786000000000';
+
+  // Open print modal & optional auto-print
+  const handleOpenPrintModal = (autoPrint: boolean = false) => {
+    if (!selectedProduct) {
+      showAlert('Seleccione Producto', 'Debe seleccionar un producto del buscador antes de generar o imprimir las etiquetas.');
+      return;
+    }
+    setIsPrintModalOpen(true);
+    if (autoPrint) {
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          window.print();
+        });
+      }, 400);
+    }
+  };
 
   // Render Single Label Item
   const renderLabelItem = (key?: number) => {
@@ -163,6 +192,8 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
       barcodeWidth = 1.2;
     }
 
+    const priceWithTax = getPriceWithTax(selectedProduct);
+
     return (
       <div
         key={key}
@@ -172,7 +203,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
         {/* Store Name Header */}
         {showStoreName && (
           <div className="text-[9px] font-black uppercase tracking-wider text-slate-600 truncate w-full border-b border-slate-200 pb-0.5">
-            {settings.storeName}
+            {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
           </div>
         )}
 
@@ -197,12 +228,12 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
           )}
         </div>
 
-        {/* Price Tag */}
+        {/* Price Tag WITH IVA */}
         {showPrice && (
           <div className="text-sm font-black text-slate-950 font-mono tracking-tight my-0.5 flex items-center gap-1 justify-center">
-            <span className="text-[10px] text-slate-500 font-bold">PVP:</span>
+            <span className="text-[10px] text-slate-500 font-bold">PVP (con IVA):</span>
             <span className="text-orange-600 font-black text-base">
-              {formatCurrency(selectedProduct.price, settings.currencySymbol)}
+              {formatCurrency(priceWithTax, settings.currencySymbol)}
             </span>
           </div>
         )}
@@ -237,7 +268,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
         </div>
 
         <button
-          onClick={() => setIsPrintModalOpen(true)}
+          onClick={() => handleOpenPrintModal(false)}
           className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
         >
           <Printer className="w-4 h-4" />
@@ -248,32 +279,83 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs">
         {/* Left Form Settings (7 cols) */}
         <div className="lg:col-span-7 space-y-5">
-          {/* STEP 1: Seleccionar Producto */}
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+          {/* STEP 1: Seleccionar Producto (Buscador editable en blanco) */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 relative">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                 <span className="w-5 h-5 bg-orange-500 text-white rounded-full flex items-center justify-center text-[10px] font-mono font-black">1</span>
-                <span>Seleccionar Producto del Inventario</span>
+                <span>Buscar Producto del Inventario</span>
               </span>
               <span className="text-[10px] text-slate-500 font-bold">{products.length} productos disponibles</span>
             </div>
 
-            <Select
-              value={selectedProductId}
-              onChange={(e) => {
-                const p = products.find((item) => item.id === e.target.value);
-                if (p) handleSelectProduct(p);
-              }}
-              className="w-full px-3 py-2 bg-white border border-slate-300 text-slate-900 rounded-xl font-black text-xs focus:ring-2 focus:ring-orange-500"
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.unit}) — [SKU: {p.sku || p.barcode || 'N/A'}] — {formatCurrency(p.price, settings.currencySymbol)}
-                </option>
-              ))}
-            </Select>
+            {/* Editable Search Input with Live Dropdown */}
+            <div className="relative">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => {
+                    setProductSearch(e.target.value);
+                    setIsSearchDropdownOpen(true);
+                  }}
+                  onFocus={() => setIsSearchDropdownOpen(true)}
+                  placeholder="Escriba el nombre, SKU o código del producto..."
+                  className="w-full pl-9 pr-10 py-2.5 bg-white border border-slate-300 text-slate-900 rounded-xl font-bold text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none shadow-2xs"
+                />
+                {productSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductSearch('');
+                      setSelectedProductId('');
+                      setBarcodeInput('');
+                      setIsSearchDropdownOpen(false);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    title="Limpiar búsqueda"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
 
-            {selectedProduct && (
+              {/* Dropdown menu of matching products */}
+              {isSearchDropdownOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto p-1 divide-y divide-slate-100">
+                  {filteredProducts.slice(0, 15).map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleSelectProduct(p)}
+                      className="w-full text-left p-2.5 hover:bg-orange-50 transition cursor-pointer flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <span className="font-bold text-slate-900 block">{p.name}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          SKU: {p.sku} {p.barcode ? `• Cód: ${p.barcode}` : ''}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-black text-emerald-600 block">
+                          {formatCurrency(getPriceWithTax(p), settings.currencySymbol)}
+                        </span>
+                        <span className="text-[9px] text-slate-400 font-bold block">PVP con IVA</span>
+                      </div>
+                    </button>
+                  ))}
+                  {filteredProducts.length === 0 && (
+                    <div className="p-4 text-center text-xs text-slate-400">
+                      No se encontraron productos coincidentes.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Selected Product Details Card */}
+            {selectedProduct ? (
               <div className="grid grid-cols-3 gap-2 pt-1 text-[11px] font-bold">
                 <div className="p-2 bg-white rounded-xl border border-slate-200">
                   <span className="block text-[9px] text-slate-400 font-extrabold uppercase">SKU</span>
@@ -284,11 +366,15 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
                   <span className="text-slate-800 truncate block">{selectedProduct.category}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-slate-200">
-                  <span className="block text-[9px] text-slate-400 font-extrabold uppercase">Precio Venta</span>
+                  <span className="block text-[9px] text-slate-400 font-extrabold uppercase">Precio con IVA</span>
                   <span className="font-mono text-emerald-600 font-black truncate block">
-                    {formatCurrency(selectedProduct.price, settings.currencySymbol)}
+                    {formatCurrency(getPriceWithTax(selectedProduct), settings.currencySymbol)}
                   </span>
                 </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium text-center">
+                Escriba en el buscador para seleccionar un producto.
               </div>
             )}
           </div>
@@ -494,22 +580,32 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 
             {/* Label Card Preview */}
             <div className="p-4 bg-slate-900/5 rounded-2xl border border-slate-300/60 shadow-lg flex items-center justify-center">
-              {renderLabelItem()}
+              {selectedProduct ? (
+                renderLabelItem()
+              ) : (
+                <div className="p-8 text-center text-slate-400 text-xs font-medium space-y-2">
+                  <Barcode className="w-10 h-10 mx-auto text-slate-300" />
+                  <p className="font-bold text-slate-600">Previsualización de Etiqueta</p>
+                  <p className="text-[11px]">Busque y seleccione un producto arriba para generar la vista previa.</p>
+                </div>
+              )}
             </div>
 
-            <div className="text-center space-y-1 max-w-xs">
-              <p className="text-[11px] font-bold text-slate-700">
-                Código generado: <span className="font-mono text-purple-700 font-black">{barcodeValue}</span>
-              </p>
-              <p className="text-[10px] text-slate-500 leading-tight">
-                Compatible con lectores láser USB, inalámbricos y cámaras de smartphone para facturación rápida en POS.
-              </p>
-            </div>
+            {selectedProduct && (
+              <div className="text-center space-y-1 max-w-xs">
+                <p className="text-[11px] font-bold text-slate-700">
+                  Código generado: <span className="font-mono text-purple-700 font-black">{barcodeValue}</span>
+                </p>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Compatible con lectores láser USB, inalámbricos y cámaras de smartphone para facturación rápida en POS.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Action Print Button */}
           <button
-            onClick={() => setIsPrintModalOpen(true)}
+            onClick={() => handleOpenPrintModal(true)}
             className="w-full py-3.5 bg-slate-950 hover:bg-slate-900 text-orange-400 hover:text-orange-300 font-black rounded-2xl transition flex items-center justify-center gap-2 cursor-pointer shadow-lg ring-1 ring-slate-800"
           >
             <Printer className="w-5 h-5 text-orange-500" />

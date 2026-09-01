@@ -67,6 +67,8 @@ export interface Promotion {
   status: 'ACTIVA' | 'PROGRAMADA' | 'EXPIRADA';
   minQuantity: number;
   appliedCategory: string; // nombre de la categoría a la que aplica
+  productId?: string; // ID de producto específico (opcional)
+  productName?: string; // Nombre del producto específico (opcional)
 }
 
 
@@ -178,6 +180,15 @@ export interface StoreSettings {
   footerNotes: string; // "¡Gracias por su compra! Garantía de 30 días con su comprobante."
   accountingRequired?: boolean;
   rimpe?: string;
+  country?: string;
+  province?: string;
+  city?: string;
+  specialTaxpayerNumber?: string;
+  isMicroenterprise?: boolean;
+  isRimpe?: boolean;
+  rimpeType?: string;
+  isRetentionAgent?: boolean;
+  retentionAgentResolution?: string;
 }
 
 export type SalesSubTab = 

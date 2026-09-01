@@ -248,8 +248,8 @@ export const Cart: React.FC<CartProps> = ({
                       onUpdateQuantity(
                         item.product.id,
                         Math.max(
-                          item.product.allowFractional ? 0.25 : 1,
-                          item.quantity - (item.product.allowFractional ? 0.5 : 1)
+                          0.1,
+                          item.quantity <= 1 ? +(item.quantity - 0.25).toFixed(2) : +(item.quantity - 1).toFixed(2)
                         )
                       )
                     }
@@ -260,21 +260,34 @@ export const Cart: React.FC<CartProps> = ({
 
                   <input
                     type="number"
-                    step={item.product.allowFractional ? '0.1' : '1'}
-                    min="0.1"
-                    value={item.quantity}
+                    step="any"
+                    min="0.0001"
+                    value={item.quantity === 0 ? '' : item.quantity}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 0;
-                      if (val > 0) onUpdateQuantity(item.product.id, val);
+                      const val = e.target.value;
+                      if (val === '') {
+                        onUpdateQuantity(item.product.id, 0);
+                      } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) {
+                          onUpdateQuantity(item.product.id, num);
+                        }
+                      }
                     }}
-                    className="w-10 text-center font-mono font-black text-slate-900 bg-transparent focus:outline-none text-xs"
+                    onBlur={(e) => {
+                      const num = parseFloat(e.target.value);
+                      if (isNaN(num) || num <= 0) {
+                        onUpdateQuantity(item.product.id, 1);
+                      }
+                    }}
+                    className="w-12 text-center font-mono font-black text-slate-900 bg-transparent focus:outline-none text-xs"
                   />
 
                   <button
                     onClick={() =>
                       onUpdateQuantity(
                         item.product.id,
-                        item.quantity + (item.product.allowFractional ? 0.5 : 1)
+                        item.quantity < 1 ? +(item.quantity + 0.25).toFixed(2) : +(item.quantity + 1).toFixed(2)
                       )
                     }
                     className="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-900 cursor-pointer"
@@ -288,13 +301,15 @@ export const Cart: React.FC<CartProps> = ({
                   <Percent className="w-3 h-3 text-slate-400" />
                   <input
                     type="number"
+                    step="any"
                     min="0"
                     max="100"
                     placeholder="0"
                     value={item.discountPercent || ''}
-                    onChange={(e) =>
-                      onUpdateDiscount(item.product.id, parseFloat(e.target.value) || 0)
-                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      onUpdateDiscount(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
+                    }}
                     className="w-9 px-1 py-0.5 bg-white border border-slate-200 text-slate-800 text-center font-mono font-bold rounded text-[11px] focus:ring-1 focus:ring-orange-500"
                     title="Descuento %"
                   />

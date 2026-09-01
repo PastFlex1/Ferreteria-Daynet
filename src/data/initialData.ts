@@ -55,6 +55,9 @@ export const initialStoreSettings: StoreSettings = {
   address: 'Av. Principal #100',
   phone: '0999999999',
   email: 'contacto@ferreteriadaynet.com',
+  country: 'Ecuador',
+  province: 'Pichincha',
+  city: 'Quito',
   currencySymbol: '$',
   currencyCode: 'USD',
   defaultTaxRate: 15,
@@ -65,6 +68,13 @@ export const initialStoreSettings: StoreSettings = {
   nextTicketNumber: 1,
   nextQuoteNumber: 1,
   footerNotes: '¡Gracias por su compra!',
+  accountingRequired: false,
+  specialTaxpayerNumber: '',
+  isMicroenterprise: false,
+  isRimpe: false,
+  rimpeType: 'NO_APLICA',
+  isRetentionAgent: false,
+  retentionAgentResolution: '',
 };
 
 export const CONSUMIDOR_FINAL: Customer = {

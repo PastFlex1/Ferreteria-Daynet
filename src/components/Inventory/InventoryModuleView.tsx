@@ -30,6 +30,8 @@ import {
   ArrowDownLeft, 
   Check, 
   X,
+  Save,
+  Minus,
   Layers,
   Percent
 } from 'lucide-react';
@@ -290,9 +292,91 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   // 6. Ajuste de Stock Formal State
   const [adjustProductId, setAdjustProductId] = useState(products[0]?.id || '');
   const [adjustQtyVal, setAdjustQtyVal] = useState('');
-  const [adjustTypeReason, setAdjustTypeReason] = useState<'ENTRADA_COMPRA' | 'ENTRADA_DEVOLUCION' | 'SALIDA_MERMA' | 'SALIDA_ROBO' | 'CORRECCION'>('SALIDA_MERMA');
+  const [adjustTypeReason, setAdjustTypeReason] = useState<'ENTRADA_COMPRA' | 'ENTRADA_DEVOLUCION' | 'SALIDA_MERMA' | 'SALIDA_ROBO' | 'CORRECCION'>('CORRECCION');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustHistory, setAdjustHistory] = useState<{ id: string; date: string; product: string; qty: number; reason: string; user: string; }[]>([]);
+
+  // Interactive Multi-Product Stock Adjustment Rows State (matching image design)
+  const [adjustRows, setAdjustRows] = useState<{
+    productId: string;
+    sku: string;
+    name: string;
+    category?: string;
+    currentStock: number;
+    newStock: number;
+  }[]>([]);
+  const [adjustSearch, setAdjustSearch] = useState('');
+  const [isAdjustSearchOpen, setIsAdjustSearchOpen] = useState(false);
+
+  const handleAddProductToAdjustRows = (p: Product) => {
+    if (adjustRows.some((r) => r.productId === p.id)) {
+      showToast(`El producto "${p.name}" ya fue agregado a la tabla.`, 'info');
+      setAdjustSearch('');
+      setIsAdjustSearchOpen(false);
+      return;
+    }
+    setAdjustRows((prev) => [
+      ...prev,
+      {
+        productId: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        currentStock: p.stock,
+        newStock: p.stock,
+      },
+    ]);
+    setAdjustSearch('');
+    setIsAdjustSearchOpen(false);
+  };
+
+  const handleRemoveAdjustRow = (productId: string) => {
+    setAdjustRows((prev) => prev.filter((r) => r.productId !== productId));
+  };
+
+  const handleUpdateAdjustRowStock = (productId: string, val: number) => {
+    setAdjustRows((prev) =>
+      prev.map((r) => (r.productId === productId ? { ...r, newStock: val } : r))
+    );
+  };
+
+  const handleSaveBatchAdjust = () => {
+    if (adjustRows.length === 0) {
+      showToast('Agregue al menos un producto para guardar el ajuste de stock.', 'warning');
+      return;
+    }
+
+    let modifiedCount = 0;
+    const newHistoryEntries: any[] = [];
+
+    adjustRows.forEach((r) => {
+      const diff = r.newStock - r.currentStock;
+      if (diff !== 0) {
+        onStockAdjust(r.productId, diff);
+        modifiedCount++;
+        newHistoryEntries.push({
+          id: `adj-${Date.now()}-${Math.random()}`,
+          date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          product: r.name,
+          qty: diff,
+          reason: `Ajuste manual de stock (${r.currentStock} ➔ ${r.newStock})`,
+          user: 'Administrador POS',
+        });
+      }
+    });
+
+    if (newHistoryEntries.length > 0) {
+      setAdjustHistory((prev) => [...newHistoryEntries, ...prev]);
+    }
+
+    showToast(
+      modifiedCount > 0
+        ? `¡Ajuste de stock guardado exitosamente! (${modifiedCount} productos actualizados)`
+        : 'Registro guardado sin cambios en existencias.',
+      'success'
+    );
+    setAdjustRows([]);
+  };
 
   // 7. Transferencias State
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
@@ -708,7 +792,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="py-3 px-4">Código / Nombre</th>
-                  <th className="py-3 px-4">Categoría Aplicada</th>
+                  <th className="py-3 px-4">Aplica A (Producto / Alcance)</th>
                   <th className="py-3 px-4 text-center">Descuento</th>
                   <th className="py-3 px-4 text-center">Min. Cantidad</th>
                   <th className="py-3 px-4 text-center">Vigencia</th>
@@ -723,7 +807,21 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                       <span className="font-mono text-orange-600 text-[11px] block">{p.code}</span>
                       {p.name}
                     </td>
-                    <td className="py-3 px-4 font-bold text-slate-700">{p.appliedCategory}</td>
+                    <td className="py-3 px-4 font-bold text-slate-700">
+                      {p.productName ? (
+                        <span className="inline-flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-200">
+                          📦 {p.productName}
+                        </span>
+                      ) : p.appliedCategory && p.appliedCategory !== 'TODOS' ? (
+                        <span className="inline-flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                          📁 Categoría: {p.appliedCategory}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                          🌐 Todos los Productos
+                        </span>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-center font-mono font-black text-emerald-600 text-sm">
                       {p.discountPercent}% OFF
                     </td>
@@ -759,8 +857,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
           {/* Promo Modal */}
           {isPromoModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
-              <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl my-auto">
                 <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
                   <Tag className="w-5 h-5 text-orange-500" />
                   <span>Crear Nueva Campaña Promocional</span>
@@ -768,44 +866,123 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
                 <div className="space-y-3 text-xs">
                   <div>
-                    <label className="block font-black text-slate-800 mb-1">Código Promocional</label>
+                    <label className="block font-black text-slate-800 mb-1">Producto Específico (Opcional)</label>
+                    <Select
+                      value={newPromo.productId || ''}
+                      onChange={(e) => {
+                        const pid = e.target.value;
+                        if (pid) {
+                          const selectedProd = products.find((p) => p.id === pid);
+                          if (selectedProd) {
+                            setNewPromo({
+                              ...newPromo,
+                              productId: selectedProd.id,
+                              productName: selectedProd.name,
+                              appliedCategory: selectedProd.category,
+                            });
+                          }
+                        } else {
+                          setNewPromo({
+                            ...newPromo,
+                            productId: '',
+                            productName: '',
+                          });
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    >
+                      <option value="">-- Aplicar por Categoría o General --</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          📦 {p.name} ({p.sku})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {!newPromo.productId && (
+                    <div>
+                      <label className="block font-black text-slate-800 mb-1">Categoría Aplicada</label>
+                      <Select
+                        value={newPromo.appliedCategory || 'TODOS'}
+                        onChange={(e) => setNewPromo({ ...newPromo, appliedCategory: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                      >
+                        <option value="TODOS">🌐 Todas las Categorías</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            📁 {c.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block font-black text-slate-800 mb-1">Código Promocional *</label>
                     <input
                       type="text"
                       value={newPromo.code}
                       onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
-                      placeholder="ej: PROMO-VERANO10"
+                      placeholder="ej: PROMO-HERRAMIENTAS10"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
                     />
                   </div>
 
                   <div>
-                    <label className="block font-black text-slate-800 mb-1">Nombre de la Oferta</label>
+                    <label className="block font-black text-slate-800 mb-1">Nombre de la Oferta *</label>
                     <input
                       type="text"
                       value={newPromo.name}
                       onChange={(e) => setNewPromo({ ...newPromo, name: e.target.value })}
-                      placeholder="ej: Descuento en Tuberías PVC"
+                      placeholder="ej: 15% OFF en Martillos Stanley"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-black text-slate-800 mb-1">% Descuento</label>
+                      <label className="block font-black text-slate-800 mb-1">% Descuento *</label>
                       <input
                         type="number"
+                        step="any"
+                        min="0"
+                        max="100"
                         value={newPromo.discountPercent}
                         onChange={(e) => setNewPromo({ ...newPromo, discountPercent: parseFloat(e.target.value) || 0 })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
                       />
                     </div>
                     <div>
-                      <label className="block font-black text-slate-800 mb-1">Mínimo Unidades</label>
+                      <label className="block font-black text-slate-800 mb-1">Mínimo Unidades *</label>
                       <input
                         type="number"
+                        step="any"
+                        min="1"
                         value={newPromo.minQuantity}
                         onChange={(e) => setNewPromo({ ...newPromo, minQuantity: parseFloat(e.target.value) || 1 })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-black text-slate-800 mb-1">Fecha Inicio</label>
+                      <input
+                        type="date"
+                        value={newPromo.startDate || new Date().toISOString().split('T')[0]}
+                        onChange={(e) => setNewPromo({ ...newPromo, startDate: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-black text-slate-800 mb-1">Fecha Fin</label>
+                      <input
+                        type="date"
+                        value={newPromo.endDate || '2026-12-31'}
+                        onChange={(e) => setNewPromo({ ...newPromo, endDate: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
                       />
                     </div>
                   </div>
@@ -827,17 +1004,31 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                               code: newPromo.code,
                               name: newPromo.name,
                               discountPercent: newPromo.discountPercent || 10,
-                              startDate: newPromo.startDate || '2026-08-01',
+                              startDate: newPromo.startDate || new Date().toISOString().split('T')[0],
                               endDate: newPromo.endDate || '2026-12-31',
                               status: 'ACTIVA',
                               minQuantity: newPromo.minQuantity || 1,
-                              appliedCategory: newPromo.appliedCategory || 'General'
+                              appliedCategory: newPromo.appliedCategory || 'TODOS',
+                              productId: newPromo.productId || undefined,
+                              productName: newPromo.productName || undefined,
                             }
                           ]);
                           setIsPromoModalOpen(false);
+                          setNewPromo({
+                            code: '',
+                            name: '',
+                            discountPercent: 10,
+                            startDate: new Date().toISOString().split('T')[0],
+                            endDate: '2026-12-31',
+                            status: 'ACTIVA',
+                            minQuantity: 1,
+                            appliedCategory: 'TODOS',
+                            productId: '',
+                            productName: ''
+                          });
                         }
                       }}
-                      className="px-5 py-2 bg-orange-500 text-white font-black rounded-xl shadow-md"
+                      className="px-5 py-2 bg-orange-500 text-white font-black rounded-xl shadow-md cursor-pointer"
                     >
                       Guardar Promoción
                     </button>
@@ -1136,89 +1327,233 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 7: AJUSTE DE STOCK
+          SUBTAB 7: AJUSTE DE STOCK DE PRODUCTOS
          --------------------------------------------------------------------- */}
       {subTab === 'AJUSTE_STOCK' && (
         <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-              <Sliders className="w-5 h-5 text-yellow-500" />
-              <span>Ajustes de Stock e Inventario (Mermas / Ingresos)</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Registra entradas o salidas justificadas para mantener la precisión del inventario físico.
-            </p>
+          {/* Breadcrumb / Top Indicator */}
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500 border-b border-slate-100 pb-3">
+            <span className="flex items-center gap-1"><Package className="w-3.5 h-3.5 text-slate-400" /> Panel</span>
+            <span>/</span>
+            <span className="text-slate-900 flex items-center gap-1"><Boxes className="w-3.5 h-3.5 text-orange-500" /> Productos</span>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-xs">
-            {/* Form */}
-            <form onSubmit={handleSaveFormalAdjust} className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
-              <h3 className="font-black text-slate-900 text-sm">Registrar Nuevo Ajuste</h3>
+          {/* Title Header */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-black text-slate-950 flex items-center gap-2 tracking-tight">
+              <Search className="w-6 h-6 text-slate-800" />
+              <span>Ajuste de Stock de Productos</span>
+            </h2>
+          </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Producto</label>
-                <Select
-                  value={adjustProductId}
-                  onChange={(e) => setAdjustProductId(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
-                >
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} (Stock: {p.stock} u.)
-                    </option>
-                  ))}
-                </Select>
-              </div>
+          {/* Búsqueda de Productos Section */}
+          <div className="space-y-1.5 relative">
+            <label className="block text-xs font-black text-slate-900">
+              Búsqueda de productos:
+            </label>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Motivo / Tipo de Ajuste</label>
-                <Select
-                  value={adjustTypeReason}
-                  onChange={(e) => setAdjustTypeReason(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
-                >
-                  <option value="SALIDA_MERMA">Salida por Merma / Daño</option>
-                  <option value="SALIDA_ROBO">Salida por Pérdida / Robos</option>
-                  <option value="ENTRADA_COMPRA">Entrada por Compra Directa</option>
-                  <option value="ENTRADA_DEVOLUCION">Entrada por Devolución</option>
-                  <option value="CORRECCION">Corrección de Conteo</option>
-                </Select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Cantidad de Unidades</label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={adjustQtyVal}
-                  onChange={(e) => setAdjustQtyVal(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Nota u Observación</label>
+            <div className="flex items-center">
+              <div className="relative w-full">
                 <input
                   type="text"
-                  placeholder="ej: Funda de cemento rota durante descarga"
-                  value={adjustNotes}
-                  onChange={(e) => setAdjustNotes(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl"
+                  placeholder="Ingrese el nombre de un producto"
+                  value={adjustSearch}
+                  onChange={(e) => {
+                    setAdjustSearch(e.target.value);
+                    setIsAdjustSearchOpen(true);
+                  }}
+                  onFocus={() => setIsAdjustSearchOpen(true)}
+                  className="w-full pl-3 pr-10 py-2 bg-white border border-blue-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-xs font-medium rounded-l-xl focus:outline-none"
                 />
+                {adjustSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdjustSearch('');
+                      setIsAdjustSearchOpen(false);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               <button
-                type="submit"
-                className="w-full py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black rounded-xl shadow-md cursor-pointer"
+                type="button"
+                onClick={() => setIsAdjustSearchOpen(!isAdjustSearchOpen)}
+                className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-r-xl border border-blue-600 flex items-center justify-center transition cursor-pointer shrink-0"
               >
-                Guardar Ajuste
+                <Filter className="w-4 h-4" />
               </button>
-            </form>
+            </div>
 
-            {/* History Ledger */}
-            <div className="lg:col-span-2 space-y-3">
-              <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider">Historial de Ajustes Realizados</h3>
+            {/* Dropdown list of matching products */}
+            {isAdjustSearchOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto p-1 divide-y divide-slate-100">
+                {products
+                  .filter((p) =>
+                    !adjustSearch ||
+                    p.name.toLowerCase().includes(adjustSearch.toLowerCase()) ||
+                    p.sku.toLowerCase().includes(adjustSearch.toLowerCase()) ||
+                    (p.barcode && p.barcode.toLowerCase().includes(adjustSearch.toLowerCase()))
+                  )
+                  .slice(0, 15)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleAddProductToAdjustRows(p)}
+                      className="w-full text-left p-2.5 hover:bg-blue-50 transition cursor-pointer flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <span className="font-bold text-slate-900 block">{p.name}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Código: {p.sku} • Cat: {p.category}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-slate-700 block">Stock: {p.stock} u.</span>
+                        <span className="text-[10px] text-blue-600 font-bold">+ Agregar</span>
+                      </div>
+                    </button>
+                  ))}
+                {products.filter((p) =>
+                  !adjustSearch ||
+                  p.name.toLowerCase().includes(adjustSearch.toLowerCase()) ||
+                  p.sku.toLowerCase().includes(adjustSearch.toLowerCase())
+                ).length === 0 && (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    No se encontraron productos coincidentes.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Table: Ajuste de Stock de Productos */}
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left text-xs text-slate-800">
+              <thead className="bg-slate-100 border-b border-slate-200 text-slate-900 font-black text-xs">
+                <tr>
+                  <th className="py-3 px-4 text-center w-16">Eliminar</th>
+                  <th className="py-3 px-4 w-36">Código</th>
+                  <th className="py-3 px-4">Producto</th>
+                  <th className="py-3 px-4 text-center w-28">Stock actual</th>
+                  <th className="py-3 px-4 text-center w-44">Stock nuevo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white font-medium">
+                {adjustRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                      <Search className="w-8 h-8 mx-auto mb-2 opacity-40 text-blue-500" />
+                      <p className="font-bold text-slate-700 text-sm">No hay productos seleccionados para ajuste</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Utilice el campo de búsqueda arriba para ingresar productos y modificar sus existencias.
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  adjustRows.map((row) => (
+                    <tr key={row.productId} className="hover:bg-slate-50 transition">
+                      {/* Eliminar Button */}
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAdjustRow(row.productId)}
+                          className="w-7 h-7 bg-rose-600 hover:bg-rose-700 text-white rounded-md transition flex items-center justify-center mx-auto cursor-pointer shadow-sm"
+                          title="Eliminar de la lista"
+                        >
+                          <X className="w-4 h-4 font-black" />
+                        </button>
+                      </td>
+
+                      {/* Código */}
+                      <td className="py-3 px-4 font-mono font-bold text-slate-900">
+                        {row.sku}
+                      </td>
+
+                      {/* Producto */}
+                      <td className="py-3 px-4">
+                        <span className="font-bold text-slate-900 block">{row.name}</span>
+                        {row.category && (
+                          <span className="text-[10px] text-slate-500 font-medium">({row.category})</span>
+                        )}
+                      </td>
+
+                      {/* Stock actual */}
+                      <td className={`py-3 px-4 text-center font-mono font-bold text-sm ${
+                        row.currentStock < 0 ? 'text-rose-600' : 'text-slate-900'
+                      }`}>
+                        {row.currentStock}
+                      </td>
+
+                      {/* Stock nuevo with - / + controls */}
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateAdjustRowStock(row.productId, Math.max(0, row.newStock - 1))}
+                            className="px-2.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-l-md transition cursor-pointer text-xs"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            step="any"
+                            value={row.newStock}
+                            onChange={(e) => handleUpdateAdjustRowStock(row.productId, parseFloat(e.target.value) || 0)}
+                            className="w-20 py-1 px-2 border-y border-slate-300 text-center font-mono font-black text-slate-900 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateAdjustRowStock(row.productId, row.newStock + 1)}
+                            className="px-2.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-r-md transition cursor-pointer text-xs"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer Summary text */}
+          <div className="text-xs text-slate-600 font-medium">
+            Mostrando registros del {adjustRows.length > 0 ? 1 : 0} al {adjustRows.length} de un total de {adjustRows.length} registros
+          </div>
+
+          {/* Action Buttons: Guardar registro & Cancelar */}
+          <div className="flex items-center space-x-3 pt-2">
+            <button
+              type="button"
+              onClick={handleSaveBatchAdjust}
+              disabled={adjustRows.length === 0}
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-md"
+            >
+              <Save className="w-4 h-4" />
+              <span>Guardar registro</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAdjustRows([])}
+              disabled={adjustRows.length === 0}
+              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-md"
+            >
+              <X className="w-4 h-4" />
+              <span>Cancelar</span>
+            </button>
+          </div>
+
+          {/* Historial Auditoría */}
+          {adjustHistory.length > 0 && (
+            <div className="pt-6 border-t border-slate-200 space-y-3">
+              <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider">Historial Reciente de Ajustes Realizados</h3>
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-left text-xs text-slate-700">
                   <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
@@ -1226,7 +1561,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                       <th className="py-2.5 px-3">Fecha</th>
                       <th className="py-2.5 px-3">Producto</th>
                       <th className="py-2.5 px-3 text-center">Ajuste</th>
-                      <th className="py-2.5 px-3">Motivo</th>
+                      <th className="py-2.5 px-3">Detalle / Motivo</th>
                       <th className="py-2.5 px-3">Usuario</th>
                     </tr>
                   </thead>
@@ -1250,7 +1585,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                 </table>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

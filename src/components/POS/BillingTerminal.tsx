@@ -290,13 +290,25 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   // Promotion calculation helper
   const getActivePromoForProduct = (product: Product, qty: number): Promotion | null => {
     const today = new Date().toISOString().split('T')[0];
-    const active = promotions.filter(p =>
-      p.status === 'ACTIVA' &&
-      p.startDate <= today &&
-      p.endDate >= today &&
-      p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase() &&
-      qty >= p.minQuantity
-    );
+    const active = promotions.filter(p => {
+      if (p.status !== 'ACTIVA') return false;
+      if (p.startDate && p.startDate > today) return false;
+      if (p.endDate && p.endDate < today) return false;
+      if (qty < (p.minQuantity || 1)) return false;
+
+      // Match product ID if specified
+      if (p.productId) {
+        return p.productId === product.id;
+      }
+
+      // Match category if specified (and not 'TODOS')
+      if (p.appliedCategory && p.appliedCategory !== 'TODOS') {
+        return p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase();
+      }
+
+      return true; // Applies to all products
+    });
+
     if (active.length === 0) return null;
     return active.reduce((best, p) => p.discountPercent > best.discountPercent ? p : best);
   };
@@ -359,18 +371,20 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   };
 
   const handleUpdateQuantity = (productId: string, newQty: number) => {
-    if (newQty <= 0) {
-      handleRemoveItem(productId);
-      return;
-    }
+    if (isNaN(newQty) || newQty < 0) return;
 
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
         const baseUnitPrice = getPriceForQuantity(item.product, newQty);
+
+        const promo = getActivePromoForProduct(item.product, newQty);
+        const discountPct = promo ? Math.max(promo.discountPercent, item.discountPercent) : item.discountPercent;
+        const appliedPromo = promo ? `${promo.code} · ${promo.discountPercent}% OFF` : item.appliedPromo;
+
         const itemSubtotal = newQty * baseUnitPrice;
-        const itemDiscountAmount = itemSubtotal * (item.discountPercent / 100);
+        const itemDiscountAmount = itemSubtotal * (discountPct / 100);
         const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
         const itemTaxAmount = baseAfterDiscount * taxRate;
         const itemTotal = baseAfterDiscount + itemTaxAmount;
@@ -379,9 +393,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
           ...item,
           quantity: newQty,
           unitPrice: baseUnitPrice,
+          discountPercent: discountPct,
           subtotal: itemSubtotal,
           taxAmount: itemTaxAmount,
           total: itemTotal,
+          appliedPromo,
         };
       })
     );
@@ -1086,9 +1102,17 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                           className="w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between hover:bg-slate-50 transition cursor-pointer border-b border-slate-50 last:border-none"
                         >
                           <div>
-                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                               <span>{p.name}</span>
                               <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
+                              {(() => {
+                                const promo = getActivePromoForProduct(p, 1);
+                                return promo ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
+                                    🏷️ {promo.discountPercent}% OFF
+                                  </span>
+                                ) : null;
+                              })()}
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
                               <span>Cat: {p.category}</span>
@@ -1196,21 +1220,44 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                           <div className="flex items-center justify-center gap-1">
                             <button
                               type="button"
-                              onClick={() => handleUpdateQuantity(item.product.id, item.quantity - 1)}
+                              onClick={() => {
+                                const nextQty = item.quantity <= 1 ? Math.max(0.1, +(item.quantity - 0.25).toFixed(2)) : +(item.quantity - 1).toFixed(2);
+                                handleUpdateQuantity(item.product.id, nextQty);
+                              }}
                               className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
                             >
                               -
                             </button>
                             <input
                               type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) => handleUpdateQuantity(item.product.id, parseFloat(e.target.value) || 1)}
-                              className="w-10 text-center font-black font-mono border border-slate-200 rounded py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              step="any"
+                              min="0.0001"
+                              value={item.quantity === 0 ? '' : item.quantity}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '') {
+                                  handleUpdateQuantity(item.product.id, 0);
+                                } else {
+                                  const num = parseFloat(val);
+                                  if (!isNaN(num)) {
+                                    handleUpdateQuantity(item.product.id, num);
+                                  }
+                                }
+                              }}
+                              onBlur={(e) => {
+                                const num = parseFloat(e.target.value);
+                                if (isNaN(num) || num <= 0) {
+                                  handleUpdateQuantity(item.product.id, 1);
+                                }
+                              }}
+                              className="w-14 text-center font-black font-mono border border-slate-200 rounded py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
                             />
                             <button
                               type="button"
-                              onClick={() => handleUpdateQuantity(item.product.id, item.quantity + 1)}
+                              onClick={() => {
+                                const nextQty = item.quantity < 1 ? +(item.quantity + 0.25).toFixed(2) : +(item.quantity + 1).toFixed(2);
+                                handleUpdateQuantity(item.product.id, nextQty);
+                              }}
                               className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
                             >
                               +
@@ -1222,10 +1269,13 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         <td className="py-2.5 px-2 text-right">
                           <input
                             type="number"
-                            step="0.01"
+                            step="any"
                             min="0"
                             value={item.unitPrice}
-                            onChange={(e) => handleUpdateUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              handleUpdateUnitPrice(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
+                            }}
                             className="w-20 text-right font-bold font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:ring-1 focus:ring-orange-500 focus:outline-none"
                           />
                         </td>
@@ -1283,10 +1333,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         <td className="py-2.5 px-2 text-center">
                           <input
                             type="number"
+                            step="any"
                             min="0"
                             max="100"
                             value={item.discountPercent || 0}
-                            onChange={(e) => handleUpdateDiscount(item.product.id, parseFloat(e.target.value) || 0)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              handleUpdateDiscount(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
+                            }}
                             className="w-12 text-center font-bold font-mono border border-slate-200 rounded px-1 py-0.5 text-xs text-slate-800 focus:ring-1 focus:ring-orange-500 focus:outline-none"
                           />
                         </td>
@@ -1410,7 +1464,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                     <div className="relative">
                       <input
                         type="number"
-                        step="0.01"
+                        step="any"
                         min="0"
                         placeholder={sriBreakdown.valorAPagar > 0 ? sriBreakdown.valorAPagar.toFixed(2) : "0.00"}
                         value={cashAmountTendered}
@@ -1674,7 +1728,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 </span>
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   placeholder={sriBreakdown.valorAPagar > 0 ? sriBreakdown.valorAPagar.toFixed(2) : "0.00"}
                   value={cashAmountTendered}
@@ -1856,7 +1910,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">Precio Unit. ($)</label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     required
                     value={customPrice}
@@ -1868,7 +1922,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad</label>
                   <input
                     type="number"
-                    min="1"
+                    step="any"
+                    min="0.0001"
                     required
                     value={customQty}
                     onChange={(e) => setCustomQty(e.target.value)}
@@ -1963,7 +2018,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   </span>
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     required
                     value={openCashAmount}

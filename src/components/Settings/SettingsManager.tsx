@@ -721,7 +721,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">Nombre Comercial *</label>
                 <input
@@ -759,13 +759,57 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <label className="block text-xs font-bold text-slate-300 mb-1">Teléfono de Atención</label>
                 <input
                   type="text"
-                  value={formData.phone}
+                  value={formData.phone || ''}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500"
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Correo Electrónico Matriz</label>
+                <input
+                  type="email"
+                  value={formData.email || ''}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500"
+                />
+              </div>
+
+              {/* Ubicación Geográfica */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">País *</label>
+                <input
+                  type="text"
+                  value={formData.country ?? 'Ecuador'}
+                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500 font-medium"
+                  placeholder="Ej: Ecuador"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Provincia *</label>
+                <input
+                  type="text"
+                  value={formData.province ?? ''}
+                  onChange={(e) => setFormData({ ...formData, province: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500 font-medium"
+                  placeholder="Ej: Pichincha, Guayas, Azuay..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Ciudad / Cantón *</label>
+                <input
+                  type="text"
+                  value={formData.city ?? ''}
+                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500 font-medium"
+                  placeholder="Ej: Quito, Guayaquil, Cuenca..."
+                />
+              </div>
+
+              <div className="sm:col-span-2 lg:col-span-3">
                 <label className="block text-xs font-bold text-slate-300 mb-1">Dirección Matriz / Fiscal *</label>
                 <input
                   type="text"
@@ -774,6 +818,108 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs focus:outline-none focus:border-orange-500"
                 />
+              </div>
+            </div>
+
+            {/* Clasificación & Configuración Tributaria SRI */}
+            <div className="pt-4 border-t border-slate-800 space-y-4">
+              <h3 className="text-xs font-black text-orange-400 uppercase tracking-wider flex items-center gap-2">
+                <Receipt className="w-4 h-4" />
+                <span>Régimen Tributario & Clasificación SRI</span>
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Obligado a llevar contabilidad (SI / NO) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">Obligado a Llevar Contabilidad *</label>
+                  <select
+                    value={formData.accountingRequired ? 'SI' : 'NO'}
+                    onChange={(e) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-bold focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="NO">NO</option>
+                    <option value="SI">SI</option>
+                  </select>
+                </div>
+
+                {/* N° Contribuyente Especial */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">N° Contribuyente Especial (Resolución SRI)</label>
+                  <input
+                    type="text"
+                    value={formData.specialTaxpayerNumber ?? ''}
+                    onChange={(e) => setFormData({ ...formData, specialTaxpayerNumber: e.target.value })}
+                    placeholder="Escriba el N° de resolución o deje en blanco..."
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-amber-400 font-mono font-bold rounded-xl text-xs focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+              </div>
+
+              {/* Casillas para visar / Toggles */}
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                <span className="block text-[11px] font-black uppercase tracking-wider text-slate-400">
+                  Marque las casillas que correspondan a su contribución legal (SRI):
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* ¿Contribuyente régimen microempresas? */}
+                  <label className="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-800 hover:border-orange-500/50 cursor-pointer transition">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.isMicroenterprise}
+                      onChange={(e) => setFormData({ ...formData, isMicroenterprise: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400 bg-slate-950 border-slate-700"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-white block">¿Régimen Microempresas?</span>
+                      <span className="text-[10px] text-slate-400 block">Marcar si aplica</span>
+                    </div>
+                  </label>
+
+                  {/* ¿Contribuyente régimen RIMPE? */}
+                  <label className="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-800 hover:border-orange-500/50 cursor-pointer transition">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.isRimpe}
+                      onChange={(e) => setFormData({ ...formData, isRimpe: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400 bg-slate-950 border-slate-700"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-white block">¿Régimen RIMPE?</span>
+                      <span className="text-[10px] text-slate-400 block">Emprendedor / Negocio Popular</span>
+                    </div>
+                  </label>
+
+                  {/* ¿Agente de retención? */}
+                  <label className="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-800 hover:border-orange-500/50 cursor-pointer transition">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.isRetentionAgent}
+                      onChange={(e) => setFormData({ ...formData, isRetentionAgent: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400 bg-slate-950 border-slate-700"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-white block">¿Agente de Retención?</span>
+                      <span className="text-[10px] text-slate-400 block">Resolución N° Agente SRI</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Si es agente de retención, campo extra para resolución */}
+                {formData.isRetentionAgent && (
+                  <div className="pt-2">
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      N° Resolución Agente de Retención SRI:
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.retentionAgentResolution ?? ''}
+                      onChange={(e) => setFormData({ ...formData, retentionAgentResolution: e.target.value })}
+                      placeholder="Ej: NAC-DNCRASGC20-00000001"
+                      className="w-full max-w-md px-3 py-2 bg-slate-900 border border-slate-700 text-white rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1623,6 +1769,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <label className="text-xs font-bold text-slate-300">Base Inicial en Efectivo por Defecto ($)</label>
               <input 
                 type="number"
+                step="any"
                 defaultValue={100.00}
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-teal-400"
               />
@@ -1632,6 +1779,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <label className="text-xs font-bold text-slate-300">Límite Máximo de Efectivo en Caja ($)</label>
               <input 
                 type="number"
+                step="any"
                 defaultValue={1000.00}
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-amber-400"
               />

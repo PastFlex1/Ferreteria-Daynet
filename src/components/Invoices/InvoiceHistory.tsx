@@ -631,7 +631,8 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                   <div>
                     <input
                       type="number"
-                      min="1"
+                      step="any"
+                      min="0.0001"
                       placeholder="Cantidad"
                       value={editAddQty}
                       onChange={(e) => setEditAddQty(e.target.value)}
@@ -673,10 +674,11 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           <td className="py-2 px-3 text-center">
                             <input
                               type="number"
-                              min="1"
+                              step="any"
+                              min="0.0001"
                               value={item.quantity}
                               onChange={(e) => {
-                                const newQty = parseFloat(e.target.value) || 1;
+                                const newQty = parseFloat(e.target.value) || 0;
                                 const sub = item.unitPrice * newQty;
                                 const tax = sub * ((item.taxRate || 15) / 100);
                                 setEditItems(items => items.map((it, i) => i === idx ? {
@@ -693,7 +695,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           <td className="py-2 px-3 text-right">
                             <input
                               type="number"
-                              step="0.01"
+                              step="any"
                               min="0"
                               value={item.unitPrice}
                               onChange={(e) => {
@@ -708,7 +710,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                                   total: sub + tax
                                 } : it));
                               }}
-                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono text-emerald-600 font-bold"
+                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono font-bold"
                             />
                           </td>
                           <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">

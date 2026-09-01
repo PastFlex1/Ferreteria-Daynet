@@ -464,8 +464,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 </label>
                 <input
                   type="number"
-                  step={adjustingProduct.allowFractional ? '0.1' : '1'}
-                  min="0.1"
+                  step="any"
+                  min="0.0001"
                   required
                   value={adjustQty}
                   onChange={(e) => setAdjustQty(e.target.value)}

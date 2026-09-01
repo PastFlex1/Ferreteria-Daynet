@@ -453,7 +453,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  min="1"
+                  step="any"
+                  min="0.0001"
                   placeholder="1"
                   value={quantityToAdd}
                   onChange={(e) => setQuantityToAdd(e.target.value)}
@@ -538,11 +539,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         <td className="py-2.5 px-3 text-center">
                           <input
                             type="number"
-                            min="1"
+                            step="any"
+                            min="0.0001"
                             placeholder="1"
                             value={item.qty === 0 ? '' : item.qty}
                             onChange={(e) =>
-                              handleUpdateQty(item.productId, e.target.value === '' ? 0 : parseInt(e.target.value) || 0)
+                              handleUpdateQty(item.productId, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)
                             }
                             className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-center font-bold text-xs"
                           />

@@ -149,7 +149,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   // -------------------------------------------------------------------------
   // FORM STATES FOR REGISTRAR COMPRA (COMPRAS)
   // -------------------------------------------------------------------------
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>(suppliers[0]?.id || '');
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
   const [invoiceNumberInput, setInvoiceNumberInput] = useState('');
   const [purchaseDateInput, setPurchaseDateInput] = useState(new Date().toISOString().split('T')[0]);
   const [paymentCondition, setPaymentCondition] = useState<'CONTADO' | 'CREDITO'>('CONTADO');
@@ -175,9 +175,16 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [editOrderQty, setEditOrderQty] = useState('');
 
   const handleAddOrderProduct = () => {
-    const p = products.find(prod => prod.id === newOrderProductId) || products[0];
-    if(!p) return;
-    const qty = parseFloat(newOrderQty) || 1;
+    const p = products.find(prod => prod.id === newOrderProductId);
+    if (!p) {
+      showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
+      return;
+    }
+    const qty = parseFloat(newOrderQty) || 0;
+    if (qty <= 0) {
+      showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Requerida', 'warning');
+      return;
+    }
     const sub = p.costPrice * qty;
     const tax = sub * ((typeof p.taxRate === 'number' ? p.taxRate : 15) / 100);
     const newItem: PurchaseItem = {
@@ -220,6 +227,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     };
     setPurchaseOrders([newOrder, ...purchaseOrders]);
     setIsNewOrderModalOpen(false);
+    setNewOrderSupplierId('');
+    setNewOrderProductId('');
+    setNewOrderQty('');
     setNewOrderItems([]);
     showToast(`Orden de Compra #${newOrder.orderNumber} creada exitosamente.`, 'success');
   };
@@ -243,9 +253,16 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
   // Add Item to Edit Order
   const handleAddEditOrderItem = () => {
-    const p = products.find(prod => prod.id === editOrderProductId) || products[0];
-    if (!p) return;
-    const qty = parseFloat(editOrderQty) || 1;
+    const p = products.find(prod => prod.id === editOrderProductId);
+    if (!p) {
+      showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
+      return;
+    }
+    const qty = parseFloat(editOrderQty) || 0;
+    if (qty <= 0) {
+      showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Requerida', 'warning');
+      return;
+    }
     const sub = p.costPrice * qty;
     const tax = sub * ((typeof p.taxRate === 'number' ? p.taxRate : 15) / 100);
     const newItem: PurchaseItem = {
@@ -295,6 +312,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
   // Convert Order to Purchase Invoice
   const handleConvertOrderToPurchase = (oc: PurchaseOrder) => {
+    // Close the view modal first
+    setSelectedOrderView(null);
+
+    // Populate the purchase form with order data
     setSelectedSupplierId(oc.supplier.id);
     setPurchaseItems(oc.items.map(item => ({ ...item })));
     setInvoiceNumberInput(`FAC-${oc.orderNumber.replace(/[^0-9]/g, '') || Date.now().toString().slice(-6)}`);
@@ -302,9 +323,6 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     // Update order status to RECIBIDA
     const updated = purchaseOrders.map(o => o.id === oc.id ? { ...o, status: 'RECIBIDA' as const } : o);
     setPurchaseOrders(updated);
-    if (selectedOrderView && selectedOrderView.id === oc.id) {
-      setSelectedOrderView({ ...selectedOrderView, status: 'RECIBIDA' });
-    }
 
     if (onSelectSubTab) {
       onSelectSubTab('COMPRAS');
@@ -332,18 +350,21 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   // Print Order
   const handlePrintOrder = (oc: PurchaseOrder) => {
     setSelectedOrderView(oc);
+    // Wait for React to render the modal, then print
     setTimeout(() => {
-      window.print();
-    }, 300);
+      requestAnimationFrame(() => {
+        window.print();
+      });
+    }, 500);
   };
 
 
   // Item selector for purchase form
   const [taxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const activeTaxRates = taxRates.filter(t => t.active !== false);
-  const [currentProductId, setCurrentProductId] = useState<string>(products[0]?.id || '');
-  const [currentQty, setCurrentQty] = useState<string>('10');
-  const [currentCost, setCurrentCost] = useState<string>(products[0]?.costPrice?.toString() || '10');
+  const [currentProductId, setCurrentProductId] = useState<string>('');
+  const [currentQty, setCurrentQty] = useState<string>('');
+  const [currentCost, setCurrentCost] = useState<string>('');
   const [currentTaxRate, setCurrentTaxRate] = useState<string>(settings.defaultTaxRate ? settings.defaultTaxRate.toString() : '15');
   const [currentBatch, setCurrentBatch] = useState<string>('');
   const [currentExpiry, setCurrentExpiry] = useState<string>('');
@@ -406,13 +427,23 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   // -------------------------------------------------------------------------
   const handleAddPurchaseItem = () => {
     const prod = products.find((p) => p.id === currentProductId);
-    if (!prod) return;
+    if (!prod) {
+      showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
+      return;
+    }
 
     const qty = parseFloat(currentQty) || 0;
     const cost = parseFloat(currentCost) || 0;
     const tax = parseFloat(currentTaxRate) || 0;
 
-    if (qty <= 0 || cost < 0) return;
+    if (qty <= 0) {
+      showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Requerida', 'warning');
+      return;
+    }
+    if (cost < 0) {
+      showAlert('Ingrese un costo unitario válido.', 'Costo Requerido', 'warning');
+      return;
+    }
 
     if (!currentBatch.trim() || !currentExpiry) {
       showAlert('El número de lote y la fecha de caducidad son obligatorios para ingresar la mercadería.', 'Campos Requeridos', 'warning');
@@ -437,7 +468,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     };
 
     setPurchaseItems([...purchaseItems, newItem]);
-    setCurrentQty('10');
+    setCurrentProductId('');
+    setCurrentQty('');
+    setCurrentCost('');
     setCurrentBatch('');
     setCurrentExpiry('');
   };
@@ -449,6 +482,11 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const handleProcessPurchase = (e: React.FormEvent) => {
     e.preventDefault();
     if (purchaseItems.length === 0) return;
+
+    if (!selectedSupplierId) {
+      showAlert('Seleccione un proveedor para registrar la factura de compra.', 'Proveedor Requerido', 'warning');
+      return;
+    }
 
     const supplier = suppliers.find((s) => s.id === selectedSupplierId) || suppliers[0];
 
@@ -524,6 +562,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setPurchasesHistory([newInvoice, ...purchasesHistory]);
     setPurchaseItems([]);
     setInvoiceNumberInput('');
+    setSelectedSupplierId('');
+    setCurrentProductId('');
+    setCurrentQty('');
+    setCurrentCost('');
+    setCurrentBatch('');
+    setCurrentExpiry('');
+    setCreditDaysInput('');
     setPurchaseSuccessMsg(`¡Factura de Compra #${newInvoice.invoiceNumber} registrada exitosamente! Se actualizó el inventario.`);
   };
 
@@ -585,11 +630,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   };
 
   const handleOpenCreateManualPreOrder = () => {
-    setPreOrderSupplierId(suppliers[0]?.id || '');
+    setPreOrderSupplierId('');
     setPreOrderPriority('MEDIA');
     setPreOrderExpectedDate(new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0]);
     setPreOrderNotes('');
     setPreOrderItems([]);
+    setPreOrderAddProductId('');
+    setPreOrderAddQty('');
     setIsPreOrderModalOpen(true);
   };
 
@@ -660,7 +707,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       ]);
     }
     setPreOrderAddProductId('');
-    setPreOrderAddQty('10');
+    setPreOrderAddQty('');
   };
 
   const handleUpdatePreOrderItemQty = (index: number, newQty: number) => {
@@ -862,6 +909,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   onChange={(e) => setSelectedSupplierId(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
                 >
+                  <option value="">-- Seleccionar Proveedor --</option>
                   {suppliers.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.taxId})
@@ -927,12 +975,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                       setCurrentProductId(e.target.value);
                       const p = products.find((prod) => prod.id === e.target.value);
                       if (p) {
-                        setCurrentCost(p.costPrice.toString());
+                        setCurrentCost(p.costPrice > 0 ? p.costPrice.toString() : '');
                         setCurrentTaxRate((typeof p.taxRate === 'number' ? p.taxRate : 15).toString());
+                      } else {
+                        setCurrentCost('');
                       }
                     }}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
                   >
+                    <option value="">-- Seleccionar Producto del Catálogo --</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name} (IVA {typeof p.taxRate === 'number' ? p.taxRate : 15}%)
@@ -945,8 +996,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Cantidad</label>
                   <input
                     type="number"
-                    min="1"
-                    placeholder="1"
+                    step="any"
+                    min="0.0001"
+                    placeholder="Cant."
                     value={currentQty}
                     onChange={(e) => setCurrentQty(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center"
@@ -1316,7 +1368,14 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
             </div>
             <button
-              onClick={() => setIsNewOrderModalOpen(true)}
+              onClick={() => {
+                setNewOrderSupplierId('');
+                setNewOrderExpectedDate(new Date().toISOString().split('T')[0]);
+                setNewOrderItems([]);
+                setNewOrderProductId('');
+                setNewOrderQty('');
+                setIsNewOrderModalOpen(true);
+              }}
               className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
             >
               <Plus className="w-4 h-4 text-purple-200" />
@@ -2194,7 +2253,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 <div className="sm:col-span-2">
                   <input
                     type="number"
-                    min="1"
+                    step="any"
+                    min="0.0001"
                     placeholder="Cant."
                     value={preOrderAddQty}
                     onChange={(e) => setPreOrderAddQty(e.target.value)}
@@ -2266,9 +2326,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                               </button>
                               <input
                                 type="number"
-                                min="1"
+                                step="any"
+                                min="0.0001"
                                 value={item.quantity}
-                                onChange={(e) => handleUpdatePreOrderItemQty(idx, parseFloat(e.target.value) || 1)}
+                                onChange={(e) => handleUpdatePreOrderItemQty(idx, parseFloat(e.target.value) || 0)}
                                 className="w-14 text-center font-mono font-black text-slate-900 text-xs border border-slate-200 rounded py-0.5 bg-slate-50"
                               />
                               <button
@@ -2633,10 +2694,52 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
             </div>
 
             {/* Printable Voucher Body */}
-            <div id="printable-order-voucher" className="space-y-6 text-xs text-slate-800">
-              {/* Header Info: Store & Supplier Cards */}
+            <div id="printable-order-voucher" className="space-y-6 text-xs text-slate-800 bg-white">
+              {/* Membrete Corporativo */}
+              <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  {settings.logoUrl ? (
+                    <img src={settings.logoUrl} alt="Logo" className="w-16 h-16 object-contain border border-slate-200 rounded-xl p-1" />
+                  ) : (
+                    <div className="p-3 bg-purple-950 text-white rounded-xl font-black text-lg">
+                      <ListOrdered className="w-8 h-8 text-purple-400" />
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-lg font-black text-slate-950 uppercase tracking-tight">
+                      {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                    </h1>
+                    <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                    <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong></p>
+                    <p className="text-[11px] text-slate-600">{settings.address} • Tel: {settings.phone}</p>
+                  </div>
+                </div>
+
+                <div className="text-right sm:border-l sm:border-slate-200 sm:pl-6 space-y-1">
+                  <span className="px-3 py-1 bg-purple-900 text-white font-black text-[10px] rounded-lg uppercase tracking-wider block text-center">
+                    ORDEN DE COMPRA
+                  </span>
+                  <p className="text-[12px] font-bold text-slate-900 font-mono">N° {selectedOrderView.orderNumber}</p>
+                  <p className="text-[10px] text-slate-600 font-mono">
+                    Fecha: <strong>{selectedOrderView.createdAt}</strong>
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Entrega: <strong>{selectedOrderView.expectedDelivery || 'Inmediata'}</strong>
+                  </p>
+                  <p className={`text-[10px] font-black mt-1 ${
+                    selectedOrderView.status === 'RECIBIDA' ? 'text-emerald-700' :
+                    selectedOrderView.status === 'APROBADA' ? 'text-indigo-700' :
+                    selectedOrderView.status === 'ENVIADA' ? 'text-blue-700' :
+                    selectedOrderView.status === 'CANCELADA' ? 'text-rose-700' :
+                    'text-amber-700'
+                  }`}>
+                    Estado: {selectedOrderView.status}
+                  </p>
+                </div>
+              </div>
+
+              {/* Info Cards: Comprador y Proveedor */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Store Header */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
                   <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Comprador (Empresa)</span>
                   <h4 className="text-sm font-black text-slate-900">{settings.storeName || 'FERRETERÍA INDUSTRIAL'}</h4>
@@ -2645,9 +2748,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   <p className="text-slate-600">Tel: {settings.phone || '0990000000'} • Email: {settings.email || 'compras@ferreteria.com'}</p>
                 </div>
 
-                {/* Supplier Header */}
                 <div className="p-4 bg-purple-50/50 border border-purple-200/80 rounded-2xl space-y-1.5">
-                  <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Proveedor (Emisor)</span>
+                  <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Proveedor</span>
                   <h4 className="text-sm font-black text-slate-900">{selectedOrderView.supplier.name}</h4>
                   <p className="text-slate-600">RUC / CI: <strong className="text-slate-900 font-mono">{selectedOrderView.supplier.taxId}</strong></p>
                   {selectedOrderView.supplier.contactPerson && (
@@ -2659,9 +2761,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
               </div>
 
               {/* Items Table */}
-              <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <table className="w-full text-left text-xs text-slate-700">
-                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px] tracking-wider">
+              <div className="overflow-x-auto rounded-2xl border border-slate-300">
+                <table className="w-full text-left text-xs text-slate-800">
+                  <thead className="bg-slate-900 text-white font-black uppercase text-[10px] tracking-wider">
                     <tr>
                       <th className="py-2.5 px-3">#</th>
                       <th className="py-2.5 px-3">SKU</th>
@@ -2673,15 +2775,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                       <th className="py-2.5 px-3 text-right">Total</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white font-medium">
+                  <tbody className="divide-y divide-slate-200 bg-white font-medium">
                     {selectedOrderView.items.map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/80 transition">
                         <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
                         <td className="py-2.5 px-3 font-mono text-purple-600 font-bold">{item.sku}</td>
                         <td className="py-2.5 px-3 font-bold text-slate-900">{item.productName}</td>
                         <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900">{item.quantity}</td>
-                        <td className="py-2.5 px-3 text-right font-mono text-emerald-600">{formatCurrency(item.costPrice, settings.currencySymbol)}</td>
-                        <td className="py-2.5 px-3 text-center font-mono text-slate-500">{item.taxPercent}%</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-700">{formatCurrency(item.costPrice, settings.currencySymbol)}</td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-600 text-[11px]">{item.taxPercent}%</td>
                         <td className="py-2.5 px-3 text-right font-mono text-slate-700">{formatCurrency(item.subtotal, settings.currencySymbol)}</td>
                         <td className="py-2.5 px-3 text-right font-mono font-black text-slate-900">{formatCurrency(item.total, settings.currencySymbol)}</td>
                       </tr>
@@ -2700,32 +2802,41 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </p>
                 </div>
 
-                <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-2 font-mono text-xs">
-                  <div className="flex justify-between text-slate-300">
+                <div className="p-4 bg-slate-50 border border-slate-300 rounded-2xl space-y-2 font-mono text-xs">
+                  <div className="flex justify-between text-slate-600">
                     <span>Subtotal Neto:</span>
-                    <span>{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + i.subtotal, 0), settings.currencySymbol)}</span>
+                    <span className="font-bold text-slate-900">{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + i.subtotal, 0), settings.currencySymbol)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-300">
+                  <div className="flex justify-between text-slate-600">
                     <span>IVA Estimado:</span>
-                    <span>{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + (i.total - i.subtotal), 0), settings.currencySymbol)}</span>
+                    <span className="font-bold text-slate-900">{formatCurrency(selectedOrderView.items.reduce((acc, i) => acc + (i.total - i.subtotal), 0), settings.currencySymbol)}</span>
                   </div>
-                  <div className="flex justify-between text-base font-black text-emerald-400 pt-2 border-t border-slate-800">
-                    <span>Total Estimado:</span>
+                  <div className="flex justify-between text-base font-black text-slate-950 pt-2 border-t-2 border-slate-900">
+                    <span>TOTAL ESTIMADO:</span>
                     <span>{formatCurrency(selectedOrderView.totalAmount, settings.currencySymbol)}</span>
                   </div>
                 </div>
               </div>
 
               {/* Signature Blocks for Printing */}
-              <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+              <div className="grid grid-cols-3 gap-6 pt-10 text-center text-xs">
                 <div className="border-t border-slate-400 pt-2">
-                  <p className="font-bold text-slate-900">Firma Autorizada</p>
-                  <p className="text-slate-500 text-[11px]">Departamento de Compras / Gerencia</p>
+                  <p className="font-bold text-slate-900">Elaborado por</p>
+                  <p className="text-slate-500 text-[11px]">Departamento de Compras</p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">Autorizado por</p>
+                  <p className="text-slate-500 text-[11px]">Gerencia / Administración</p>
                 </div>
                 <div className="border-t border-slate-400 pt-2">
                   <p className="font-bold text-slate-900">Recibido Conforme</p>
-                  <p className="text-slate-500 text-[11px]">Proveedor / Representante Comercial</p>
+                  <p className="text-slate-500 text-[11px]">Proveedor / Representante</p>
                 </div>
+              </div>
+
+              {/* Footer / Nota Legal */}
+              <div className="text-center text-[9px] text-slate-400 pt-4 border-t border-slate-200">
+                <p>Documento generado electrónicamente • {settings.storeName || 'FERRETERÍA INDUSTRIAL'} • {new Date().toLocaleDateString('es-EC', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
               </div>
             </div>
 
@@ -2869,8 +2980,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   <div>
                     <input
                       type="number"
-                      min="1"
-                      placeholder="Cantidad"
+                      step="any"
+                      min="0.0001"
+                      placeholder="Cant."
                       value={editOrderQty}
                       onChange={(e) => setEditOrderQty(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center"
@@ -2911,10 +3023,11 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           <td className="py-2 px-3 text-center">
                             <input
                               type="number"
-                              min="1"
+                              step="any"
+                              min="0.0001"
                               value={item.quantity}
                               onChange={(e) => {
-                                const newQty = parseFloat(e.target.value) || 1;
+                                const newQty = parseFloat(e.target.value) || 0;
                                 const sub = item.costPrice * newQty;
                                 const tax = sub * (item.taxPercent / 100);
                                 setEditOrderItems(items => items.map((it, i) => i === idx ? {

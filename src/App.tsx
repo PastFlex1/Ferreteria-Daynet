@@ -403,9 +403,11 @@ export default function App() {
   };
 
   const handleOpenCashRegister = (initialCash: number) => {
+    const nowIso = new Date().toISOString();
     setCashSession({
       id: `session-${Date.now()}`,
-      openedAt: new Date().toISOString(),
+      openedAt: nowIso,
+      closedAt: undefined,
       initialCash,
       expectedCash: initialCash,
       status: 'ABIERTA',
@@ -414,6 +416,48 @@ export default function App() {
       totalSalesTransfer: 0,
       totalSalesCredit: 0,
       totalInvoicesCount: 0,
+    });
+  };
+
+  const handleCloseCashRegister = (actualCashCount: number) => {
+    const openTime = cashSession.openedAt ? new Date(cashSession.openedAt).getTime() : Date.now();
+    const sessionInvoices = invoices.filter((i) => {
+      if (i.documentType === 'COTIZACION') return false;
+      const invTime = new Date((i as any).date || i.createdAt || Date.now()).getTime();
+      return invTime >= openTime;
+    });
+
+    const salesCash = sessionInvoices
+      .filter((i) => i.paymentMethod === 'EFECTIVO' && i.paymentStatus === 'PAGADA')
+      .reduce((sum, i) => sum + i.total, 0);
+
+    const salesCard = sessionInvoices
+      .filter((i) => (i.paymentMethod === 'TARJETA_DEBITO' || i.paymentMethod === 'TARJETA_CREDITO') && i.paymentStatus === 'PAGADA')
+      .reduce((sum, i) => sum + i.total, 0);
+
+    const salesTransfer = sessionInvoices
+      .filter((i) => i.paymentMethod === 'TRANSFERENCIA' && i.paymentStatus === 'PAGADA')
+      .reduce((sum, i) => sum + i.total, 0);
+
+    const salesCredit = sessionInvoices
+      .filter((i) => i.paymentMethod === 'CREDITO_CLIENTE')
+      .reduce((sum, i) => sum + i.total, 0);
+
+    const expected = cashSession.initialCash + salesCash;
+    const difference = actualCashCount - expected;
+
+    setCashSession({
+      ...cashSession,
+      closedAt: new Date().toISOString(),
+      actualCash: actualCashCount,
+      expectedCash: expected,
+      totalSalesCash: salesCash,
+      totalSalesCard: salesCard,
+      totalSalesTransfer: salesTransfer,
+      totalSalesCredit: salesCredit,
+      totalInvoicesCount: sessionInvoices.length,
+      difference,
+      status: 'CERRADA',
     });
   };
 
@@ -510,19 +554,6 @@ export default function App() {
 
     localStorage.clear();
     window.location.reload();
-  };
-
-  const handleCloseCashRegister = (actualCashCount: number) => {
-    const expected = cashSession.initialCash + cashSession.totalSalesCash;
-    const difference = actualCashCount - expected;
-
-    setCashSession((prev) => ({
-      ...prev,
-      closedAt: new Date().toISOString(),
-      actualCash: actualCashCount,
-      difference,
-      status: 'CERRADA',
-    }));
   };
 
   if (isInitialLoading) {

@@ -71,7 +71,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setCategory(productToEdit.category);
       setDescription(productToEdit.description || '');
       setUnit(productToEdit.unit);
-      setPrice(productToEdit.price.toString());
+      setPrice(productToEdit.price !== undefined && productToEdit.price !== null ? productToEdit.price.toFixed(2) : '');
       setCostPrice(productToEdit.costPrice.toString());
       setStock(productToEdit.stock.toString());
       setMinStock(productToEdit.minStock.toString());
@@ -79,7 +79,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setAllowFractional(productToEdit.allowFractional);
       const currentTax = productToEdit.taxRate ?? defaultTaxRate;
       setTaxRate(currentTax.toString());
-      setPriceWithTax((productToEdit.price * (1 + currentTax / 100)).toFixed(4));
+      setPriceWithTax((productToEdit.price * (1 + currentTax / 100)).toFixed(2));
       setPriceScales(productToEdit.priceScales || []);
     } else {
       // Reset defaults
@@ -118,7 +118,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const p = parseFloat(val) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
-    setPriceWithTax((p * (1 + finalT / 100)).toFixed(4));
+    setPriceWithTax((p * (1 + finalT / 100)).toFixed(2));
   };
 
   const handlePriceWithTaxChange = (val: string) => {
@@ -130,7 +130,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const pWithTax = parseFloat(val) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
-    setPrice((pWithTax / (1 + finalT / 100)).toFixed(4));
+    setPrice((pWithTax / (1 + finalT / 100)).toFixed(2));
   };
 
   const handleTaxRateChange = (val: string) => {
@@ -142,7 +142,19 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const p = parseFloat(price) || 0;
     const t = parseFloat(val);
     const finalT = isNaN(t) ? defaultTaxRate : t;
-    setPriceWithTax((p * (1 + finalT / 100)).toFixed(4));
+    setPriceWithTax((p * (1 + finalT / 100)).toFixed(2));
+  };
+
+  const handlePriceBlur = () => {
+    if (price && !isNaN(parseFloat(price))) {
+      setPrice(parseFloat(price).toFixed(2));
+    }
+  };
+
+  const handlePriceWithTaxBlur = () => {
+    if (priceWithTax && !isNaN(parseFloat(priceWithTax))) {
+      setPriceWithTax(parseFloat(priceWithTax).toFixed(2));
+    }
   };
 
   const handleAddScale = () => {
@@ -409,6 +421,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 placeholder="0.00"
                 value={price}
                 onChange={(e) => handlePriceChange(e.target.value)}
+                onBlur={handlePriceBlur}
                 className="w-full px-3 py-2 bg-white border border-orange-300 text-orange-600 font-mono font-bold rounded-xl text-sm focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -425,6 +438,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   placeholder="0.00"
                   value={priceWithTax}
                   onChange={(e) => handlePriceWithTaxChange(e.target.value)}
+                  onBlur={handlePriceWithTaxBlur}
                   className="w-full px-3 py-2 bg-white border border-orange-300 text-slate-900 font-mono font-bold rounded-xl text-sm focus:ring-2 focus:ring-orange-500"
                 />
               </div>
@@ -459,7 +473,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </label>
               <input
                 type="number"
-                step={allowFractional ? '0.1' : '1'}
+                step="any"
                 placeholder="0"
                 value={stock}
                 onChange={(e) => setStock(e.target.value)}
@@ -473,7 +487,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </label>
               <input
                 type="number"
-                step="1"
+                step="any"
                 placeholder="0"
                 value={minStock}
                 onChange={(e) => setMinStock(e.target.value)}
@@ -560,8 +574,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step={allowFractional ? '0.1' : '1'}
-                          min="1"
+                          step="any"
+                          min="0.0001"
                           placeholder="1"
                           value={scale.minQty === 0 ? '' : scale.minQty}
                           onChange={(e) => handleUpdateScale(scale.id, 'minQty', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
@@ -575,7 +589,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step={allowFractional ? '0.1' : '1'}
+                          step="any"
                           placeholder="∞"
                           value={scale.maxQty ? scale.maxQty : ''}
                           onChange={(e) => handleUpdateScale(scale.id, 'maxQty', e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined)}

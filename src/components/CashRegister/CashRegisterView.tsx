@@ -34,30 +34,52 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
-  // Calculate live sales breakdown for active session
-  const todaySalesCash = invoices
-    .filter((i) => i.documentType !== 'COTIZACION' && i.paymentMethod === 'EFECTIVO' && i.paymentStatus === 'PAGADA')
+  // Calculate live sales breakdown for active session window
+  const sessionInvoices = React.useMemo(() => {
+    if (!session.openedAt) return [];
+    const openTime = new Date(session.openedAt).getTime();
+    const closeTime = session.closedAt ? new Date(session.closedAt).getTime() : Infinity;
+
+    return invoices.filter((i) => {
+      if (i.documentType === 'COTIZACION') return false;
+      const invTime = new Date((i as any).date || i.createdAt || Date.now()).getTime();
+      return invTime >= openTime && invTime <= closeTime;
+    });
+  }, [invoices, session.openedAt, session.closedAt]);
+
+  const todaySalesCash = sessionInvoices
+    .filter((i) => i.paymentMethod === 'EFECTIVO' && i.paymentStatus === 'PAGADA')
     .reduce((sum, i) => sum + i.total, 0);
 
-  const todaySalesCard = invoices
+  const todaySalesCard = sessionInvoices
     .filter(
       (i) =>
-        i.documentType !== 'COTIZACION' &&
         (i.paymentMethod === 'TARJETA_DEBITO' || i.paymentMethod === 'TARJETA_CREDITO') &&
         i.paymentStatus === 'PAGADA'
     )
     .reduce((sum, i) => sum + i.total, 0);
 
-  const todaySalesTransfer = invoices
-    .filter((i) => i.documentType !== 'COTIZACION' && i.paymentMethod === 'TRANSFERENCIA' && i.paymentStatus === 'PAGADA')
+  const todaySalesTransfer = sessionInvoices
+    .filter((i) => i.paymentMethod === 'TRANSFERENCIA' && i.paymentStatus === 'PAGADA')
     .reduce((sum, i) => sum + i.total, 0);
 
-  const todaySalesCredit = invoices
-    .filter((i) => i.documentType !== 'COTIZACION' && i.paymentMethod === 'CREDITO_CLIENTE')
+  const todaySalesCredit = sessionInvoices
+    .filter((i) => i.paymentMethod === 'CREDITO_CLIENTE')
     .reduce((sum, i) => sum + i.total, 0);
 
   const expectedCashInDrawer = session.initialCash + todaySalesCash;
   const grandTotalSales = todaySalesCash + todaySalesCard + todaySalesTransfer + todaySalesCredit;
+
+  const handleOpenPrintModal = (autoPrint: boolean = false) => {
+    setIsPrintModalOpen(true);
+    if (autoPrint) {
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          window.print();
+        });
+      }, 400);
+    }
+  };
 
   const handleOpenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +135,7 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              onClick={() => setIsPrintModalOpen(true)}
+              onClick={() => handleOpenPrintModal(true)}
               className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2 cursor-pointer shadow-sm"
             >
               <Printer className="w-4 h-4 text-orange-400" />
