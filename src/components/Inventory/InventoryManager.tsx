@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Layers, Search, Plus, UploadCloud, Download, AlertTriangle, Boxes, BadgeDollarSign, TrendingUp, Filter, MapPin, ArrowUpDown, Edit3, Trash2 } from 'lucide-react';
 import { Category, Product, ProductCategory, StoreSettings } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { ProductModal } from './ProductModal';
 import { BulkProductImporterModal } from './BulkProductImporterModal';
@@ -317,7 +317,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono text-slate-500">
-                        {formatCurrency(p.costPrice, settings.currencySymbol)}
+                        {formatCostCurrency(p.costPrice, settings.currencySymbol)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-extrabold text-orange-600">
                         {formatCurrency(p.price, settings.currencySymbol)}

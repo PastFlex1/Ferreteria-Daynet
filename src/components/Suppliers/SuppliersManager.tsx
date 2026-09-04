@@ -996,7 +996,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                 <label className="block font-black text-slate-800 mb-1">Monto a Abonar ($)</label>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   required
                   value={paymentForm.amount}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}

@@ -126,7 +126,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   }, [availableMethods]);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(defaultKey);
-  const [amountTenderedStr, setAmountTenderedStr] = useState<string>(total.toFixed(4));
+  const [amountTenderedStr, setAmountTenderedStr] = useState<string>(total.toFixed(2));
   const [transferReference, setTransferReference] = useState('');
   const [notes, setNotes] = useState('');
   const [propinaEnabled, setPropinaEnabled] = useState(false);
@@ -135,7 +135,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setPaymentMethod(defaultKey);
-      setAmountTenderedStr(total.toFixed(4));
+      setAmountTenderedStr(total.toFixed(2));
       setTransferReference('');
       setNotes('');
     }
@@ -160,7 +160,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   const handleExactCash = () => {
-    setAmountTenderedStr(total.toFixed(4));
+    setAmountTenderedStr(total.toFixed(2));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -307,7 +307,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </span>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   min="0"
                   value={amountTenderedStr}
                   onChange={(e) => setAmountTenderedStr(e.target.value)}
@@ -382,7 +382,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2 font-medium">
               <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
               <span>
-                El crédito excede el límite disponible del cliente (${(customer.creditLimit - customer.currentBalance).toFixed(4)} libre).
+                El crédito excede el límite disponible del cliente (${(customer.creditLimit - customer.currentBalance).toFixed(2)} libre).
               </span>
             </div>
           )}

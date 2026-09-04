@@ -88,7 +88,7 @@ export const CreateRetentionModal: React.FC<CreateRetentionModalProps> = ({
                 <option value="">Seleccione una factura emitida...</option>
                 {invoices.map((inv) => (
                   <option key={inv.id} value={inv.id}>
-                    {inv.fullNumber} - {inv.customer.name} - ${inv.total.toFixed(4)}
+                    {inv.fullNumber} - {inv.customer.name} - ${inv.total.toFixed(2)}
                   </option>
                 ))}
               </Select>
@@ -100,13 +100,13 @@ export const CreateRetentionModal: React.FC<CreateRetentionModalProps> = ({
                   <User className="w-4 h-4 text-slate-400" /> {selectedInvoice.customer.name}
                 </p>
                 <p className="text-slate-500">
-                  Subtotal: <span className="font-mono font-bold text-slate-900">${selectedInvoice.subtotal.toFixed(4)}</span>
+                  Subtotal: <span className="font-mono font-bold text-slate-900">${selectedInvoice.subtotal.toFixed(2)}</span>
                 </p>
                 <p className="text-slate-500">
-                  IVA Retenible: <span className="font-mono font-bold text-slate-900">${selectedInvoice.taxTotal.toFixed(4)}</span>
+                  IVA Retenible: <span className="font-mono font-bold text-slate-900">${selectedInvoice.taxTotal.toFixed(2)}</span>
                 </p>
                 <p className="text-slate-500">
-                  Total Factura: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(4)}</span>
+                  Total Factura: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(2)}</span>
                 </p>
               </div>
             )}
@@ -151,7 +151,7 @@ export const CreateRetentionModal: React.FC<CreateRetentionModalProps> = ({
                 </span>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   required
                   value={formData.totalRetenido}
                   onChange={(e) => setFormData({ ...formData, totalRetenido: e.target.value })}

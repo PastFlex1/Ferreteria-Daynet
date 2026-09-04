@@ -165,6 +165,8 @@ export default function App() {
   const dbCustomers = customers.filter(c => c.id !== 'cust-general');
   const allCustomers = [CONSUMIDOR_FINAL, ...dbCustomers];
   const [invoices, setInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', initialInvoices);
+  const [orders, setOrders] = useFirestoreSync<Order[]>('ferreteria_orders', []);
+  const [posInvoicingOrder, setPosInvoicingOrder] = useState<Order | null>(null);
   const [cashSession, setCashSession] = useFirestoreSync<CashRegisterSession>('ferreteria_cash_session', {
     id: 'cash-0',
     openedAt: new Date().toISOString(),
@@ -207,6 +209,25 @@ export default function App() {
     setInvoices((prev) => [newInvoice, ...prev]);
     setProducts(updatedProducts);
     setSettings(updatedSettings);
+
+    // Si la venta corresponde a un pedido, cambiar automáticamente su estado de PENDIENTE a FACTURADO
+    const targetOrderId = newInvoice.orderId || posInvoicingOrder?.id;
+    if (targetOrderId && newInvoice.documentType !== 'COTIZACION') {
+      setOrders((prevOrders) =>
+        prevOrders.map((ord) =>
+          ord.id === targetOrderId
+            ? {
+                ...ord,
+                status: 'FACTURADO',
+                invoiceId: newInvoice.id,
+                invoiceNumber: newInvoice.fullNumber,
+              }
+            : ord
+        )
+      );
+      setPosInvoicingOrder(null);
+      showToast(`Pedido ${targetOrderId} facturado con éxito con ${newInvoice.fullNumber}`, 'success');
+    }
 
     // If customer paid on credit, update customer debt balance
     if (newInvoice.paymentMethod === 'CREDITO_CLIENTE') {
@@ -292,6 +313,8 @@ export default function App() {
   };
 
   const handleInvoiceOrder = (order: Order) => {
+    setPosInvoicingOrder(order);
+
     const customerMatch = allCustomers.find(
       (c) =>
         (order.customerRuc && c.docNumber.trim() === order.customerRuc.trim()) ||
@@ -346,6 +369,7 @@ export default function App() {
     setTimeout(() => {
       setIsTabLoading(false);
     }, 150);
+    showToast(`Pedido ${order.id} cargado en el Punto de Venta para facturar`, 'info');
   };
 
   const handleCreateCustomer = (newCustomer: Customer) => {
@@ -620,6 +644,8 @@ export default function App() {
             initialDocumentType={posDocumentType}
             initialCartItems={posInitialCart}
             initialCustomer={posInitialCustomer}
+            invoicingOrder={posInvoicingOrder}
+            onCancelInvoicingOrder={() => setPosInvoicingOrder(null)}
             paymentMethods={paymentMethods}
             isCashRegisterOpen={cashSession.status === 'ABIERTA'}
             onOpenCashRegister={handleOpenCashRegister}

@@ -246,7 +246,7 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
     xml += `            <codigoPrincipal>${escapeXml(item.codigo || (index + 1).toString().padStart(3, '0'))}</codigoPrincipal>\n`;
     xml += `            <descripcion>${escapeXml(item.descripcion)}</descripcion>\n`;
     xml += `            <cantidad>${safe(item.cantidad).toFixed(2)}</cantidad>\n`;
-    xml += `            <precioUnitario>${unitPrice.toFixed(4)}</precioUnitario>\n`;
+    xml += `            <precioUnitario>${unitPrice.toFixed(2)}</precioUnitario>\n`;
     xml += `            <descuento>${discount.toFixed(2)}</descuento>\n`;
     xml += `            <precioTotalSinImpuesto>${safe(baseVal).toFixed(2)}</precioTotalSinImpuesto>\n\n`;
     xml += `            <impuestos>\n`;
@@ -354,4 +354,36 @@ export function downloadXML(xmlString: string, filename: string) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Obtiene o construye el XML con el contenedor oficial <autorizacion> del SRI.
+ */
+export function getAuthorizedXmlContent(
+  invoice: Invoice,
+  settings: StoreSettings,
+  establishment: string = '001',
+  emissionPoint: string = '001',
+  sriMode: string = 'PRODUCCION'
+): string {
+  if (invoice.sriXmlFirmado && invoice.sriXmlFirmado.trim().length > 0) {
+    return invoice.sriXmlFirmado;
+  }
+
+  const ambienteCode = sriMode === 'PRODUCCION' ? '2' : '1';
+  const sriData = convertERPInvoiceToSRI(invoice, settings, establishment, emissionPoint, ambienteCode);
+  const { xml, claveAcceso } = generateInvoiceXML(sriData);
+
+  const numAuth = invoice.sriNumeroAutorizacion || invoice.sriClaveAcceso || claveAcceso;
+  const fechaAuth = invoice.sriFechaAutorizacion || invoice.createdAt || new Date().toISOString();
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<autorizacion>
+  <estado>AUTORIZADO</estado>
+  <numeroAutorizacion>${numAuth}</numeroAutorizacion>
+  <fechaAutorizacion class="fechaAutorizacion">${fechaAuth}</fechaAutorizacion>
+  <ambiente>${sriMode === 'PRODUCCION' ? 'PRODUCCIÓN' : 'PRUEBAS'}</ambiente>
+  <comprobante><![CDATA[${xml}]]></comprobante>
+  <mensajes/>
+</autorizacion>`;
 }

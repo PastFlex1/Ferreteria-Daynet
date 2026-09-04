@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { Product, StoreSettings, Invoice, ProductCategory } from '../../types';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { Select } from '../Shared/Select';
 import { useModal } from '../../context/ModalContext';
@@ -611,7 +611,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                           Stock: {p.stock} {p.unit}
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono">
-                          Costo: ${p.costPrice.toFixed(2)}
+                          Costo: {formatCostCurrency(p.costPrice, settings.currencySymbol)}
                         </span>
                       </div>
                     </button>
@@ -1138,7 +1138,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Stock Actual / Costo Prom.:</span>
                   <strong className="font-mono text-emerald-700">
-                    {selectedProduct.stock} {selectedProduct.unit} • ${selectedProduct.costPrice.toFixed(2)}
+                    {selectedProduct.stock} {selectedProduct.unit} • {formatCostCurrency(selectedProduct.costPrice, settings.currencySymbol)}
                   </strong>
                 </div>
               </div>
@@ -1173,13 +1173,13 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                       <td className="p-1.5 border-r border-slate-200 font-bold">{m.typeLabel}</td>
                       <td className="p-1.5 border-r border-slate-200 font-mono text-[10px]">{m.docNumber || '-'}</td>
                       <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.inQty > 0 ? m.inQty : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.inQty > 0 ? `$${m.inCost.toFixed(2)}` : '-'}</td>
+                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.inQty > 0 ? formatCostCurrency(m.inCost, settings.currencySymbol) : '-'}</td>
                       <td className="p-1.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-700">{m.inQty > 0 ? `$${m.inTotal.toFixed(2)}` : '-'}</td>
                       <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.outQty > 0 ? m.outQty : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.outQty > 0 ? `$${m.outCost.toFixed(2)}` : '-'}</td>
+                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.outQty > 0 ? formatCostCurrency(m.outCost, settings.currencySymbol) : '-'}</td>
                       <td className="p-1.5 border-r border-slate-200 text-right font-mono font-bold text-rose-700">{m.outQty > 0 ? `$${m.outTotal.toFixed(2)}` : '-'}</td>
                       <td className="p-1.5 border-r border-slate-200 text-right font-mono font-black">{m.balanceQty}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">${m.balanceCost.toFixed(2)}</td>
+                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{formatCostCurrency(m.balanceCost, settings.currencySymbol)}</td>
                       <td className="p-1.5 text-right font-mono font-black text-slate-900">${m.balanceTotal.toFixed(2)}</td>
                     </tr>
                   ))}

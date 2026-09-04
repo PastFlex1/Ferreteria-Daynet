@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { useModal } from '../../context/ModalContext';
 import { 
@@ -32,18 +32,21 @@ import {
   Eye,
   Pencil
 } from 'lucide-react';
-import { Customer, Invoice, Product, SalesSubTab, StoreSettings } from '../../types';
+import { Customer, Invoice, Product, SalesSubTab, StoreSettings, CreditNoteData } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { CreateOrderModal, Order } from './CreateOrderModal';
 import { OrderDetailModal } from './OrderDetailModal';
 import { printOrderDocument, downloadOrderPdf } from '../../utils/orderPdfGenerator';
 import { CreateGuiaRemisionModal, GuiaRemisionData } from './CreateGuiaRemisionModal';
 import { CreateCreditNoteModal } from './CreateCreditNoteModal';
+import { CreditNoteViewerModal } from './CreditNoteViewerModal';
+import { printCreditNoteDocument, downloadCreditNotePdf } from '../../utils/creditNotePdfGenerator';
 import { CreateMedicalPrescriptionModal } from './CreateMedicalPrescriptionModal';
 import { CreateRetentionModal } from './CreateRetentionModal';
 import { CommissionsAndGoalsManager } from './CommissionsAndGoalsManager';
 import { defaultSellers } from '../../data/initialData';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
+import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 
 
 interface SalesModuleViewProps {
@@ -98,6 +101,39 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
   };
 
+  // Detección automática: Si el sistema detecta que un número de pedido se facturó, actualiza su estado de PENDIENTE a FACTURADO
+  useEffect(() => {
+    if (!orders || orders.length === 0 || !invoices || invoices.length === 0) return;
+
+    let hasChanges = false;
+    const syncedOrders = orders.map((ord) => {
+      if (ord.status === 'FACTURADO' || ord.status === 'ANULADO') return ord;
+
+      // Buscar si existe un comprobante generado para este pedido
+      const matchingInvoice = invoices.find(
+        (inv) =>
+          inv.documentType !== 'COTIZACION' &&
+          inv.paymentStatus !== 'ANULADA' &&
+          (inv.orderId === ord.id || (inv.notes && inv.notes.includes(ord.id)))
+      );
+
+      if (matchingInvoice) {
+        hasChanges = true;
+        return {
+          ...ord,
+          status: 'FACTURADO' as const,
+          invoiceId: matchingInvoice.id,
+          invoiceNumber: matchingInvoice.fullNumber,
+        };
+      }
+      return ord;
+    });
+
+    if (hasChanges) {
+      setOrders(syncedOrders);
+    }
+  }, [invoices, orders]);
+
   const [guias, setGuias] = useFirestoreSync<GuiaRemisionData[]>('ferreteria_guias', []);
   
   const [isCreateGuiaOpen, setIsCreateGuiaOpen] = useState(false);
@@ -113,6 +149,8 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [secRetention, setSecRetention] = useFirestoreSync<string>('ferreteria_settings_sec_retention', '000000001');
 
   const [creditNotes, setCreditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
+  const [selectedCreditNoteForView, setSelectedCreditNoteForView] = useState<CreditNoteData | null>(null);
+  const [isCreditNoteViewerOpen, setIsCreditNoteViewerOpen] = useState(false);
   const [retenciones, setRetenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
   const [recetas, setRecetas] = useFirestoreSync<any[]>('ferreteria_recetas', []);
   const [isCreditNoteModalOpen, setIsCreditNoteModalOpen] = useState(false);
@@ -269,6 +307,11 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                         >
                           {ord.status}
                         </span>
+                        {ord.invoiceNumber && (
+                          <span className="block text-[9px] font-mono text-emerald-700 font-bold mt-1">
+                            {ord.invoiceNumber}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-extrabold text-orange-600">
                         {formatCurrency(ord.total, settings.currencySymbol)}
@@ -325,8 +368,8 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                             <Download className="w-4 h-4" />
                           </button>
 
-                          {/* 5. Facturar */}
-                          {ord.status !== 'FACTURADO' && ord.status !== 'ANULADO' && (
+                          {/* 5. Facturar (si no está facturado) o Ver Factura (si ya fue facturado) */}
+                          {ord.status !== 'FACTURADO' && ord.status !== 'ANULADO' ? (
                             <button
                               type="button"
                               onClick={() => {
@@ -341,7 +384,29 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                             >
                               <Receipt className="w-4 h-4" />
                             </button>
-                          )}
+                          ) : ord.status === 'FACTURADO' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const matchingInv = invoices.find(
+                                  (i) => i.id === ord.invoiceId || i.fullNumber === ord.invoiceNumber || ((i as any).orderId === ord.id)
+                                );
+                                if (matchingInv && onOpenViewer) {
+                                  onOpenViewer(matchingInv);
+                                } else {
+                                  showAlert(
+                                    `Este pedido fue facturado con el comprobante N° ${ord.invoiceNumber || 'Generado'}`,
+                                    'Pedido Facturado',
+                                    'info'
+                                  );
+                                }
+                              }}
+                              className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg transition cursor-pointer border border-emerald-200"
+                              title={ord.invoiceNumber ? `Ver Factura ${ord.invoiceNumber}` : 'Ver Comprobante Facturado'}
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -497,12 +562,13 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                   <th className="py-3 px-4">Motivo Modificación</th>
                   <th className="py-3 px-4 text-right">Monto</th>
                   <th className="py-3 px-4 text-center">Estado SRI</th>
+                  <th className="py-3 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {creditNotes.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500 font-medium">
+                    <td colSpan={7} className="py-8 text-center text-slate-500 font-medium">
                       No hay notas de crédito emitidas.
                     </td>
                   </tr>
@@ -521,6 +587,42 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                           {nc.status}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {/* 1. Ver */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCreditNoteForView(nc);
+                              setIsCreditNoteViewerOpen(true);
+                            }}
+                            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition cursor-pointer"
+                            title="Ver Nota de Crédito RIDE"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+
+                          {/* 2. Imprimir */}
+                          <button
+                            type="button"
+                            onClick={() => printCreditNoteDocument(nc, settings, invoices)}
+                            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer"
+                            title="Imprimir Nota de Crédito"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+
+                          {/* 3. Descargar PDF */}
+                          <button
+                            type="button"
+                            onClick={() => downloadCreditNotePdf(nc, settings, invoices)}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                            title="Descargar en PDF"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -537,6 +639,19 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
           establishment={establishment}
           emissionPoint={emissionPoint}
           secCreditNote={secCreditNote}
+        />
+      )}
+
+      {isCreditNoteViewerOpen && selectedCreditNoteForView && (
+        <CreditNoteViewerModal
+          isOpen={isCreditNoteViewerOpen}
+          onClose={() => {
+            setIsCreditNoteViewerOpen(false);
+            setSelectedCreditNoteForView(null);
+          }}
+          creditNote={selectedCreditNoteForView}
+          settings={settings}
+          invoices={invoices}
         />
       )}
       </div>
@@ -673,6 +788,24 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                           <Send className="w-3 h-3" />
                           <span>{inv.sriStatus === 'AUTORIZADO' ? 'Ver SRI' : 'Transmitir SRI'}</span>
                         </button>
+
+                        {/* Botón Descargar XML Autorizado */}
+                        {(inv.sriStatus === 'AUTORIZADO' || !!inv.sriNumeroAutorizacion) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const xml = getAuthorizedXmlContent(inv, settings, establishment, emissionPoint, sriMode);
+                              downloadXML(xml, `factura-${inv.fullNumber}-autorizada.xml`);
+                              showAlert(`XML Autorizado de la factura ${inv.fullNumber} descargado exitosamente.`, 'SRI', 'success');
+                            }}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg font-bold text-[10px] transition inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title="Descargar XML Oficial Autorizado del SRI"
+                          >
+                            <Download className="w-3 h-3 text-emerald-600" />
+                            <span>XML Autorizado</span>
+                          </button>
+                        )}
+
                         {onOpenViewer && (
                           <button
                             onClick={() => onOpenViewer(inv)}

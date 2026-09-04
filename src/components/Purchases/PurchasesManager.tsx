@@ -39,7 +39,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { Product, PurchasesSubTab, StoreSettings, TaxRateItem, PreOrder, PreOrderItem } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { Select } from '../Shared/Select';
 import { defaultTaxRates } from '../../data/initialData';
@@ -1930,7 +1930,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                         <tr key={idx}>
                           <td className="py-2 px-3 text-slate-800 font-medium">{item.productName}</td>
                           <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">{item.quantity}</td>
-                          <td className="py-2 px-3 text-right font-mono text-emerald-600">$\{item.costPrice.toFixed(4)}</td>
+                          <td className="py-2 px-3 text-right font-mono text-emerald-600">${item.costPrice.toFixed(4)}</td>
                           <td className="py-2 px-3 text-center">
                             <button
                               type="button"
@@ -2244,7 +2244,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     <option value="">-- Seleccionar producto del catálogo --</option>
                     {products.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.sku} - {p.name} (Stock: {p.stock} u. | Costo: ${p.costPrice.toFixed(2)})
+                        {p.sku} - {p.name} (Stock: {p.stock} u. | Costo: {formatCostCurrency(p.costPrice, settings.currencySymbol)})
                       </option>
                     ))}
                   </Select>
@@ -2346,7 +2346,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                               <span className="text-slate-400 font-mono">$</span>
                               <input
                                 type="number"
-                                step="0.01"
+                                step="0.0001"
                                 min="0"
                                 value={item.costPrice}
                                 onChange={(e) => handleUpdatePreOrderItemCost(idx, parseFloat(e.target.value) || 0)}

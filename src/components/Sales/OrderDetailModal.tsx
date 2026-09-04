@@ -114,6 +114,24 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto text-xs">
+          {/* Facturado Banner */}
+          {order.status === 'FACTURADO' && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between text-emerald-950 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <div>
+                  <span className="font-bold text-xs block">Pedido Facturado</span>
+                  <span className="text-[11px] text-emerald-700">Este pedido ya generó comprobante fiscal de venta</span>
+                </div>
+              </div>
+              {order.invoiceNumber && (
+                <span className="font-mono text-xs font-black bg-white px-3 py-1 rounded-xl border border-emerald-200 text-emerald-800 shadow-xs">
+                  Factura: {order.invoiceNumber}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Customer info */}
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -258,7 +276,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           </button>
 
           <div className="flex items-center gap-2">
-            {onInvoiceOrder && order.status !== 'ANULADO' && (
+            {onInvoiceOrder && order.status !== 'FACTURADO' && order.status !== 'ANULADO' && (
               <button
                 type="button"
                 onClick={() => {

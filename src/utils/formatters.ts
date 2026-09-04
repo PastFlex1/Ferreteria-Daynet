@@ -1,13 +1,17 @@
 import { DocumentType, Invoice, StoreSettings } from '../types';
 
-export const formatCurrency = (amount: number, symbol: string = '$'): string => {
+export const formatCurrency = (amount: number, symbol: string = '$', maxDecimals: number = 2): string => {
   if (amount == null || isNaN(amount)) {
     return `${symbol} 0.00`;
   }
   return `${symbol} ${amount.toLocaleString('es-MX', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: maxDecimals,
   })}`;
+};
+
+export const formatCostCurrency = (amount: number, symbol: string = '$'): string => {
+  return formatCurrency(amount, symbol, 4);
 };
 
 export const formatDate = (dateString: string): string => {

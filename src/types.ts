@@ -105,6 +105,7 @@ export interface InvoiceItem {
   productId: string;
   sku: string;
   productName: string;
+  description?: string;
   unit: UnitOfMeasure;
   quantity: number;
   unitPrice: number;
@@ -135,6 +136,7 @@ export interface Invoice {
   paymentReference?: string; // Número de comprobante o referencia de transferencia / tarjeta
   notes?: string;
   sellerName: string;
+  orderId?: string; // ID / Número de pedido de origen si fue facturado desde un pedido
   // SRI Ecuador Electronic Invoicing fields
   sriStatus?: 'PENDIENTE' | 'FIRMADO' | 'ENVIADO' | 'AUTORIZADO' | 'NO AUTORIZADO' | 'DEVUELTA' | 'ERROR';
   sriClaveAcceso?: string;
@@ -256,6 +258,31 @@ export interface PreOrder {
   totalEstimatedCost: number;
   totalItemsCount: number;
   notes?: string;
+}
+
+export interface CreditNoteData {
+  id: string; // Secuencial: 001-001-000000001
+  invoiceRef: string; // Número de factura afectada: F001-000000124
+  invoiceId?: string;
+  invoiceDate?: string;
+  customer: string;
+  customerRuc?: string;
+  customerAddress?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  reason: string;
+  amount: number;
+  subtotal?: number;
+  tax?: number;
+  date: string;
+  status: string;
+  establishment?: string;
+  emissionPoint?: string;
+  secNumber?: string;
+  claveAcceso?: string;
+  numeroAutorizacion?: string;
+  fechaAutorizacion?: string;
+  items?: InvoiceItem[];
 }
 
 export type SuppliersSubTab =

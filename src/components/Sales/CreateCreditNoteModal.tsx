@@ -38,15 +38,57 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
-    
+
+    const amountVal = parseFloat(formData.amount) || selectedInvoice.total;
+    const ratio = selectedInvoice.total > 0 ? amountVal / selectedInvoice.total : 1;
+    const subtotal = Math.round(selectedInvoice.subtotal * ratio * 100) / 100;
+    const tax = Math.round((amountVal - subtotal) * 100) / 100;
+
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const dateStr = `${day}${month}${year}`;
+    const ruc = (settings.taxId || '1790012345001').padStart(13, '0');
+    const ambiente = '1';
+    const serie = `${establishment.padStart(3, '0')}${emissionPoint.padStart(3, '0')}`;
+    const secuencial = secCreditNote.padStart(9, '0');
+    const codNum = '12345678';
+    const tipoEmi = '1';
+    const baseKey = `${dateStr}04${ruc}${ambiente}${serie}${secuencial}${codNum}${tipoEmi}`;
+    let factor = 2;
+    let sum = 0;
+    for (let i = baseKey.length - 1; i >= 0; i--) {
+      sum += parseInt(baseKey.charAt(i), 10) * factor;
+      factor = factor === 7 ? 2 : factor + 1;
+    }
+    const rem = sum % 11;
+    const dv = rem === 0 ? 0 : rem === 1 ? 1 : 11 - rem;
+    const claveAcceso = `${baseKey}${dv}`;
+
     onSave({
       id: `${establishment}-${emissionPoint}-${secCreditNote}`,
       invoiceRef: selectedInvoice.fullNumber || selectedInvoice.id,
+      invoiceId: selectedInvoice.id,
+      invoiceDate: selectedInvoice.createdAt,
       customer: selectedInvoice.customer?.name || 'Consumidor Final',
+      customerRuc: selectedInvoice.customer?.docNumber || '9999999999999',
+      customerAddress: selectedInvoice.customer?.address || 'Matriz',
+      customerEmail: selectedInvoice.customer?.email || '',
+      customerPhone: selectedInvoice.customer?.phone || '',
       reason: formData.reason,
-      amount: parseFloat(formData.amount) || selectedInvoice.total,
-      date: new Date().toISOString(),
+      amount: amountVal,
+      subtotal,
+      tax,
+      items: selectedInvoice.items,
+      date: now.toISOString(),
       status: 'AUTORIZADO',
+      establishment,
+      emissionPoint,
+      secNumber: secCreditNote,
+      claveAcceso,
+      numeroAutorizacion: claveAcceso,
+      fechaAutorizacion: now.toISOString(),
     });
   };
 
@@ -122,12 +164,12 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">{settings.currencySymbol}</span>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   required
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none font-mono"
-                  placeholder={selectedInvoice ? selectedInvoice.total.toString() : "0.00"}
+                  placeholder={selectedInvoice ? selectedInvoice.total.toFixed(2) : "0.00"}
                   max={selectedInvoice ? selectedInvoice.total : undefined}
                 />
               </div>

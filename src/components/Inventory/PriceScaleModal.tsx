@@ -149,7 +149,7 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                       <label className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">Precio Un. ($)</label>
                       <input
                         type="number"
-                        step="0.0001"
+                        step="0.01"
                         min="0"
                         value={scale.price}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'price', e.target.value)}
@@ -159,7 +159,7 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio + IVA</label>
                       <div className="px-2.5 py-1.5 bg-slate-100 text-slate-600 font-mono font-bold rounded-lg text-xs border border-transparent">
-                        ${scalePriceWithTax.toFixed(4)}
+                        ${scalePriceWithTax.toFixed(2)}
                       </div>
                     </div>
                     <div className="sm:col-span-1">

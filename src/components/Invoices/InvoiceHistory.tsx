@@ -30,6 +30,7 @@ import { formatCurrency, formatDate, getDocumentTypeName, getPaymentMethodLabel 
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 
 interface InvoiceHistoryProps {
   invoices: Invoice[];
@@ -61,6 +62,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   // Data for editing quotes
   const [products] = useFirestoreSync<Product[]>('ferreteria_products', []);
   const [customers] = useFirestoreSync<Customer[]>('ferreteria_customers', []);
+  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [editingQuote, setEditingQuote] = useState<Invoice | null>(null);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [editCustomerId, setEditCustomerId] = useState<string>('');
@@ -137,8 +139,9 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
     if (!p) return;
     const qty = parseFloat(editAddQty) || 1;
     const taxRate = typeof p.taxRate === 'number' ? p.taxRate : 15;
-    const subtotal = p.price * qty;
-    const tax = subtotal * (taxRate / 100);
+    const subtotal = Math.round(p.price * qty * 100) / 100;
+    const tax = Math.round(subtotal * (taxRate / 100) * 100) / 100;
+    const total = Math.round((subtotal + tax) * 100) / 100;
     const newItem: InvoiceItem = {
       productId: p.id,
       sku: p.sku,
@@ -150,7 +153,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
       subtotal: subtotal,
       taxRate: taxRate,
       taxAmount: tax,
-      total: subtotal + tax
+      total: total
     };
     setEditItems(prev => [...prev, newItem]);
     setEditAddProductId('');
@@ -529,6 +532,21 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                             </button>
                           )}
 
+                          {/* Descargar XML Autorizado para Facturas Autorizadas */}
+                          {isFactura && isAutorizado && (
+                            <button
+                              onClick={() => {
+                                const xml = getAuthorizedXmlContent(inv, settings, undefined, undefined, sriMode);
+                                downloadXML(xml, `factura-${inv.fullNumber || inv.number}-autorizada.xml`);
+                                showToast(`XML Autorizado descargado exitosamente`, 'success');
+                              }}
+                              className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-300 transition cursor-pointer shadow-2xs"
+                              title="Descargar XML Oficial Autorizado del SRI"
+                            >
+                              <Download className="w-4 h-4 text-emerald-600" />
+                            </button>
+                          )}
+
                           {/* 5. Eliminar */}
                           {onDeleteInvoice && (!isAutorizado || inv.documentType === 'COTIZACION') && (
                             <button
@@ -679,14 +697,14 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                               value={item.quantity}
                               onChange={(e) => {
                                 const newQty = parseFloat(e.target.value) || 0;
-                                const sub = item.unitPrice * newQty;
-                                const tax = sub * ((item.taxRate || 15) / 100);
+                                const sub = Math.round(item.unitPrice * newQty * 100) / 100;
+                                const tax = Math.round(sub * ((item.taxRate || 15) / 100) * 100) / 100;
                                 setEditItems(items => items.map((it, i) => i === idx ? {
                                   ...it,
                                   quantity: newQty,
                                   subtotal: sub,
                                   taxAmount: tax,
-                                  total: sub + tax
+                                  total: Math.round((sub + tax) * 100) / 100
                                 } : it));
                               }}
                               className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-mono font-bold"
@@ -695,19 +713,19 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           <td className="py-2 px-3 text-right">
                             <input
                               type="number"
-                              step="any"
+                              step="0.01"
                               min="0"
                               value={item.unitPrice}
                               onChange={(e) => {
                                 const newPrice = parseFloat(e.target.value) || 0;
-                                const sub = newPrice * item.quantity;
-                                const tax = sub * ((item.taxRate || 15) / 100);
+                                const sub = Math.round(newPrice * item.quantity * 100) / 100;
+                                const tax = Math.round(sub * ((item.taxRate || 15) / 100) * 100) / 100;
                                 setEditItems(items => items.map((it, i) => i === idx ? {
                                   ...it,
                                   unitPrice: newPrice,
                                   subtotal: sub,
                                   taxAmount: tax,
-                                  total: sub + tax
+                                  total: Math.round((sub + tax) * 100) / 100
                                 } : it));
                               }}
                               className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono font-bold"

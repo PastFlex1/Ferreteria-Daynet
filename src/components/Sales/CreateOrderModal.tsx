@@ -41,6 +41,8 @@ export interface Order {
   items: OrderItem[];
   notes?: string;
   deliveryAddress?: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
 }
 
 interface CreateOrderModalProps {
@@ -355,6 +357,28 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                     </option>
                   ))}
                 </Select>
+
+                {selectedCustomerId && (() => {
+                  const cust = customers.find(c => c.id === selectedCustomerId);
+                  if (!cust || cust.creditLimit <= 0) return null;
+                  const debt = cust.currentBalance || 0;
+                  const available = Math.max(0, cust.creditLimit - debt);
+                  return (
+                    <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <span className="text-slate-600 font-medium">
+                        Límite de crédito: <strong className="font-bold text-slate-900">${cust.creditLimit.toFixed(2)}</strong>
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-rose-600 font-medium">
+                        Deuda actual: <strong className="font-bold text-rose-700">${debt.toFixed(2)}</strong>
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 font-medium">
+                        Cupo disponible: <strong className="font-black text-emerald-800">${available.toFixed(2)}</strong>
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               {!selectedCustomerId && (

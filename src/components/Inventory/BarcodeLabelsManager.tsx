@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Barcode, 
   Printer, 
@@ -163,10 +164,8 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
     setIsPrintModalOpen(true);
     if (autoPrint) {
       setTimeout(() => {
-        requestAnimationFrame(() => {
-          window.print();
-        });
-      }, 400);
+        window.print();
+      }, 500);
     }
   };
 
@@ -197,7 +196,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
     return (
       <div
         key={key}
-        className={`bg-white border-2 border-slate-900 rounded-xl flex flex-col justify-between items-center text-center shadow-xs ${containerStyle}`}
+        className={`printable-label-item bg-white border-2 border-slate-900 rounded-xl flex flex-col justify-between items-center text-center shadow-xs ${containerStyle}`}
         style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
       >
         {/* Store Name Header */}
@@ -615,8 +614,8 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
       </div>
 
       {/* ── PRINT SHEET MODAL ────────────────────────────────────────────────── */}
-      {isPrintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+      {isPrintModalOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh] ring-1 ring-slate-900/10">
             {/* Modal Actions Header */}
             <div className="px-6 py-4 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between no-print shrink-0">
@@ -636,6 +635,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
 
               <div className="flex items-center space-x-2">
                 <button
+                  type="button"
                   onClick={() => window.print()}
                   className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
                 >
@@ -643,6 +643,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
                   <span>Imprimir Ahora (Ctrl+P)</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setIsPrintModalOpen(false)}
                   className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
                   title="Cerrar"
@@ -655,7 +656,7 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
             {/* Printable Labels Container */}
             <div className="p-6 overflow-y-auto flex-1 bg-slate-100 custom-scrollbar">
               <div id="printable-labels" className="bg-white p-4 rounded-2xl border border-slate-300 shadow-sm mx-auto min-h-[500px]">
-                <div className="flex flex-wrap gap-3 items-center justify-center">
+                <div className="labels-grid flex flex-wrap gap-3 items-center justify-center">
                   {Array.from({ length: quantity }).map((_, index) => (
                     renderLabelItem(index)
                   ))}
@@ -663,7 +664,8 @@ export const BarcodeLabelsManager: React.FC<BarcodeLabelsManagerProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

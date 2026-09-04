@@ -17,6 +17,7 @@ export interface SriTotalsBreakdown {
   propina10Enabled: boolean;
   propina10Amount: number;
   valorAPagar: number;
+  total?: number;
   rateBreakdowns?: Record<number, { base: number; tax: number }>;
 }
 

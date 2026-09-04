@@ -146,7 +146,7 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setActualCountInput(expectedCashInDrawer.toFixed(4));
+                  setActualCountInput(expectedCashInDrawer.toFixed(2));
                   setIsClosingModalOpen(true);
                 }}
                 className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-rose-600/20 flex items-center space-x-2 cursor-pointer"
@@ -158,7 +158,7 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
               <form onSubmit={handleOpenSubmit} className="flex items-center gap-2">
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   min="0"
                   placeholder="Fondo Inicial ($)"
                   value={initialCashInput}
@@ -264,7 +264,7 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   min="0"
                   required
                   value={actualCountInput}

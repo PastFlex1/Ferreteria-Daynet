@@ -175,11 +175,29 @@ export const CustomerSelectModal: React.FC<CustomerSelectModalProps> = ({
                           {cust.phone && <span>Tel: {cust.phone}</span>}
                           {cust.address && <span>{cust.address}</span>}
                         </div>
-                        {cust.creditLimit > 0 && (
-                          <div className="text-[11px] text-orange-600 font-semibold pt-1">
-                            Límite de Crédito: ${cust.creditLimit.toLocaleString()} • Deuda Actual: ${cust.currentBalance.toLocaleString()}
+                        {cust.creditLimit > 0 ? (() => {
+                          const debt = cust.currentBalance || 0;
+                          const availableCredit = Math.max(0, cust.creditLimit - debt);
+                          return (
+                            <div className="text-[11px] pt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                              <span className="text-slate-600 font-medium">
+                                Límite de crédito: <strong className="font-bold text-slate-900">${cust.creditLimit.toFixed(2)}</strong>
+                              </span>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-rose-600 font-medium">
+                                Deuda actual: <strong className="font-bold text-rose-700">${debt.toFixed(2)}</strong>
+                              </span>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 font-medium">
+                                Cupo disponible: <strong className="font-black text-emerald-800">${availableCredit.toFixed(2)}</strong>
+                              </span>
+                            </div>
+                          );
+                        })() : (cust.currentBalance && cust.currentBalance > 0 ? (
+                          <div className="text-[11px] text-rose-600 font-medium pt-1">
+                            Deuda actual: <strong className="font-bold text-rose-700">${cust.currentBalance.toFixed(2)}</strong>
                           </div>
-                        )}
+                        ) : null)}
                       </div>
 
                       {isSelected && (

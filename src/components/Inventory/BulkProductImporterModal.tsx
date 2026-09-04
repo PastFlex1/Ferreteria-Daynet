@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Product, ProductCategory, StoreSettings } from '../../types';
 import { exportToModernExcel } from '../../utils/excelExport';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
 
 interface BulkProductImporterProps {
@@ -531,7 +531,7 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
                     <td className="py-2 px-3 text-slate-500">{row.product.category}</td>
                     <td className="py-2 px-3 text-center font-mono font-bold text-[10px]">{row.product.unit}</td>
                     <td className="py-2 px-3 text-right font-mono text-slate-600">
-                      {formatCurrency(row.product.costPrice, settings.currencySymbol)}
+                      {formatCostCurrency(row.product.costPrice, settings.currencySymbol)}
                     </td>
                     <td className="py-2 px-3 text-right font-mono font-black text-orange-600">
                       {formatCurrency(row.product.price, settings.currencySymbol)}

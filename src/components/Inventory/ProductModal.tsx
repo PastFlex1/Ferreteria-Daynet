@@ -160,7 +160,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const handleAddScale = () => {
     const defaultMinQty = priceScales.length > 0 ? (priceScales[priceScales.length - 1].minQty * 2) : 6;
     const basePrice = parseFloat(price) || 0;
-    const suggestedPrice = basePrice > 0 ? Math.round(basePrice * 0.9 * 10000) / 10000 : 0;
+    const suggestedPrice = basePrice > 0 ? Math.round(basePrice * 0.9 * 100) / 100 : 0;
 
     const newScale: PriceScale = {
       id: `scale-${Date.now()}`,
@@ -415,7 +415,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </label>
               <input
                 type="number"
-                step="0.0001"
+                step="0.01"
                 min="0"
                 required
                 placeholder="0.00"
@@ -433,7 +433,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="0.01"
                   min="0"
                   placeholder="0.00"
                   value={priceWithTax}
@@ -603,7 +603,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step="0.0001"
+                          step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={scale.price === 0 ? '' : scale.price}

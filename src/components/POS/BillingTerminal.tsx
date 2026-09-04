@@ -25,7 +25,8 @@ import {
   AlertCircle,
   ArrowLeftRight,
   Lock,
-  Unlock
+  Unlock,
+  PackageCheck
 } from 'lucide-react';
 import { 
   CartItem, 
@@ -43,6 +44,7 @@ import { formatCurrency, generateDocumentNumber } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
+import { Order } from '../Sales/CreateOrderModal';
 import { calculateSriTotals } from '../../utils/sriCalculations';
 import { CustomerSelectModal } from './CustomerSelectModal';
 import { PaymentModal } from './PaymentModal';
@@ -70,6 +72,8 @@ interface BillingTerminalProps {
   initialDocumentType?: DocumentType;
   initialCartItems?: CartItem[];
   initialCustomer?: Customer | null;
+  invoicingOrder?: Order | null;
+  onCancelInvoicingOrder?: () => void;
   paymentMethods?: PaymentMethodItem[];
   isCashRegisterOpen?: boolean;
   onOpenCashRegister?: (initialCash: number) => void;
@@ -96,6 +100,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   initialDocumentType = 'FACTURA',
   initialCartItems = [],
   initialCustomer = null,
+  invoicingOrder = null,
+  onCancelInvoicingOrder,
   paymentMethods,
   isCashRegisterOpen = true,
   onOpenCashRegister,
@@ -404,16 +410,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   };
 
   const handleUpdateUnitPrice = (productId: string, newUnitPrice: number) => {
-    const safePrice = Math.max(0, newUnitPrice);
+    const safePrice = Math.max(0, Math.round(newUnitPrice * 100) / 100);
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-        const itemSubtotal = item.quantity * safePrice;
-        const itemDiscountAmount = itemSubtotal * (item.discountPercent / 100);
-        const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
-        const itemTaxAmount = baseAfterDiscount * taxRate;
-        const itemTotal = baseAfterDiscount + itemTaxAmount;
+        const itemSubtotal = Math.round(item.quantity * safePrice * 100) / 100;
+        const itemDiscountAmount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
+        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+        const itemTaxAmount = Math.round((baseAfterDiscount * taxRate) * 100) / 100;
+        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
 
         return {
           ...item,
@@ -657,6 +663,10 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       changeGiven: selectedPaymentMethod === 'EFECTIVO' ? change : 0,
       paymentReference: paymentReference || undefined,
       sellerName: sellerName || 'Juan Pérez',
+      orderId: invoicingOrder?.id,
+      notes: invoicingOrder
+        ? `Pedido N° ${invoicingOrder.id}${invoicingOrder.notes ? ' - ' + invoicingOrder.notes : ''}`
+        : undefined,
     };
 
     // Deduct stock for active sales (not quote)
@@ -723,6 +733,39 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       <div className="lg:col-span-8 space-y-4">
         <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
           
+          {/* Banner de Pedido Vinculado */}
+          {invoicingOrder && (
+            <div className="bg-gradient-to-r from-orange-500 via-amber-500 to-amber-600 text-white px-4 py-3 rounded-2xl flex items-center justify-between shadow-sm animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-xl">
+                  <PackageCheck className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs uppercase tracking-wide">Facturando Pedido:</span>
+                    <span className="font-mono font-black text-sm bg-black/20 px-2 py-0.5 rounded-md">
+                      {invoicingOrder.id}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/95">
+                    Cliente: <strong>{invoicingOrder.customerName}</strong> {invoicingOrder.customerRuc ? `(${invoicingOrder.customerRuc})` : ''}
+                  </p>
+                </div>
+              </div>
+              {onCancelInvoicingOrder && (
+                <button
+                  type="button"
+                  onClick={onCancelInvoicingOrder}
+                  className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-xs"
+                  title="Desvincular pedido de esta venta"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Desvincular Pedido</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {/* 1. TOP HEADER: Tipo de Documento, Secuencial y Botones de Acción */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div className="flex items-center gap-3 flex-wrap">
@@ -990,6 +1033,19 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                           <div className="text-[10px] text-slate-500 mt-0.5">
                             {c.email || 'Sin correo'} • {c.phone || 'Sin teléfono'} • {c.address || 'Ecuador'}
                           </div>
+                          {c.creditLimit > 0 && (() => {
+                            const debt = c.currentBalance || 0;
+                            const available = Math.max(0, c.creditLimit - debt);
+                            return (
+                              <div className="text-[10px] text-slate-600 font-medium mt-1 flex flex-wrap items-center gap-1.5">
+                                <span>Límite: <strong className="text-slate-800">${c.creditLimit.toFixed(2)}</strong></span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-rose-600">Deuda: <strong className="text-rose-700">${debt.toFixed(2)}</strong></span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-emerald-700 font-bold">Cupo: ${available.toFixed(2)}</span>
+                              </div>
+                            );
+                          })()}
                         </div>
                         {selectedCustomer.id === c.id && (
                           <Check className="w-4 h-4 text-orange-600 shrink-0" />
@@ -1018,6 +1074,25 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                     <div className="text-[11px] text-slate-500 mt-0.5">
                       {selectedCustomer.email || 'Sin email registrado'} • Tel: {selectedCustomer.phone || 'N/A'} • {selectedCustomer.address || 'Ecuador'}
                     </div>
+                    {selectedCustomer.creditLimit > 0 && (() => {
+                      const debt = selectedCustomer.currentBalance || 0;
+                      const available = Math.max(0, selectedCustomer.creditLimit - debt);
+                      return (
+                        <div className="text-[11px] pt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                          <span className="text-slate-600 font-medium">
+                            Límite de crédito: <strong className="font-bold text-slate-900">${selectedCustomer.creditLimit.toFixed(2)}</strong>
+                          </span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-rose-600 font-medium">
+                            Deuda actual: <strong className="font-bold text-rose-700">${debt.toFixed(2)}</strong>
+                          </span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 font-medium">
+                            Cupo disponible: <strong className="font-black text-emerald-800">${available.toFixed(2)}</strong>
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1269,7 +1344,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         <td className="py-2.5 px-2 text-right">
                           <input
                             type="number"
-                            step="any"
+                            step="0.01"
                             min="0"
                             value={item.unitPrice}
                             onChange={(e) => {

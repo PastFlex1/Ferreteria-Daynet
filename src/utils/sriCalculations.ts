@@ -21,12 +21,13 @@ export function calculateSriTotals(
   const rateBreakdowns: Record<number, { base: number; tax: number }> = {};
 
   items.forEach((item) => {
-    const itemSubtotal = item.subtotal || item.unitPrice * item.quantity;
-    const itemDiscount = (itemSubtotal * (item.discountPercent || 0)) / 100;
-    const baseAfterDiscount = itemSubtotal - itemDiscount;
+    const rawSubtotal = item.subtotal || item.unitPrice * item.quantity;
+    const itemSubtotal = Math.round(rawSubtotal * 100) / 100;
+    const itemDiscount = Math.round(((itemSubtotal * (item.discountPercent || 0)) / 100) * 100) / 100;
+    const baseAfterDiscount = Math.round((itemSubtotal - itemDiscount) * 100) / 100;
 
-    subtotalSinImpuestos += baseAfterDiscount;
-    totalDescuento += itemDiscount;
+    subtotalSinImpuestos = Math.round((subtotalSinImpuestos + baseAfterDiscount) * 100) / 100;
+    totalDescuento = Math.round((totalDescuento + itemDiscount) * 100) / 100;
 
     // Check product or item tax rate
     let taxRate = defaultTaxRate;
@@ -44,34 +45,34 @@ export function calculateSriTotals(
     }
 
     const calculatedTax = item.taxAmount !== undefined && item.taxAmount >= 0
-      ? item.taxAmount
-      : (taxRate > 0 ? baseAfterDiscount * (taxRate / 100) : 0);
+      ? Math.round(item.taxAmount * 100) / 100
+      : (taxRate > 0 ? Math.round(baseAfterDiscount * (taxRate / 100) * 100) / 100 : 0);
 
     if (!rateBreakdowns[taxRate]) {
       rateBreakdowns[taxRate] = { base: 0, tax: 0 };
     }
-    rateBreakdowns[taxRate].base += baseAfterDiscount;
-    rateBreakdowns[taxRate].tax += calculatedTax;
+    rateBreakdowns[taxRate].base = Math.round((rateBreakdowns[taxRate].base + baseAfterDiscount) * 100) / 100;
+    rateBreakdowns[taxRate].tax = Math.round((rateBreakdowns[taxRate].tax + calculatedTax) * 100) / 100;
 
     if (taxRate === 15) {
-      subtotal15 += baseAfterDiscount;
-      iva15 += calculatedTax;
+      subtotal15 = Math.round((subtotal15 + baseAfterDiscount) * 100) / 100;
+      iva15 = Math.round((iva15 + calculatedTax) * 100) / 100;
     } else if (taxRate === 5) {
-      subtotal5 += baseAfterDiscount;
-      iva5 += calculatedTax;
+      subtotal5 = Math.round((subtotal5 + baseAfterDiscount) * 100) / 100;
+      iva5 = Math.round((iva5 + calculatedTax) * 100) / 100;
     } else if (taxRate === 0) {
-      subtotal0 += baseAfterDiscount;
+      subtotal0 = Math.round((subtotal0 + baseAfterDiscount) * 100) / 100;
     } else {
-      subtotalEspecial += baseAfterDiscount;
-      ivaEspecial += calculatedTax;
+      subtotalEspecial = Math.round((subtotalEspecial + baseAfterDiscount) * 100) / 100;
+      ivaEspecial = Math.round((ivaEspecial + calculatedTax) * 100) / 100;
     }
   });
 
-  const totalTaxableBase = subtotal15 + subtotal5 + subtotalEspecial + subtotal0 + subtotalNoObjeto + subtotalExento;
-  const totalIva = iva15 + iva5 + ivaEspecial;
-  const propina10Amount = propina10Enabled ? (totalTaxableBase * 0.10) : 0;
+  const totalTaxableBase = Math.round((subtotal15 + subtotal5 + subtotalEspecial + subtotal0 + subtotalNoObjeto + subtotalExento) * 100) / 100;
+  const totalIva = Math.round((iva15 + iva5 + ivaEspecial) * 100) / 100;
+  const propina10Amount = propina10Enabled ? Math.round((totalTaxableBase * 0.10) * 100) / 100 : 0;
   const valorICE = 0;
-  const valorAPagar = totalTaxableBase + totalIva + valorICE + propina10Amount;
+  const valorAPagar = Math.round((totalTaxableBase + totalIva + valorICE + propina10Amount) * 100) / 100;
 
   return {
     subtotalSinImpuestos,
@@ -89,6 +90,7 @@ export function calculateSriTotals(
     propina10Enabled,
     propina10Amount,
     valorAPagar,
+    total: valorAPagar,
     rateBreakdowns,
   };
 }

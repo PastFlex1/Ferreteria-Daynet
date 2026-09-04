@@ -73,7 +73,7 @@
   }
 
   /* When printing any modal document, isolate printable content and hide screen components */
-  body:has(#printable-invoice, #printable-order-voucher, #printable-report-document, #printable-kardex, #printable-labels, #printable-statement, #printable-payroll-role, #printable-preorder, #printable-cash-close, .printable-document) main > *:not(.fixed):not(.printable-document):not(#printable-invoice):not(#printable-order-voucher):not(#printable-report-document):not(#printable-kardex):not(#printable-labels):not(#printable-statement):not(#printable-payroll-role):not(#printable-preorder):not(#printable-cash-close) {
+  body:has(#printable-invoice, #printable-order-voucher, #printable-report-document, #printable-kardex, #printable-labels, #printable-statement, #printable-payroll-role, #printable-preorder, #printable-cash-close, .printable-document) main:not(:has(#printable-invoice, #printable-order-voucher, #printable-report-document, #printable-kardex, #printable-labels, #printable-statement, #printable-payroll-role, #printable-preorder, #printable-cash-close, .printable-document)) {
     display: none !important;
   }
 
@@ -163,19 +163,36 @@
   /* Barcode Labels Specific Grid */
   #printable-labels {
     position: static !important;
-    display: flex !important;
-    flex-wrap: wrap !important;
-    justify-content: flex-start !important;
-    gap: 4mm !important;
-    padding: 2mm !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
     margin: 0 auto !important;
     background: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 
+  #printable-labels .labels-grid,
   #printable-labels > div {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 3mm !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+    width: 100% !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .printable-label-item {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     box-shadow: none !important;
+    display: flex !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Table styling in print */
