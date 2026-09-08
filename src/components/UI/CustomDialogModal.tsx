@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { 
   AlertCircle, 
   CheckCircle2, 
@@ -81,8 +82,8 @@ export const CustomDialogModal: React.FC<CustomDialogModalProps> = ({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fadeIn">
+  return createPortal(
+    <div className="fixed inset-0 z-[99999999] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fadeIn">
       <div className="bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden ring-1 ring-orange-500/20 text-white my-auto">
         {/* Header Visual */}
         <div className={`p-6 flex flex-col items-center text-center border-b ${getHeaderBg()}`}>
@@ -131,6 +132,7 @@ export const CustomDialogModal: React.FC<CustomDialogModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

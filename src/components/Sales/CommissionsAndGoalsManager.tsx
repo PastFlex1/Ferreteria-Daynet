@@ -95,10 +95,12 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
   const allStaff = useMemo(() => {
     const map = new Map<string, { id: string; name: string; code: string; position: string; department: string; status: string }>();
 
-    employees.forEach(emp => {
-      map.set(emp.fullName.toLowerCase().trim(), {
+    (employees || []).forEach(emp => {
+      const empName = (emp.fullName || emp.name || '').trim();
+      if (!empName) return;
+      map.set(empName.toLowerCase(), {
         id: emp.id,
-        name: emp.fullName,
+        name: empName,
         code: emp.code || 'EMP',
         position: emp.positionName || 'Asesor Comercial',
         department: emp.departmentName || 'Ventas',
@@ -106,12 +108,14 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
       });
     });
 
-    usersList.forEach(usr => {
-      const key = usr.name.toLowerCase().trim();
+    (usersList || []).forEach(usr => {
+      const usrName = (usr.name || usr.fullName || '').trim();
+      if (!usrName) return;
+      const key = usrName.toLowerCase();
       if (!map.has(key)) {
         map.set(key, {
           id: usr.id,
-          name: usr.name,
+          name: usrName,
           code: usr.role || 'USR',
           position: usr.role || 'Ventas',
           department: 'Operaciones',

@@ -161,14 +161,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     });
   }, [paymentMethods, syncedPaymentMethods]);
 
-  // Sellers
+  // Sellers (Sincronizado en tiempo real con RRHH y Usuarios del Sistema)
   const sellerOptions = useMemo(() => {
     const names = new Set<string>();
     (employees || []).forEach((e: any) => {
-      if (e.name) names.add(e.name);
+      const n = e.fullName || e.name;
+      if (n) names.add(n);
     });
     (usersList || []).forEach((u: any) => {
-      if (u.name) names.add(u.name);
+      const n = u.name || u.fullName;
+      if (n) names.add(n);
     });
     if (names.size === 0) names.add('Juan Pérez');
     return Array.from(names);

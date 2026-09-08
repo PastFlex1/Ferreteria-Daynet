@@ -35,7 +35,15 @@ import {
   Layers,
   Percent,
   RotateCcw,
-  FileText
+  FileText,
+  Clock,
+  Building,
+  Truck,
+  ShieldAlert,
+  AlertCircle,
+  Eye,
+  MapPin,
+  User
 } from 'lucide-react';
 import { InventorySubTab, Product, ProductCategory, Promotion, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
@@ -47,6 +55,9 @@ import { Select } from '../Shared/Select';
 import { useModal } from '../../context/ModalContext';
 import { defaultCategories } from '../../data/initialData';
 import { downloadTomaFisicaPdf, PhysicalInventoryPdfItem } from '../../utils/tomaFisicaPdfGenerator';
+import { CustomDatePicker } from '../Shared/CustomDatePicker';
+import { exportToModernExcel } from '../../utils/excelExport';
+import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 
 interface InventoryModuleViewProps {
   subTab: InventorySubTab;
@@ -71,33 +82,92 @@ interface UnitOfMeasure {
   name: string;
   symbol: string;
   baseRatio: number; // e.g. 1 Box = 24 Units
-  category: 'PESO' | 'LONGIT' | 'VOLUMEN' | 'CANTIDAD' | 'EMPAQUE';
+  category: 'LONGITUD' | 'PESO' | 'VOLUMEN' | 'SUPERFICIE' | 'CANTIDAD';
 }
 
 
 
-// Batch / Expiry
+// Batch / Expiry (Sincronizado con Facturas de Compra y Almacén)
 interface ProductBatch {
   id: string;
   productId: string;
+  sku?: string;
   productName: string;
+  category?: string;
+  unit?: string;
   batchNumber: string;
   expiryDate: string;
+  purchaseDate?: string;
+  supplierName?: string;
+  invoiceNumber?: string;
   quantity: number;
   location: string;
   status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO';
+  daysRemaining: number;
+  costPrice?: number;
 }
 
-// Warehouse Transfer
-interface StockTransfer {
+// Warehouse / Bodegas Management
+export interface WarehouseLocation {
+  id: string;
+  name: string;
+  code?: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+  isMain?: boolean;
+}
+
+export const defaultWarehouseLocations: WarehouseLocation[] = [
+  { id: 'wh-1', name: 'Bodega Principal', code: 'BOD-01', address: 'Matriz Principal', city: 'Quito', isMain: true },
+  { id: 'wh-2', name: 'Bodega Central Norte', code: 'BOD-02', address: 'Av. Amazonas y Colón', city: 'Quito', isMain: false },
+  { id: 'wh-3', name: 'Tienda POS / Salón de Ventas', code: 'POS-01', address: 'Local Comercial', city: 'Quito', isMain: false },
+];
+
+// Warehouse Transfer Items & Guia Remisión
+export interface TransferItem {
+  productId: string;
+  sku: string;
+  productName: string;
+  category?: string;
+  unit?: string;
+  quantity: number;
+  costPrice: number;
+  receivedQuantity?: number;
+  notes?: string;
+}
+
+export interface TransferGuiaRemision {
+  number: string;
+  driverName: string;
+  driverIdNumber: string;
+  licensePlate: string;
+  vehicleModel?: string;
+  route: string;
+  transferStartDate: string;
+  transferEndDate: string;
+  transferReason: string;
+  status: 'EMITIDA' | 'EN_TRANSITO';
+}
+
+// Warehouse Transfer (Doble Fase Transaccional)
+export interface StockTransfer {
   id: string;
   code: string;
   date: string;
+  dispatchedAt?: string;
+  receivedAt?: string;
   originStore: string;
   destinationStore: string;
   itemCount: number;
-  status: 'PENDIENTE' | 'EN_TRANSITO' | 'COMPLETADA' | 'CANCELADA';
+  items: TransferItem[];
+  totalValue: number;
+  status: 'EN_TRANSITO' | 'COMPLETADA' | 'CANCELADA';
   responsible: string;
+  receivedBy?: string;
+  notes?: string;
+  receptionNotes?: string;
+  guiaRemision?: TransferGuiaRemision;
 }
 
 // Physical Count Audit Item
@@ -287,8 +357,342 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     category: 'CANTIDAD'
   });
 
-  // 3. Lotes & Vencimientos State
-  const [batches, setBatches] = useFirestoreSync<ProductBatch[]>('ferreteria_product_batches', []);
+  // 3. Lotes & Vencimientos State (Sincronizado directamente con Compras y Lotes de Almacén)
+  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
+  const [manualBatches, setManualBatches] = useFirestoreSync<ProductBatch[]>('ferreteria_product_batches', []);
+  const [batchSearchTerm, setBatchSearchTerm] = useState('');
+  const [batchStatusFilter, setBatchStatusFilter] = useState<'TODOS' | 'POR_VENCER' | 'VENCIDOS' | 'VIGENTES'>('TODOS');
+  const [batchLocationFilter, setBatchLocationFilter] = useState('TODAS');
+
+  // Modal para registrar nuevo lote manual
+  const [isNewBatchModalOpen, setIsNewBatchModalOpen] = useState(false);
+  const [newBatchProductId, setNewBatchProductId] = useState('');
+  const [newBatchNumber, setNewBatchNumber] = useState('');
+  const [newBatchExpiryDate, setNewBatchExpiryDate] = useState('');
+  const [newBatchQty, setNewBatchQty] = useState('');
+  const [newBatchLocation, setNewBatchLocation] = useState('Bodega Principal');
+
+  // Consolidar lotes desde Facturas de Compra Reales + Lotes Manuales + Demostración
+  const consolidatedBatches = useMemo(() => {
+    const list: ProductBatch[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 1. Extraer desde Facturas de Compra registradas (ferreteria_purchases)
+    (purchases || []).forEach((purch: any) => {
+      if (purch.paymentStatus === 'ANULADA') return;
+      const purchDate = purch.purchaseDate || purch.date || (purch.createdAt ? purch.createdAt.split('T')[0] : '');
+      const supplierName = purch.supplier?.name || purch.supplierName || 'Proveedor Directo';
+      const invNumber = purch.invoiceNumber || purch.orderNumber || `#${(purch.id || '').substring(0, 6)}`;
+
+      if (purch.items && Array.isArray(purch.items)) {
+        purch.items.forEach((item: any, idx: number) => {
+          if (item.batchNumber || item.expiryDate) {
+            const prod = products.find(p => p.id === item.productId || (p.sku && p.sku.toLowerCase() === (item.sku || '').toLowerCase()));
+            const expDateStr = item.expiryDate || '';
+            
+            let daysRemaining = 9999;
+            let status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO' = 'VIGENTE';
+
+            if (expDateStr && expDateStr !== 'Sin caducidad' && expDateStr !== 'N/A') {
+              const expDate = new Date(expDateStr);
+              expDate.setHours(0, 0, 0, 0);
+              const diffTime = expDate.getTime() - today.getTime();
+              daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+              if (daysRemaining < 0) {
+                status = 'VENCIDO';
+              } else if (daysRemaining <= 30) {
+                status = 'POR_VENCER';
+              } else {
+                status = 'VIGENTE';
+              }
+            }
+
+            list.push({
+              id: `pur-batch-${purch.id}-${item.productId || idx}`,
+              productId: item.productId || prod?.id || `prod-${idx}`,
+              sku: item.sku || prod?.sku || 'S/SKU',
+              productName: item.productName || prod?.name || 'Producto sin nombre',
+              category: prod?.category || 'General',
+              unit: prod?.unit || 'u.',
+              batchNumber: item.batchNumber || 'S/L',
+              expiryDate: expDateStr || 'Sin caducidad',
+              purchaseDate: purchDate,
+              supplierName,
+              invoiceNumber: invNumber,
+              quantity: Number(item.quantity) || 1,
+              location: prod?.location || (purch as any).warehouse || 'Bodega Principal',
+              status,
+              daysRemaining,
+              costPrice: item.costPrice || prod?.costPrice || 0,
+            });
+          }
+        });
+      }
+    });
+
+    // 2. Extraer desde Lotes manuales (ferreteria_product_batches)
+    (manualBatches || []).forEach((b: any) => {
+      if (list.some(item => item.id === b.id || (item.batchNumber === b.batchNumber && item.productId === b.productId))) return;
+
+      const prod = products.find(p => p.id === b.productId);
+      const expDateStr = b.expiryDate || '';
+      let daysRemaining = 9999;
+      let status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO' = b.status || 'VIGENTE';
+
+      if (expDateStr && expDateStr !== 'Sin caducidad' && expDateStr !== 'N/A') {
+        const expDate = new Date(expDateStr);
+        expDate.setHours(0, 0, 0, 0);
+        const diffTime = expDate.getTime() - today.getTime();
+        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (daysRemaining < 0) {
+          status = 'VENCIDO';
+        } else if (daysRemaining <= 30) {
+          status = 'POR_VENCER';
+        } else {
+          status = 'VIGENTE';
+        }
+      }
+
+      list.push({
+        id: b.id,
+        productId: b.productId,
+        sku: prod?.sku || b.sku || 'S/SKU',
+        productName: b.productName || prod?.name || 'Producto',
+        category: prod?.category || 'General',
+        unit: prod?.unit || 'u.',
+        batchNumber: b.batchNumber || 'S/L',
+        expiryDate: expDateStr || 'Sin caducidad',
+        purchaseDate: b.purchaseDate || b.date || '',
+        supplierName: b.supplierName || 'Registro Almacén',
+        invoiceNumber: b.invoiceNumber || 'ING-INTERNO',
+        quantity: Number(b.quantity) || 1,
+        location: b.location || prod?.location || 'Bodega Principal',
+        status,
+        daysRemaining,
+        costPrice: b.costPrice || prod?.costPrice || 0,
+      });
+    });
+
+    // Ordenar con lógica FEFO: fechas más próximas a vencer primero
+    return list.sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }, [purchases, manualBatches, products]);
+
+  // Filtros de Lotes
+  const filteredBatches = useMemo(() => {
+    return consolidatedBatches.filter((b) => {
+      if (batchStatusFilter === 'POR_VENCER' && b.status !== 'POR_VENCER') return false;
+      if (batchStatusFilter === 'VENCIDOS' && b.status !== 'VENCIDO') return false;
+      if (batchStatusFilter === 'VIGENTES' && b.status !== 'VIGENTE') return false;
+
+      if (batchLocationFilter !== 'TODAS' && b.location !== batchLocationFilter) return false;
+
+      if (batchSearchTerm.trim()) {
+        const term = batchSearchTerm.toLowerCase().trim();
+        const matchName = b.productName.toLowerCase().includes(term);
+        const matchSku = (b.sku || '').toLowerCase().includes(term);
+        const matchBatch = b.batchNumber.toLowerCase().includes(term);
+        const matchSupp = (b.supplierName || '').toLowerCase().includes(term);
+        const matchInv = (b.invoiceNumber || '').toLowerCase().includes(term);
+        if (!matchName && !matchSku && !matchBatch && !matchSupp && !matchInv) return false;
+      }
+
+      return true;
+    });
+  }, [consolidatedBatches, batchStatusFilter, batchLocationFilter, batchSearchTerm]);
+
+  // Resumen Métricas de Lotes (KPIs)
+  const batchMetrics = useMemo(() => {
+    const total = consolidatedBatches.length;
+    const vigentes = consolidatedBatches.filter(b => b.status === 'VIGENTE').length;
+    const porVencer = consolidatedBatches.filter(b => b.status === 'POR_VENCER').length;
+    const vencidos = consolidatedBatches.filter(b => b.status === 'VENCIDO').length;
+    const totalUnits = consolidatedBatches.reduce((acc, b) => acc + b.quantity, 0);
+
+    return { total, vigentes, porVencer, vencidos, totalUnits };
+  }, [consolidatedBatches]);
+
+  // Gestión de Bodegas y Almacenes Reales (Sincronizado con Firestore ferreteria_warehouses)
+  const [warehouses, setWarehouses] = useFirestoreSync<WarehouseLocation[]>('ferreteria_warehouses', defaultWarehouseLocations);
+  const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
+  const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
+  const [editingWarehouse, setEditingWarehouse] = useState<WarehouseLocation | null>(null);
+  const [warehouseFormData, setWarehouseFormData] = useState<Omit<WarehouseLocation, 'id'>>({
+    name: '',
+    code: '',
+    address: '',
+    city: 'Quito',
+    phone: '',
+    isMain: false,
+  });
+
+  // Ubicaciones / Bodegas disponibles
+  const availableBatchLocations = useMemo(() => {
+    const list: string[] = [];
+    (warehouses || []).forEach((w) => {
+      if (w.name && !list.includes(w.name)) list.push(w.name);
+    });
+    products.forEach((p) => {
+      if (p.location && !list.includes(p.location)) list.push(p.location);
+    });
+    consolidatedBatches.forEach((b) => {
+      if (b.location && !list.includes(b.location)) list.push(b.location);
+    });
+    if (list.length === 0) list.push('Bodega Principal');
+    return list;
+  }, [warehouses, products, consolidatedBatches]);
+
+  // Guardar / Actualizar Bodega Real
+  const handleSaveWarehouse = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = warehouseFormData.name.trim();
+    if (!cleanName) {
+      showAlert('El nombre de la bodega es obligatorio.', 'Campo Requerido', 'warning');
+      return;
+    }
+
+    if (editingWarehouse) {
+      setWarehouses(
+        (warehouses || []).map((w) =>
+          w.id === editingWarehouse.id
+            ? { ...editingWarehouse, ...warehouseFormData, name: cleanName }
+            : w
+        )
+      );
+      showToast(`Bodega "${cleanName}" actualizada con éxito.`, 'success');
+      setIsEditWarehouseModalOpen(false);
+      setEditingWarehouse(null);
+    } else {
+      const newWh: WarehouseLocation = {
+        id: `wh-${Date.now()}`,
+        name: cleanName,
+        code: warehouseFormData.code?.trim() || `BOD-${String((warehouses || []).length + 1).padStart(2, '0')}`,
+        address: warehouseFormData.address?.trim() || '',
+        city: warehouseFormData.city?.trim() || 'Quito',
+        phone: warehouseFormData.phone?.trim() || '',
+        isMain: warehouseFormData.isMain || false,
+      };
+      setWarehouses([...(warehouses || []), newWh]);
+      showToast(`Bodega "${cleanName}" agregada con éxito.`, 'success');
+      setTransferDestination(cleanName);
+    }
+
+    setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
+  };
+
+  // Eliminar Bodega (Permite limpiar bodegas de prueba)
+  const handleDeleteWarehouse = (wh: WarehouseLocation) => {
+    showConfirm(
+      `¿Está seguro de eliminar la bodega "${wh.name}"? Ya no aparecerá en las opciones de transferencias.`,
+      () => {
+        setWarehouses((warehouses || []).filter((w) => w.id !== wh.id));
+        showToast(`Bodega "${wh.name}" eliminada.`, 'info');
+      },
+      'Confirmar Eliminación de Bodega',
+      'Sí, Eliminar',
+      'Cancelar'
+    );
+  };
+
+  // Guardar Lote Manual
+  const handleSaveManualBatch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const prod = products.find(p => p.id === newBatchProductId);
+    if (!prod) {
+      showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
+      return;
+    }
+    const qty = parseFloat(newBatchQty) || 0;
+    if (qty <= 0) {
+      showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Inválida', 'warning');
+      return;
+    }
+    const bNumber = newBatchNumber.trim() || 'S/L';
+    const expDate = newBatchExpiryDate || 'Sin caducidad';
+
+    let status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO' = 'VIGENTE';
+    let daysRemaining = 9999;
+    if (expDate && expDate !== 'Sin caducidad') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const expiry = new Date(expDate);
+      expiry.setHours(0, 0, 0, 0);
+      daysRemaining = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysRemaining < 0) status = 'VENCIDO';
+      else if (daysRemaining <= 30) status = 'POR_VENCER';
+    }
+
+    const newBatch: ProductBatch = {
+      id: `batch-${Date.now()}`,
+      productId: prod.id,
+      sku: prod.sku,
+      productName: prod.name,
+      category: prod.category,
+      unit: prod.unit,
+      batchNumber: bNumber,
+      expiryDate: expDate,
+      purchaseDate: new Date().toISOString().split('T')[0],
+      supplierName: 'Registro Manual Almacén',
+      invoiceNumber: 'ING-MANUAL',
+      quantity: qty,
+      location: newBatchLocation || prod.location || 'Bodega Principal',
+      status,
+      daysRemaining,
+      costPrice: prod.costPrice
+    };
+
+    setManualBatches([newBatch, ...(manualBatches || [])]);
+    setIsNewBatchModalOpen(false);
+    setNewBatchProductId('');
+    setNewBatchNumber('');
+    setNewBatchExpiryDate('');
+    setNewBatchQty('');
+    showToast(`Lote "${bNumber}" para ${prod.name} registrado con éxito.`, 'success');
+  };
+
+  // Exportar a Excel
+  const handleExportBatchesExcel = () => {
+    const columns = [
+      { header: 'Producto', key: 'productName', width: 32 },
+      { header: 'SKU', key: 'sku', width: 16 },
+      { header: 'Categoría', key: 'category', width: 20 },
+      { header: 'N° de Lote', key: 'batchNumber', width: 18 },
+      { header: 'Fecha de Caducidad', key: 'expiryDate', width: 20 },
+      { header: 'Días Restantes', key: 'daysLabel', width: 16 },
+      { header: 'Estado FEFO', key: 'status', width: 16 },
+      { header: 'Cantidad en Stock', key: 'qtyLabel', width: 18 },
+      { header: 'Bodega / Ubicación', key: 'location', width: 22 },
+      { header: 'Proveedor Origen', key: 'supplierName', width: 28 },
+      { header: 'Factura Compra', key: 'invoiceNumber', width: 20 },
+      { header: 'Fecha de Compra', key: 'purchaseDate', width: 18 },
+    ];
+
+    const data = filteredBatches.map(b => ({
+      productName: b.productName,
+      sku: b.sku || 'S/SKU',
+      category: b.category || 'General',
+      batchNumber: b.batchNumber,
+      expiryDate: b.expiryDate,
+      daysLabel: b.daysRemaining === 9999 ? 'Sin fecha' : b.daysRemaining < 0 ? `Vencido hace ${Math.abs(b.daysRemaining)}d` : `Faltan ${b.daysRemaining} días`,
+      status: b.status,
+      qtyLabel: `${b.quantity} ${b.unit || 'u.'}`,
+      location: b.location,
+      supplierName: b.supplierName || 'N/A',
+      invoiceNumber: b.invoiceNumber || 'N/A',
+      purchaseDate: b.purchaseDate || 'N/A',
+    }));
+
+    exportToModernExcel({
+      filename: `Reporte_Lotes_Vencimientos_${new Date().toISOString().split('T')[0]}`,
+      sheetName: 'Lotes y Vencimientos',
+      title: 'Control de Lotes y Fechas de Caducidad (FEFO) - Ferretería',
+      columns,
+      data,
+    });
+    showToast('Reporte de lotes y vencimientos descargado en Excel.', 'success');
+  };
 
   // 5. Cambio de Precio Masivo State
   const [selectedCategoryForPrice, setSelectedCategoryForPrice] = useState('TODAS');
@@ -385,14 +789,362 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     setAdjustRows([]);
   };
 
-  // 7. Transferencias State
-  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  // 7. Transferencias State (Doble Fase Transaccional sincronizada con ferreteria_transfers)
+  const [transfers, setTransfers] = useFirestoreSync<StockTransfer[]>('ferreteria_transfers', []);
+  const [transferSearchTerm, setTransferSearchTerm] = useState('');
+  const [transferStatusFilter, setTransferStatusFilter] = useState<'TODAS' | 'EN_TRANSITO' | 'COMPLETADA' | 'CANCELADA'>('TODAS');
+
+  // Modal Fase 1: Nueva Transferencia & Despacho con Guía de Remisión
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [newTransfer, setNewTransfer] = useState({
-    origin: 'Bodega Central Norte',
-    destination: 'Sucursal Centro POS',
-    responsible: 'Administrador'
-  });
+  const [transferOrigin, setTransferOrigin] = useState('Bodega Central Norte');
+  const [transferDestination, setTransferDestination] = useState('Sucursal Centro POS');
+  const [transferResponsible, setTransferResponsible] = useState('Bodega Central');
+  const [transferNotes, setTransferNotes] = useState('');
+  const [transferItemsList, setTransferItemsList] = useState<TransferItem[]>([]);
+  
+  // Agregar item en Modal Fase 1
+  const [transferAddProdId, setTransferAddProdId] = useState('');
+  const [transferAddQty, setTransferAddQty] = useState('');
+
+  // Datos de la Guía de Remisión (Fase 1)
+  const [guiaDriverName, setGuiaDriverName] = useState('');
+  const [guiaDriverId, setGuiaDriverId] = useState('');
+  const [guiaLicensePlate, setGuiaLicensePlate] = useState('');
+  const [guiaVehicleModel, setGuiaVehicleModel] = useState('');
+  const [guiaRoute, setGuiaRoute] = useState('');
+  const [guiaStartDate, setGuiaStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [guiaEndDate, setGuiaEndDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Modal Fase 2: Validar y Confirmar Recepción Física en Destino
+  const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
+  const [transferToReceive, setTransferToReceive] = useState<StockTransfer | null>(null);
+  const [receivingStaff, setReceivingStaff] = useState('Administrador Sucursal');
+  const [receivingNotesInput, setReceivingNotesInput] = useState('');
+  const [receptionQuantities, setReceptionQuantities] = useState<{ [productId: string]: number }>({});
+
+  // Modal Visor e Impresión de Guía de Remisión Oficial
+  const [isGuiaPrintModalOpen, setIsGuiaPrintModalOpen] = useState(false);
+  const [transferToViewGuia, setTransferToViewGuia] = useState<StockTransfer | null>(null);
+
+  // Filtrado de Transferencias
+  const filteredTransfers = useMemo(() => {
+    return (transfers || []).filter((t) => {
+      if (transferStatusFilter !== 'TODAS' && t.status !== transferStatusFilter) return false;
+
+      if (transferSearchTerm.trim()) {
+        const term = transferSearchTerm.toLowerCase().trim();
+        const matchCode = t.code.toLowerCase().includes(term);
+        const matchOrigin = t.originStore.toLowerCase().includes(term);
+        const matchDest = t.destinationStore.toLowerCase().includes(term);
+        const matchResp = t.responsible.toLowerCase().includes(term);
+        const matchDriver = (t.guiaRemision?.driverName || '').toLowerCase().includes(term);
+        const matchGuia = (t.guiaRemision?.number || '').toLowerCase().includes(term);
+        const matchItem = (t.items || []).some(item => item.productName.toLowerCase().includes(term) || item.sku.toLowerCase().includes(term));
+        if (!matchCode && !matchOrigin && !matchDest && !matchResp && !matchDriver && !matchGuia && !matchItem) return false;
+      }
+
+      return true;
+    });
+  }, [transfers, transferStatusFilter, transferSearchTerm]);
+
+  // Métricas de Transferencias
+  const transferMetrics = useMemo(() => {
+    const all = transfers || [];
+    const total = all.length;
+    const enTransito = all.filter(t => t.status === 'EN_TRANSITO').length;
+    const completadas = all.filter(t => t.status === 'COMPLETADA').length;
+    const canceladas = all.filter(t => t.status === 'CANCELADA').length;
+    
+    // Total de unidades y valor actualmente en tránsito (activo preservado en calle)
+    const transitUnits = all.filter(t => t.status === 'EN_TRANSITO').reduce((sum, t) => sum + (t.itemCount || 0), 0);
+    const transitValue = all.filter(t => t.status === 'EN_TRANSITO').reduce((sum, t) => sum + (t.totalValue || 0), 0);
+
+    return { total, enTransito, completadas, canceladas, transitUnits, transitValue };
+  }, [transfers]);
+
+  // Agregar artículo al carrito de transferencia (Fase 1)
+  const handleAddItemToTransferList = () => {
+    if (!transferAddProdId) {
+      showAlert('Seleccione un artículo del inventario para transferir.', 'Producto Requerido', 'warning');
+      return;
+    }
+    const qty = parseFloat(transferAddQty) || 0;
+    if (qty <= 0) {
+      showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Inválida', 'warning');
+      return;
+    }
+
+    const prod = products.find(p => p.id === transferAddProdId);
+    if (!prod) return;
+
+    if (qty > prod.stock) {
+      showAlert(
+        `Stock insuficiente: El producto "${prod.name}" solo dispone de ${prod.stock} ${prod.unit} en existencias.`,
+        'Existencias Insuficientes',
+        'warning'
+      );
+      return;
+    }
+
+    // Verificar si ya está en la lista
+    const existingIndex = transferItemsList.findIndex(i => i.productId === prod.id);
+    if (existingIndex >= 0) {
+      const updated = [...transferItemsList];
+      const newTotalQty = updated[existingIndex].quantity + qty;
+      if (newTotalQty > prod.stock) {
+        showAlert(
+          `La cantidad total a transferir (${newTotalQty}) supera las existencias disponibles (${prod.stock} ${prod.unit}).`,
+          'Exceso de Stock',
+          'warning'
+        );
+        return;
+      }
+      updated[existingIndex].quantity = newTotalQty;
+      setTransferItemsList(updated);
+    } else {
+      setTransferItemsList([
+        ...transferItemsList,
+        {
+          productId: prod.id,
+          sku: prod.sku,
+          productName: prod.name,
+          category: prod.category,
+          unit: prod.unit,
+          quantity: qty,
+          costPrice: prod.costPrice || 0,
+        }
+      ]);
+    }
+
+    setTransferAddProdId('');
+    setTransferAddQty('');
+  };
+
+  const handleRemoveTransferItem = (productId: string) => {
+    setTransferItemsList(transferItemsList.filter(i => i.productId !== productId));
+  };
+
+  // Fase 1: Autorizar Salida y Despachar en Tránsito con Guía de Remisión
+  const handleCreateAndDispatchTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (transferOrigin === transferDestination) {
+      showAlert('La bodega de origen y la bodega de destino no pueden ser la misma.', 'Ubicaciones Inválidas', 'warning');
+      return;
+    }
+
+    if (transferItemsList.length === 0) {
+      showAlert('Debe agregar al menos un artículo a la transferencia.', 'Lista Vacía', 'warning');
+      return;
+    }
+
+    if (!guiaDriverName.trim() || !guiaLicensePlate.trim() || !guiaDriverId.trim()) {
+      showAlert(
+        'Para amparar el traslado de mercadería es obligatorio registrar los datos del transportista (Nombre, Cédula/RUC y Placa del vehículo).',
+        'Guía de Remisión Requerida',
+        'warning'
+      );
+      return;
+    }
+
+    const idVal = validateEcuadorianDocument('AUTO', guiaDriverId.trim());
+    if (!idVal.isValid) {
+      showAlert(idVal.message || 'El documento de identificación del conductor no es válido.', 'Identificación Inválida', 'warning');
+      return;
+    }
+
+    const totalUnits = transferItemsList.reduce((sum, item) => sum + item.quantity, 0);
+    const totalValue = transferItemsList.reduce((sum, item) => sum + (item.quantity * item.costPrice), 0);
+    const trfCode = `TRF-2026-${String((transfers || []).length + 1).padStart(4, '0')}`;
+    const guiaNumber = `001-002-${String(Math.floor(100000 + Math.random() * 900000))}`;
+
+    // Descontar inmediatamente stock físico en Bodega de Origen
+    transferItemsList.forEach(item => {
+      onStockAdjust(item.productId, -item.quantity);
+    });
+
+    const newTrfRecord: StockTransfer = {
+      id: `trf-${Date.now()}`,
+      code: trfCode,
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      dispatchedAt: new Date().toISOString(),
+      originStore: transferOrigin,
+      destinationStore: transferDestination,
+      itemCount: totalUnits,
+      items: transferItemsList,
+      totalValue,
+      status: 'EN_TRANSITO',
+      responsible: transferResponsible || 'Bodega Central',
+      notes: transferNotes.trim() || undefined,
+      guiaRemision: {
+        number: guiaNumber,
+        driverName: guiaDriverName.trim(),
+        driverIdNumber: guiaDriverId.trim(),
+        licensePlate: guiaLicensePlate.trim().toUpperCase(),
+        vehicleModel: guiaVehicleModel.trim() || undefined,
+        route: guiaRoute.trim() || `${transferOrigin} ➔ ${transferDestination}`,
+        transferStartDate: guiaStartDate,
+        transferEndDate: guiaEndDate,
+        transferReason: 'Traslado entre establecimientos de la misma empresa',
+        status: 'EN_TRANSITO'
+      }
+    };
+
+    setTransfers([newTrfRecord, ...(transfers || [])]);
+
+    // Limpiar formulario y cerrar modal
+    setIsTransferModalOpen(false);
+    setTransferItemsList([]);
+    setTransferNotes('');
+    setGuiaDriverName('');
+    setGuiaDriverId('');
+    setGuiaLicensePlate('');
+    setGuiaVehicleModel('');
+    setGuiaRoute('');
+
+    showToast(
+      `Transferencia ${trfCode} autorizada y despachada. ${totalUnits} unidades en tránsito con Guía de Remisión N° ${guiaNumber}.`,
+      'success'
+    );
+
+    // Abrir automáticamente el visor de Guía de Remisión para imprimir
+    setTransferToViewGuia(newTrfRecord);
+    setIsGuiaPrintModalOpen(true);
+  };
+
+  // Fase 2: Abrir modal de recepción física
+  const handleOpenReceiveModal = (trf: StockTransfer) => {
+    setTransferToReceive(trf);
+    const initialQtys: { [id: string]: number } = {};
+    (trf.items || []).forEach(item => {
+      initialQtys[item.productId] = item.quantity;
+    });
+    setReceptionQuantities(initialQtys);
+    setReceivingStaff('Administrador Sucursal');
+    setReceivingNotesInput('');
+    setIsReceiveModalOpen(true);
+  };
+
+  // Fase 2: Confirmar recepción física e ingresar al stock de destino
+  const handleConfirmPhysicalReception = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferToReceive) return;
+
+    const receivedItems = (transferToReceive.items || []).map(item => {
+      const recQty = receptionQuantities[item.productId] !== undefined ? receptionQuantities[item.productId] : item.quantity;
+      return {
+        ...item,
+        receivedQuantity: recQty
+      };
+    });
+
+    // Ingresar unidades validadas al stock físico de destino
+    receivedItems.forEach(item => {
+      const qtyToAdd = item.receivedQuantity !== undefined ? item.receivedQuantity : item.quantity;
+      if (qtyToAdd > 0) {
+        onStockAdjust(item.productId, qtyToAdd);
+      }
+    });
+
+    const updatedTransfers = (transfers || []).map(t => {
+      if (t.id === transferToReceive.id) {
+        return {
+          ...t,
+          status: 'COMPLETADA' as const,
+          receivedAt: new Date().toISOString(),
+          receivedBy: receivingStaff || 'Recepción Sucursal',
+          receptionNotes: receivingNotesInput.trim() || undefined,
+          items: receivedItems,
+          guiaRemision: t.guiaRemision ? { ...t.guiaRemision, status: 'EMITIDA' as const } : undefined
+        };
+      }
+      return t;
+    });
+
+    setTransfers(updatedTransfers);
+    setIsReceiveModalOpen(false);
+    setTransferToReceive(null);
+
+    showToast(
+      `Recepción física confirmada para ${transferToReceive.code}. Mercadería ingresada exitosamente a ${transferToReceive.destinationStore}.`,
+      'success'
+    );
+  };
+
+  // Anular / Cancelar transferencia en tránsito (Retorna mercadería a origen)
+  const handleCancelTransfer = (trf: StockTransfer) => {
+    showConfirm(
+      `¿Está seguro de cancelar la transferencia ${trf.code}? Las ${trf.itemCount} unidades en tránsito serán retornadas automáticamente al stock de ${trf.originStore}.`,
+      () => {
+        // Reintegrar mercadería al origen
+        (trf.items || []).forEach(item => {
+          onStockAdjust(item.productId, item.quantity);
+        });
+
+        const updated = (transfers || []).map(t => {
+          if (t.id === trf.id) {
+            return {
+              ...t,
+              status: 'CANCELADA' as const,
+              notes: `${t.notes ? t.notes + ' • ' : ''}Cancelada y retornada a origen por anulación de traslado.`
+            };
+          }
+          return t;
+        });
+
+        setTransfers(updated);
+        showToast(`Transferencia ${trf.code} cancelada. Mercadería reincorporada a ${trf.originStore}.`, 'info');
+      },
+      'Confirmar Cancelación de Traslado',
+      'Sí, Cancelar Traslado',
+      'Volver'
+    );
+  };
+
+  // Exportar reporte de transferencias a Excel
+  const handleExportTransfersExcel = () => {
+    const columns = [
+      { header: 'Código Traslado', key: 'code', width: 16 },
+      { header: 'Fecha Salida', key: 'date', width: 20 },
+      { header: 'Bodega Origen', key: 'originStore', width: 24 },
+      { header: 'Bodega Destino', key: 'destinationStore', width: 24 },
+      { header: 'Estado Transaccional', key: 'status', width: 18 },
+      { header: 'Total Unidades', key: 'itemCount', width: 16 },
+      { header: 'Valorización ($)', key: 'totalValue', width: 18 },
+      { header: 'N° Guía Remisión', key: 'guiaNumber', width: 20 },
+      { header: 'Conductor / Transportista', key: 'driverName', width: 26 },
+      { header: 'Placa Vehículo', key: 'licensePlate', width: 16 },
+      { header: 'Despachado Por', key: 'responsible', width: 20 },
+      { header: 'Recibido Por', key: 'receivedBy', width: 20 },
+      { header: 'Fecha Recepción', key: 'receivedAt', width: 20 },
+    ];
+
+    const data = filteredTransfers.map(t => ({
+      code: t.code,
+      date: t.date,
+      originStore: t.originStore,
+      destinationStore: t.destinationStore,
+      status: t.status,
+      itemCount: t.itemCount,
+      totalValue: formatCurrency(t.totalValue, settings.currencySymbol),
+      guiaNumber: t.guiaRemision?.number || 'S/N',
+      driverName: t.guiaRemision?.driverName || 'N/A',
+      licensePlate: t.guiaRemision?.licensePlate || 'N/A',
+      responsible: t.responsible,
+      receivedBy: t.receivedBy || 'Pendiente',
+      receivedAt: t.receivedAt ? t.receivedAt.replace('T', ' ').substring(0, 16) : 'Pendiente',
+    }));
+
+    exportToModernExcel({
+      filename: `Reporte_Transferencias_Bodegas_${new Date().toISOString().split('T')[0]}`,
+      sheetName: 'Transferencias',
+      title: 'Registro de Transferencias de Mercadería entre Almacenes (Doble Fase)',
+      columns,
+      data,
+    });
+
+    showToast('Reporte de transferencias exportado a Excel.', 'success');
+  };
 
   // 8. Etiquetas & Códigos de Barra managed by BarcodeLabelsManager
   // 9. Kardex managed by KardexManager
@@ -1376,57 +2128,484 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           SUBTAB 5: LOTES / VENCIMIENTOS
          --------------------------------------------------------------------- */}
       {subTab === 'LOTES_VENCIMIENTOS' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-amber-500" />
-                <span>Control de Lotes y Fechas de Caducidad (FEFO)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Monitoreo de vencimientos para pinturas, resinas, cementos y químicos de construcción.
-              </p>
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 bg-amber-500/10 text-amber-600 rounded-2xl border border-amber-500/20 shadow-xs">
+                <Calendar className="w-7 h-7 stroke-[2.2]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">
+                    Control de Lotes y Fechas de Caducidad (FEFO)
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide bg-orange-50 text-orange-700 border border-orange-200">
+                    Sincronizado con Compras
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed font-medium">
+                  Rastreo cronológico de lotes ingresados mediante <strong>Facturas de Compra a Proveedores</strong> y almacén. 
+                  Aplica el principio <strong>FEFO</strong> (<em>First Expired, First Out</em>) para garantizar que la mercadería con vencimiento más próximo rote primero en ventas.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 self-end lg:self-center">
+              <button
+                type="button"
+                onClick={handleExportBatchesExcel}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-2 border border-slate-200"
+              >
+                <Download className="w-4 h-4" />
+                <span>Exportar Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsNewBatchModalOpen(true)}
+                className="px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Registrar Lote Manual</span>
+              </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Producto</th>
-                  <th className="py-3 px-4">N° de Lote</th>
-                  <th className="py-3 px-4 text-center">Fecha Caducidad</th>
-                  <th className="py-3 px-4 text-right">Cantidad Stock</th>
-                  <th className="py-3 px-4">Ubicación Bodega</th>
-                  <th className="py-3 px-4 text-center">Estado Alerta</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {batches.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-50 transition">
-                    <td className="py-3 px-4 font-black text-slate-900">{b.productName}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-slate-800">{b.batchNumber}</td>
-                    <td className="py-3 px-4 text-center font-mono font-bold">{b.expiryDate}</td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">{b.quantity} u.</td>
-                    <td className="py-3 px-4 text-slate-600">{b.location}</td>
-                    <td className="py-3 px-4 text-center">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
-                          b.status === 'VIGENTE'
-                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                            : b.status === 'POR_VENCER'
-                            ? 'bg-amber-50 border-amber-200 text-amber-700'
-                            : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}
-                      >
-                        {b.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Metric Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Total */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">
+                  Total Lotes Rastreados
+                </span>
+                <Boxes className="w-4 h-4 text-slate-400" />
+              </div>
+              <div className="flex items-baseline justify-between pt-1">
+                <span className="text-3xl font-black font-mono text-slate-950">
+                  {batchMetrics.total}
+                </span>
+                <span className="text-[11px] font-bold text-slate-400">
+                  {batchMetrics.totalUnits} u. en almacén
+                </span>
+              </div>
+            </div>
+
+            {/* Vigentes */}
+            <div className="bg-white border border-emerald-200/80 rounded-2xl p-5 shadow-xs space-y-1 bg-gradient-to-br from-emerald-50/40 to-transparent">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase text-emerald-700 tracking-wider">
+                  Lotes Vigentes
+                </span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="flex items-baseline justify-between pt-1">
+                <span className="text-3xl font-black font-mono text-emerald-700">
+                  {batchMetrics.vigentes}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Óptimo
+                </span>
+              </div>
+            </div>
+
+            {/* Por Vencer */}
+            <div className="bg-white border border-amber-200/80 rounded-2xl p-5 shadow-xs space-y-1 bg-gradient-to-br from-amber-50/40 to-transparent">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase text-amber-700 tracking-wider">
+                  Por Vencer (≤ 30 días)
+                </span>
+                <Clock className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="flex items-baseline justify-between pt-1">
+                <span className="text-3xl font-black font-mono text-amber-700">
+                  {batchMetrics.porVencer}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                  Priorizar Venta
+                </span>
+              </div>
+            </div>
+
+            {/* Vencidos */}
+            <div className="bg-white border border-rose-200/80 rounded-2xl p-5 shadow-xs space-y-1 bg-gradient-to-br from-rose-50/40 to-transparent">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase text-rose-700 tracking-wider">
+                  Lotes Vencidos
+                </span>
+                <ShieldAlert className="w-4 h-4 text-rose-600" />
+              </div>
+              <div className="flex items-baseline justify-between pt-1">
+                <span className="text-3xl font-black font-mono text-rose-700">
+                  {batchMetrics.vencidos}
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200">
+                  {batchMetrics.vencidos > 0 ? 'Retirar / Devolver' : 'Cero vencidos'}
+                </span>
+              </div>
+            </div>
           </div>
+
+          {/* Filter Toolbar */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar por producto, SKU, número de lote, proveedor o factura..."
+                value={batchSearchTerm}
+                onChange={(e) => setBatchSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+
+            {/* Status Filter Buttons */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setBatchStatusFilter('TODOS')}
+                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
+                  batchStatusFilter === 'TODOS'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Todos ({batchMetrics.total})
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchStatusFilter('POR_VENCER')}
+                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1 ${
+                  batchStatusFilter === 'POR_VENCER'
+                    ? 'bg-amber-500 text-white shadow-xs'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <span>⚠️ Por Vencer</span>
+                <span className="font-mono">({batchMetrics.porVencer})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchStatusFilter('VENCIDOS')}
+                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1 ${
+                  batchStatusFilter === 'VENCIDOS'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'
+                }`}
+              >
+                <span>⛔ Vencidos</span>
+                <span className="font-mono">({batchMetrics.vencidos})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchStatusFilter('VIGENTES')}
+                className={`px-3 py-2 rounded-xl font-bold transition cursor-pointer flex items-center gap-1 ${
+                  batchStatusFilter === 'VIGENTES'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <span>✅ Vigentes</span>
+                <span className="font-mono">({batchMetrics.vigentes})</span>
+              </button>
+            </div>
+
+            {/* Location Filter */}
+            <div className="w-full md:w-56">
+              <Select
+                value={batchLocationFilter}
+                onChange={(e) => setBatchLocationFilter(e.target.value)}
+                className="w-full py-2 bg-slate-50 border border-slate-200 rounded-xl font-medium"
+              >
+                <option value="TODAS">Todas las Bodegas</option>
+                {availableBatchLocations.map((loc) => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          {/* Batches Table */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Producto & SKU</th>
+                    <th className="py-3 px-4">N° de Lote</th>
+                    <th className="py-3 px-4">Factura Compra / Proveedor</th>
+                    <th className="py-3 px-4 text-center">Fecha Compra</th>
+                    <th className="py-3 px-4 text-center">Fecha Caducidad</th>
+                    <th className="py-3 px-4 text-right">Cantidad Stock</th>
+                    <th className="py-3 px-4">Bodega / Ubicación</th>
+                    <th className="py-3 px-4 text-center">Alerta FEFO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredBatches.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-14 text-center">
+                        <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                          <Boxes className="w-6 h-6" />
+                        </div>
+                        <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                          No se encontraron lotes registrados
+                        </h4>
+                        <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 font-medium">
+                          {batchSearchTerm || batchStatusFilter !== 'TODOS'
+                            ? 'Intenta ajustar los filtros de búsqueda o seleccionar otra condición de vencimiento.'
+                            : 'Los lotes registrados al ingresar facturas de compra de proveedores aparecerán automáticamente en esta lista.'}
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredBatches.map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
+                        {/* Producto & SKU */}
+                        <td className="py-3 px-4">
+                          <div className="font-black text-slate-950 text-xs">{b.productName}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="font-mono text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100">
+                              SKU: {b.sku}
+                            </span>
+                            {b.category && (
+                              <span className="text-[10px] text-slate-400">
+                                • {b.category}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* N° de Lote */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 font-mono font-bold text-xs bg-slate-100 text-slate-800 px-2.5 py-1 rounded-lg border border-slate-200">
+                            <Boxes className="w-3 h-3 text-slate-500" />
+                            <span>{b.batchNumber}</span>
+                          </span>
+                        </td>
+
+                        {/* Factura Compra & Proveedor */}
+                        <td className="py-3 px-4">
+                          <div className="font-mono font-bold text-slate-900 text-xs flex items-center gap-1">
+                            <FileText className="w-3 h-3 text-slate-400" />
+                            <span>{b.invoiceNumber}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate max-w-[200px]" title={b.supplierName}>
+                            {b.supplierName}
+                          </div>
+                        </td>
+
+                        {/* Fecha Compra */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span className="font-mono font-semibold text-slate-600 text-xs">
+                            {b.purchaseDate || '—'}
+                          </span>
+                        </td>
+
+                        {/* Fecha Caducidad & Días */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <div className="font-mono font-black text-xs text-slate-900">
+                            {b.expiryDate}
+                          </div>
+                          {b.daysRemaining !== 9999 && (
+                            <div className="mt-0.5">
+                              {b.daysRemaining < 0 ? (
+                                <span className="text-[10px] font-black text-rose-600">
+                                  Vencido hace {Math.abs(b.daysRemaining)} días
+                                </span>
+                              ) : b.daysRemaining <= 30 ? (
+                                <span className="text-[10px] font-black text-amber-600">
+                                  Caduca en {b.daysRemaining} días
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-400">
+                                  {b.daysRemaining} días restantes
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Cantidad Stock */}
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <span className="font-mono font-black text-slate-900 text-xs">
+                            {b.quantity} <span className="text-[10px] font-bold text-slate-500">{b.unit}</span>
+                          </span>
+                          {b.costPrice ? (
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              Costo: {formatCurrency(b.costPrice, settings.currencySymbol)}
+                            </div>
+                          ) : null}
+                        </td>
+
+                        {/* Ubicación Bodega */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+                            <Building className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{b.location}</span>
+                          </span>
+                        </td>
+
+                        {/* Estado Alerta */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wide border ${
+                              b.status === 'VIGENTE'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                : b.status === 'POR_VENCER'
+                                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                                : 'bg-rose-50 border-rose-200 text-rose-700'
+                            }`}
+                          >
+                            {b.status === 'VIGENTE' ? (
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            ) : b.status === 'POR_VENCER' ? (
+                              <Clock className="w-3 h-3 text-amber-600" />
+                            ) : (
+                              <AlertCircle className="w-3 h-3 text-rose-600" />
+                            )}
+                            <span>{b.status === 'POR_VENCER' ? 'Por Vencer' : b.status}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer Summary */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 font-medium">
+              <div>
+                Mostrando <strong className="text-slate-900 font-bold">{filteredBatches.length}</strong> de <strong className="text-slate-900 font-bold">{consolidatedBatches.length}</strong> lotes registrados en inventario
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  Vigente (&gt; 30d)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  Por Vencer (≤ 30d)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                  Vencido
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Modal para Registrar Lote Manual */}
+          {isNewBatchModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden">
+                <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-orange-500/20 text-orange-400 rounded-xl border border-orange-500/30">
+                      <Boxes className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black tracking-tight">Registrar Lote de Inventario</h3>
+                      <p className="text-[11px] text-slate-400">Asocia un número de lote y fecha de vencimiento a un artículo</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewBatchModalOpen(false)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveManualBatch} className="p-6 space-y-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Seleccionar Producto *</label>
+                    <Select
+                      value={newBatchProductId}
+                      onChange={(e) => setNewBatchProductId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                    >
+                      <option value="">-- Seleccionar producto del catálogo --</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} (SKU: {p.sku}) - Stock: {p.stock} {p.unit}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Número de Lote</label>
+                      <input
+                        type="text"
+                        placeholder="ej: LOT-2026-X1"
+                        value={newBatchNumber}
+                        onChange={(e) => setNewBatchNumber(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Fecha de Caducidad</label>
+                      <CustomDatePicker
+                        value={newBatchExpiryDate}
+                        onChange={setNewBatchExpiryDate}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Cantidad en Lote *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="any"
+                        required
+                        placeholder="Cantidad"
+                        value={newBatchQty}
+                        onChange={(e) => setNewBatchQty(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Bodega / Ubicación</label>
+                      <Select
+                        value={newBatchLocation}
+                        onChange={(e) => setNewBatchLocation(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-medium"
+                      >
+                        {availableBatchLocations.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsNewBatchModalOpen(false)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-md transition cursor-pointer"
+                    >
+                      Guardar Lote
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1773,56 +2952,332 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
          --------------------------------------------------------------------- */}
       {subTab === 'TRANSFERENCIAS' && (
         <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <ArrowLeftRight className="w-5 h-5 text-blue-500" />
-                <span>Transferencias de Mercadería entre Almacenes</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Envía inventario entre Bodega Central, Salón de Ventas y Sucursales externas.
+          {/* Header Banner & Action Buttons */}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+            <div className="flex items-start space-x-3.5">
+              <div className="p-3 bg-gradient-to-br from-blue-500/20 to-indigo-500/10 text-blue-600 rounded-2xl border border-blue-500/30 shadow-xs mt-0.5">
+                <ArrowLeftRight className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">Transferencias de Mercadería entre Almacenes</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 text-blue-700 border border-blue-200">
+                    Doble Fase Transaccional
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                    <Truck className="w-3 h-3" />
+                    Guía de Remisión SRI
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-0.5 max-w-3xl">
+                  Movimiento en dos tiempos: Despacho y descuento en bodega de origen con emisión obligatoria de Guía de Remisión, clasificación como mercadería en tránsito y posterior validación e ingreso oficial al stock en destino.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingWarehouse(null);
+                  setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
+                  setIsWarehouseModalOpen(true);
+                }}
+                className="flex-1 sm:flex-none px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 border border-slate-300 cursor-pointer"
+                title="Administrar bodegas reales, almacenes y sucursales"
+              >
+                <Building className="w-4 h-4 text-blue-600 stroke-[2.5]" />
+                <span>Gestionar Bodegas</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportTransfersExcel}
+                className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer"
+                title="Exportar historial de traslados a Excel"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
+                <span>Exportar Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferItemsList([]);
+                  setGuiaDriverName('');
+                  setGuiaDriverId('');
+                  setGuiaLicensePlate('');
+                  setGuiaVehicleModel('');
+                  setGuiaRoute(`${transferOrigin} ➔ ${transferDestination}`);
+                  setIsTransferModalOpen(true);
+                }}
+                className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>+ Nueva Transferencia & Despacho</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Total de Traslados</p>
+              <div className="flex items-baseline space-x-1.5 mt-1">
+                <span className="text-2xl font-black text-slate-900 font-mono">{transferMetrics.total}</span>
+                <span className="text-xs text-slate-500 font-bold">registros</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Historial consolidado</p>
+            </div>
+
+            <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase text-amber-700 tracking-wider">Mercadería en Tránsito</p>
+                {transferMetrics.enTransito > 0 && (
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline space-x-1.5 mt-1">
+                <span className="text-2xl font-black text-amber-900 font-mono">{transferMetrics.enTransito}</span>
+                <span className="text-xs text-amber-700 font-bold">en camino</span>
+              </div>
+              <p className="text-[10px] text-amber-600 font-medium mt-0.5">
+                {transferMetrics.transitUnits} unidades en calle amparadas
               </p>
             </div>
 
-            <button
-              onClick={() => setIsTransferModalOpen(true)}
-              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nueva Transferencia</span>
-            </button>
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">Recepciones Completadas</p>
+              <div className="flex items-baseline space-x-1.5 mt-1">
+                <span className="text-2xl font-black text-emerald-900 font-mono">{transferMetrics.completadas}</span>
+                <span className="text-xs text-emerald-700 font-bold">ingresadas</span>
+              </div>
+              <p className="text-[10px] text-emerald-600 font-medium mt-0.5">Stock en destino confirmado</p>
+            </div>
+
+            <div className="p-4 bg-blue-50/70 border border-blue-200/80 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-blue-700 tracking-wider">Activo en Tránsito (CPP)</p>
+              <div className="flex items-baseline space-x-1 mt-1">
+                <span className="text-2xl font-black text-blue-900 font-mono">
+                  {formatCurrency(transferMetrics.transitValue, settings.currencySymbol)}
+                </span>
+              </div>
+              <p className="text-[10px] text-blue-600 font-medium mt-0.5">Valoración global intacta</p>
+            </div>
           </div>
 
+          {/* Filter Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por código, bodega, chofer, placa, guía o producto..."
+                value={transferSearchTerm}
+                onChange={(e) => setTransferSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {(['TODAS', 'EN_TRANSITO', 'COMPLETADA', 'CANCELADA'] as const).map((st) => {
+                const isSelected = transferStatusFilter === st;
+                const label = st === 'TODAS' ? 'Todas' : st === 'EN_TRANSITO' ? 'En Tránsito' : st === 'COMPLETADA' ? 'Completadas' : 'Canceladas';
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setTransferStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shrink-0 ${
+                      isSelected
+                        ? 'bg-slate-950 text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Transfers Table */}
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="py-3 px-4">Código / Fecha</th>
-                  <th className="py-3 px-4">Bodega Origen</th>
-                  <th className="py-3 px-4">Bodega Destino</th>
-                  <th className="py-3 px-4 text-center">Items</th>
-                  <th className="py-3 px-4">Responsable</th>
+                  <th className="py-3 px-4">Ruta del Traslado</th>
+                  <th className="py-3 px-4 text-center">Unidades / Valor</th>
+                  <th className="py-3 px-4">Guía de Remisión & Transporte</th>
                   <th className="py-3 px-4 text-center">Estado</th>
+                  <th className="py-3 px-4 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {transfers.map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-50 transition">
-                    <td className="py-3 px-4 font-mono font-black text-slate-900">
-                      <span className="text-orange-600 block">{t.code}</span>
-                      <span className="text-[10px] text-slate-400 font-normal">{t.date}</span>
-                    </td>
-                    <td className="py-3 px-4 font-bold text-slate-700">{t.originStore}</td>
-                    <td className="py-3 px-4 font-bold text-emerald-700">{t.destinationStore}</td>
-                    <td className="py-3 px-4 text-center font-mono font-black text-slate-900">{t.itemCount} u.</td>
-                    <td className="py-3 px-4 font-medium text-slate-600">{t.responsible}</td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black border bg-blue-50 border-blue-200 text-blue-700">
-                        {t.status}
-                      </span>
+                {filteredTransfers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-slate-400">
+                      <ArrowLeftRight className="w-10 h-10 mx-auto mb-2 text-slate-300 opacity-60" />
+                      <p className="font-bold text-slate-600 text-sm">No se encontraron transferencias</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {transferSearchTerm || transferStatusFilter !== 'TODAS'
+                          ? 'Ajuste los filtros o términos de búsqueda.'
+                          : 'Haga clic en "+ Nueva Transferencia & Despacho" para iniciar el proceso transaccional.'}
+                      </p>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredTransfers.map((t) => {
+                    const isTransit = t.status === 'EN_TRANSITO';
+                    const isCompleted = t.status === 'COMPLETADA';
+                    const isCancelled = t.status === 'CANCELADA';
+
+                    return (
+                      <tr key={t.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3.5 px-4 font-mono">
+                          <span className="font-black text-orange-600 block text-xs">{t.code}</span>
+                          <span className="text-[10px] text-slate-500 font-normal flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3 text-slate-400" />
+                            {t.date}
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2">
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">Origen</span>
+                              <span className="font-bold text-slate-900 flex items-center gap-1">
+                                <Building className="w-3 h-3 text-slate-500" />
+                                {t.originStore}
+                              </span>
+                            </div>
+                            <span className="text-slate-400 font-black px-1">➔</span>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">Destino</span>
+                              <span className="font-bold text-emerald-800 flex items-center gap-1">
+                                <Building className="w-3 h-3 text-emerald-600" />
+                                {t.destinationStore}
+                              </span>
+                            </div>
+                          </div>
+                          {t.responsible && (
+                            <span className="text-[10px] text-slate-400 block mt-1">
+                              Autorizado por: <strong className="text-slate-600">{t.responsible}</strong>
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="font-black font-mono text-slate-900 text-xs block">
+                            {t.itemCount} unidades
+                          </span>
+                          <span className="text-[11px] font-bold font-mono text-slate-600 block mt-0.5">
+                            {formatCurrency(t.totalValue, settings.currencySymbol)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block">
+                            {(t.items || []).length} ítems en despacho
+                          </span>
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {t.guiaRemision ? (
+                            <div className="space-y-0.5">
+                              <span className="font-black text-slate-900 font-mono text-[11px] flex items-center gap-1">
+                                <FileText className="w-3 h-3 text-amber-500" />
+                                N° {t.guiaRemision.number}
+                              </span>
+                              <p className="text-[11px] text-slate-600 font-medium">
+                                <strong>Chofer:</strong> {t.guiaRemision.driverName}
+                              </p>
+                              <p className="text-[10px] text-slate-500 font-mono">
+                                <strong>Placa:</strong> {t.guiaRemision.licensePlate} • CI/RUC: {t.guiaRemision.driverIdNumber}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">Sin guía asignada</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-center">
+                          {isTransit && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                              </span>
+                              En Tránsito
+                            </span>
+                          )}
+                          {isCompleted && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              Completada
+                            </span>
+                          )}
+                          {isCancelled && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                              <X className="w-3 h-3 text-rose-600" />
+                              Cancelada
+                            </span>
+                          )}
+
+                          {isCompleted && t.receivedAt && (
+                            <span className="block text-[9px] text-slate-400 mt-1 font-mono">
+                              Recibido: {t.receivedAt.replace('T', ' ').substring(0, 16)}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Ver / Imprimir Guía */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTransferToViewGuia(t);
+                                setIsGuiaPrintModalOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer"
+                              title="Ver e Imprimir Guía de Remisión Oficial"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-amber-600" />
+                              <span className="hidden sm:inline">Guía</span>
+                            </button>
+
+                            {/* Fase 2: Recepción Física (solo si está EN_TRANSITO) */}
+                            {isTransit && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReceiveModal(t)}
+                                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                                title="Confirmar recepción física de mercadería en bodega de destino"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Recibir en Destino</span>
+                              </button>
+                            )}
+
+                            {/* Cancelar (solo si está EN_TRANSITO) */}
+                            {isTransit && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelTransfer(t)}
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                                title="Anular traslado y retornar mercadería a bodega de origen"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -2242,25 +3697,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               Mostrando <span className="font-bold text-slate-900">{filteredAuditItems.length}</span> productos en esta vista •{' '}
               <span className="text-orange-600 font-bold">{auditItems.filter(i => i.physicalStock !== '' && i.diff !== 0).length}</span> con discrepancia listos para ajuste.
             </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleDownloadTomaFisicaPdf}
-                className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5 text-orange-500" />
-                <span>Descargar PDF</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleApplyPhysicalAudit}
-                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Aplicar Ajuste</span>
-              </button>
+            <div className="text-slate-400 text-[11px] font-medium">
+              Usa los botones principales de la cabecera para descargar la planilla o aplicar los ajustes.
             </div>
           </div>
         </div>
@@ -2382,6 +3820,1203 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                 >
                   <Check className="w-4 h-4" />
                   <span>{editingCategory ? 'Actualizar' : 'Guardar Categoría'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL 1: NUEVA TRANSFERENCIA Y DESPACHO (FASE 1: CON GUÍA DE REMISIÓN)
+         --------------------------------------------------------------------- */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-slideUp my-auto">
+            {/* Header */}
+            <div className="px-6 py-4 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-gradient-to-br from-orange-500/30 to-amber-500/20 text-orange-400 rounded-2xl border border-orange-500/30">
+                  <ArrowLeftRight className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black tracking-tight text-white">
+                      Nueva Transferencia & Despacho de Mercadería
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                      Fase 1: Despacho
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Descuenta inmediatamente el stock de origen y emite la Guía de Remisión obligatoria para el traslado en tránsito.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTransferModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleCreateAndDispatchTransfer} className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+              {/* Sección 1: Bodegas de Origen y Destino */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Building className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      1. Definición de Ruta y Responsable
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingWarehouse(null);
+                      setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
+                      setIsWarehouseModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] rounded-lg transition flex items-center gap-1 border border-blue-200 cursor-pointer shadow-2xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Administrar / Crear Bodegas Reales</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                        Bodega de Origen (Salida) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingWarehouse(null);
+                          setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
+                          setIsWarehouseModalOpen(true);
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 cursor-pointer"
+                        title="Crear nueva bodega real"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Nueva</span>
+                      </button>
+                    </div>
+                    <select
+                      value={transferOrigin}
+                      onChange={(e) => {
+                        setTransferOrigin(e.target.value);
+                        const origWh = (warehouses || []).find(w => w.name === e.target.value);
+                        const destWh = (warehouses || []).find(w => w.name === transferDestination);
+                        const origCity = origWh?.city ? ` (${origWh.city})` : '';
+                        const destCity = destWh?.city ? ` (${destWh.city})` : '';
+                        setGuiaRoute(`${e.target.value}${origCity} ➔ ${transferDestination}${destCity}`);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    >
+                      {availableBatchLocations.map((loc) => (
+                        <option key={`orig-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-slate-400 mt-1 block">El stock se descontará de aquí</span>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
+                        Bodega de Destino (Llegada) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingWarehouse(null);
+                          setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
+                          setIsWarehouseModalOpen(true);
+                        }}
+                        className="text-[10px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-0.5 cursor-pointer"
+                        title="Crear nueva bodega real"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Nueva</span>
+                      </button>
+                    </div>
+                    <select
+                      value={transferDestination}
+                      onChange={(e) => {
+                        setTransferDestination(e.target.value);
+                        const origWh = (warehouses || []).find(w => w.name === transferOrigin);
+                        const destWh = (warehouses || []).find(w => w.name === e.target.value);
+                        const origCity = origWh?.city ? ` (${origWh.city})` : '';
+                        const destCity = destWh?.city ? ` (${destWh.city})` : '';
+                        setGuiaRoute(`${transferOrigin}${origCity} ➔ ${e.target.value}${destCity}`);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-xs font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      {availableBatchLocations.map((loc) => (
+                        <option key={`dest-${loc}`} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-emerald-600 font-medium mt-1 block">Ingresará tras confirmar recepción</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Responsable del Despacho *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Juan Pérez (Jefe de Bodega)"
+                      value={transferResponsible}
+                      onChange={(e) => setTransferResponsible(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sección 2: Selección y Agregado de Artículos */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-4 h-4 text-orange-600" />
+                    <span className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      2. Artículos a Despachar
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {transferItemsList.length} ítems agregados
+                  </span>
+                </div>
+
+                {/* Fila para agregar artículo */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                  <div className="sm:col-span-7">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Seleccionar Producto del Catálogo
+                    </label>
+                    <select
+                      value={transferAddProdId}
+                      onChange={(e) => setTransferAddProdId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    >
+                      <option value="">-- Buscar / Seleccionar producto --</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                          {p.name} {p.sku ? `(${p.sku})` : ''} • Disp: {p.stock} {p.unit || 'u.'} {p.stock <= 0 ? ' [SIN STOCK]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Cantidad a Trasladar
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="any"
+                      placeholder="0.00"
+                      value={transferAddQty}
+                      onChange={(e) => setTransferAddQty(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <button
+                      type="button"
+                      onClick={handleAddItemToTransferList}
+                      className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl transition flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Agregar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tabla de artículos agregados */}
+                {transferItemsList.length > 0 ? (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="py-2.5 px-3">Producto / SKU</th>
+                          <th className="py-2.5 px-3 text-center">Cantidad</th>
+                          <th className="py-2.5 px-3 text-right">Costo CPP</th>
+                          <th className="py-2.5 px-3 text-right">Subtotal</th>
+                          <th className="py-2.5 px-3 text-center">Quitar</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {transferItemsList.map((item) => (
+                          <tr key={item.productId} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 block">{item.productName}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{item.sku || 'S/SKU'}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900">
+                              {item.quantity} {item.unit || 'u.'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-600">
+                              {formatCurrency(item.costPrice, settings.currencySymbol)}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                              {formatCurrency(item.quantity * item.costPrice, settings.currencySymbol)}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTransferItem(item.productId)}
+                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
+                        <tr>
+                          <td className="py-2 px-3 text-slate-700 uppercase tracking-wider text-[10px]">Totales de Despacho:</td>
+                          <td className="py-2 px-3 text-center font-mono text-orange-600 font-black">
+                            {transferItemsList.reduce((sum, it) => sum + it.quantity, 0)} unidades
+                          </td>
+                          <td></td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-900 font-black">
+                            {formatCurrency(
+                              transferItemsList.reduce((sum, it) => sum + it.quantity * it.costPrice, 0),
+                              settings.currencySymbol
+                            )}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-white border border-dashed border-slate-300 rounded-xl text-center text-slate-400">
+                    <p className="font-medium">No hay productos agregados al traslado.</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Seleccione un producto arriba y haga clic en "Agregar".</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Sección 3: Datos de Transporte y Guía de Remisión Oficial */}
+              <div className="p-4 bg-amber-50/50 border border-amber-200/80 rounded-2xl space-y-4">
+                <div className="flex items-center gap-2 border-b border-amber-200 pb-2.5">
+                  <Truck className="w-4 h-4 text-amber-600" />
+                  <span className="text-xs font-black uppercase text-amber-950 tracking-wider">
+                    3. Datos Legales de Transporte para Guía de Remisión (SRI)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Nombre del Transportista / Conductor *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Carlos Alberto Morales"
+                      value={guiaDriverName}
+                      onChange={(e) => setGuiaDriverName(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Cédula o RUC del Conductor *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: 1713334455 / 1790012345001"
+                      value={guiaDriverId}
+                      onChange={(e) => setGuiaDriverId(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Placa del Vehículo *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: PBX-4589"
+                      value={guiaLicensePlate}
+                      onChange={(e) => setGuiaLicensePlate(e.target.value.toUpperCase())}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Modelo / Marca del Vehículo (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Chevrolet Hino 3.5T Blanco"
+                      value={guiaVehicleModel}
+                      onChange={(e) => setGuiaVehicleModel(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Fecha Inicio Traslado *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={guiaStartDate}
+                      onChange={(e) => setGuiaStartDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Fecha Fin Estimada *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={guiaEndDate}
+                      onChange={(e) => setGuiaEndDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Ruta Declarada de Traslado
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Bodega Central Norte (Av. Amazonas) ➔ Sucursal Centro POS (Av. 10 de Agosto)"
+                      value={guiaRoute}
+                      onChange={(e) => setGuiaRoute(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Observaciones generales */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Notas / Observaciones del Envío (Opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Instrucciones especiales de manejo, fragilidad o precintos de seguridad..."
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Footer Buttons */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={transferItemsList.length === 0}
+                  className={`px-6 py-2.5 font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer ${
+                    transferItemsList.length > 0
+                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-orange-500/20'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Truck className="w-4 h-4 stroke-[2.5]" />
+                  <span>Autorizar Salida, Descontar Origen y Emitir Guía</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL 2: VALIDAR Y CONFIRMAR RECEPCIÓN FÍSICA EN DESTINO (FASE 2)
+         --------------------------------------------------------------------- */}
+      {isReceiveModalOpen && transferToReceive && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-slideUp my-auto">
+            {/* Header */}
+            <div className="px-6 py-4 bg-emerald-950 text-white flex items-center justify-between border-b border-emerald-800 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-gradient-to-br from-emerald-500/30 to-teal-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
+                  <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black tracking-tight text-white">
+                      Confirmar Recepción Física en Destino
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Fase 2: Ingreso Oficial
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-300/80">
+                    Valida las cantidades recibidas físicamente para ingresarlas al stock de {transferToReceive.destinationStore}.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReceiveModalOpen(false)}
+                className="p-1.5 text-emerald-300 hover:text-white hover:bg-emerald-900 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleConfirmPhysicalReception} className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
+              {/* Resumen del Traslado */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block">Código Traslado</span>
+                  <span className="font-mono font-black text-orange-600 text-xs block">{transferToReceive.code}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block">Guía de Remisión</span>
+                  <span className="font-mono font-bold text-slate-900 text-xs block">
+                    N° {transferToReceive.guiaRemision?.number || 'S/N'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block">Origen ➔ Destino</span>
+                  <span className="font-bold text-slate-800 text-xs block truncate" title={`${transferToReceive.originStore} ➔ ${transferToReceive.destinationStore}`}>
+                    {transferToReceive.originStore} ➔ {transferToReceive.destinationStore}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block">Transportista</span>
+                  <span className="font-medium text-slate-700 text-xs block truncate" title={transferToReceive.guiaRemision?.driverName}>
+                    {transferToReceive.guiaRemision?.driverName || 'N/A'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Personal que recibe */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-1">
+                  Personal que Valida y Recibe la Mercadería *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: María José (Encargada Sucursal Centro)"
+                  value={receivingStaff}
+                  onChange={(e) => setReceivingStaff(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Tabla de Conteo Físico */}
+              <div>
+                <label className="block text-[11px] font-black text-slate-800 uppercase tracking-wider mb-2">
+                  Verificación de Unidades Físicas Recibidas
+                </label>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                      <tr>
+                        <th className="py-3 px-3">Producto / SKU</th>
+                        <th className="py-3 px-3 text-center">Despachado</th>
+                        <th className="py-3 px-3 text-center">Recibido Físico</th>
+                        <th className="py-3 px-3 text-center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {(transferToReceive.items || []).map((item) => {
+                        const recVal = receptionQuantities[item.productId] !== undefined ? receptionQuantities[item.productId] : item.quantity;
+                        const isMatch = recVal === item.quantity;
+
+                        return (
+                          <tr key={item.productId} className="hover:bg-slate-50">
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 block">{item.productName}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">{item.sku || 'S/SKU'}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-600">
+                              {item.quantity} {item.unit || 'u.'}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                step="any"
+                                value={recVal}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setReceptionQuantities({
+                                    ...receptionQuantities,
+                                    [item.productId]: val
+                                  });
+                                }}
+                                className="w-24 px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-center font-mono font-black text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              />
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              {isMatch ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  Conforme
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  Dif: {recVal - item.quantity}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Observaciones de Recepción */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Observaciones de Recepción (Opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Detalles sobre el estado del embalaje, sellos o novedades en la entrega..."
+                  value={receivingNotesInput}
+                  onChange={(e) => setReceivingNotesInput(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Mensaje de Garantía Contable */}
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-emerald-950">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Garantía de Consistencia Transaccional:</strong> Al confirmar, las unidades validadas ingresarán automáticamente al stock físico de <strong>{transferToReceive.destinationStore}</strong> y se asentará en el Kárdex como <strong>TRANSFERENCIA_ENTRADA</strong> preservando la valoración económica sin mermas ni distorsiones.
+                </p>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setIsReceiveModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                  <span>Confirmar Recepción e Ingresar a Inventario</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL 3: VISOR / IMPRESIÓN OFICIAL DE GUÍA DE REMISIÓN (SRI)
+         --------------------------------------------------------------------- */}
+      {isGuiaPrintModalOpen && transferToViewGuia && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-300 rounded-3xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl animate-slideUp my-auto">
+            {/* Modal Header con botones de acción */}
+            <div className="px-6 py-3.5 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center space-x-2.5">
+                <FileText className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    Guía de Remisión Oficial N° {transferToViewGuia.guiaRemision?.number}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Documento reglamentario para el transporte inter-almacenes
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir Guía</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsGuiaPrintModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Hoja Imprimible Oficial (Estilo SRI / Documento Legal) */}
+            <div className="p-8 overflow-y-auto space-y-6 bg-white text-slate-900 font-sans text-xs flex-1">
+              {/* Cabecera de la Guía */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-b-2 border-slate-900 pb-5">
+                {/* Datos de la Empresa Emisora */}
+                <div className="space-y-1">
+                  <h1 className="text-xl font-black tracking-tight text-slate-950 uppercase">
+                    {settings.legalName || settings.storeName || 'FERRETERÍA & SUMINISTROS'}
+                  </h1>
+                  <p className="text-xs text-slate-600 font-medium">
+                    <strong>RUC:</strong> {settings.taxId || '1790012345001'}
+                  </p>
+                  <p className="text-xs text-slate-600 font-medium">
+                    <strong>Matriz:</strong> {settings.address || 'Quito - Ecuador'}
+                  </p>
+                  {settings.phone && (
+                    <p className="text-xs text-slate-600">
+                      <strong>Teléfono:</strong> {settings.phone}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-slate-500 italic mt-1">
+                    Obligado a llevar contabilidad: SÍ • Régimen General
+                  </p>
+                </div>
+
+                {/* Recuadro Legal SRI Guía de Remisión */}
+                <div className="p-4 border-2 border-slate-900 rounded-xl bg-slate-50 text-right md:text-right space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 block">
+                    DOCUMENTO COMPLEMENTARIO
+                  </span>
+                  <h2 className="text-lg font-black text-slate-950 uppercase tracking-tight">
+                    GUÍA DE REMISIÓN
+                  </h2>
+                  <p className="font-mono text-sm font-black text-orange-600">
+                    No. {transferToViewGuia.guiaRemision?.number || '001-002-000000000'}
+                  </p>
+                  <div className="pt-2">
+                    <span
+                      className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                        transferToViewGuia.status === 'EN_TRANSITO'
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : transferToViewGuia.status === 'COMPLETADA'
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : 'bg-rose-100 text-rose-900 border-rose-300'
+                      }`}
+                    >
+                      {transferToViewGuia.status === 'EN_TRANSITO'
+                        ? 'MERCADERÍA EN TRÁNSITO'
+                        : transferToViewGuia.status === 'COMPLETADA'
+                        ? 'MERCADERÍA RECIBIDA'
+                        : 'ANULADA'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Datos del Traslado */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="space-y-1">
+                  <p><strong>Fecha de Emisión / Despacho:</strong> {transferToViewGuia.date}</p>
+                  <p><strong>Fecha Inicio de Traslado:</strong> {transferToViewGuia.guiaRemision?.transferStartDate}</p>
+                  <p><strong>Fecha Fin de Traslado:</strong> {transferToViewGuia.guiaRemision?.transferEndDate}</p>
+                  <p>
+                    <strong>Motivo del Traslado:</strong>{' '}
+                    <span className="font-bold text-slate-900">
+                      {transferToViewGuia.guiaRemision?.transferReason || 'Traslado entre establecimientos de la misma empresa'}
+                    </span>
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p><strong>Punto de Partida (Origen):</strong> <span className="font-bold text-blue-900">{transferToViewGuia.originStore}</span></p>
+                  <p><strong>Punto de Llegada (Destino):</strong> <span className="font-bold text-emerald-900">{transferToViewGuia.destinationStore}</span></p>
+                  <p><strong>Ruta Declarada:</strong> {transferToViewGuia.guiaRemision?.route}</p>
+                  <p><strong>Código de Transferencia Interna:</strong> <span className="font-mono font-bold text-orange-600">{transferToViewGuia.code}</span></p>
+                </div>
+              </div>
+
+              {/* Datos del Transportista */}
+              <div className="p-4 border border-slate-200 rounded-xl space-y-2">
+                <h3 className="text-xs font-black uppercase text-slate-800 tracking-wider flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-amber-600" />
+                  Identificación del Transportista & Vehículo
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">Conductor / Transportista:</span>
+                    <span className="font-bold text-slate-900">{transferToViewGuia.guiaRemision?.driverName || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">Cédula / RUC Conductor:</span>
+                    <span className="font-mono font-bold text-slate-900">{transferToViewGuia.guiaRemision?.driverIdNumber || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-bold block">Placa del Vehículo:</span>
+                    <span className="font-mono font-black text-slate-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                      {transferToViewGuia.guiaRemision?.licensePlate || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla Detallada de Mercadería Amparada */}
+              <div>
+                <h3 className="text-xs font-black uppercase text-slate-800 tracking-wider mb-2 flex items-center gap-1.5">
+                  <Boxes className="w-3.5 h-3.5 text-blue-600" />
+                  Detalle de la Mercadería Transportada
+                </h3>
+                <div className="border border-slate-300 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900 text-white font-black uppercase text-[10px]">
+                      <tr>
+                        <th className="py-2.5 px-3 w-12 text-center">N°</th>
+                        <th className="py-2.5 px-3">Código / SKU</th>
+                        <th className="py-2.5 px-3">Descripción del Producto</th>
+                        <th className="py-2.5 px-3 text-center">Cant. Despachada</th>
+                        <th className="py-2.5 px-3 text-right">Costo Unit. CPP</th>
+                        <th className="py-2.5 px-3 text-right">Valor Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {(transferToViewGuia.items || []).map((item, idx) => (
+                        <tr key={item.productId || idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-slate-700">{item.sku || 'S/SKU'}</td>
+                          <td className="py-2 px-3 font-bold text-slate-900">{item.productName}</td>
+                          <td className="py-2 px-3 text-center font-mono font-black text-slate-900">
+                            {item.quantity} {item.unit || 'u.'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-600">
+                            {formatCurrency(item.costPrice, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                            {formatCurrency(item.quantity * item.costPrice, settings.currencySymbol)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300 text-xs">
+                      <tr>
+                        <td colSpan={3} className="py-2.5 px-3 text-right font-black uppercase text-slate-700">
+                          Totales Amparados:
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono text-orange-600 font-black">
+                          {transferToViewGuia.itemCount} unidades
+                        </td>
+                        <td></td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-950 font-black">
+                          {formatCurrency(transferToViewGuia.totalValue, settings.currencySymbol)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* Cuadro de Firmas Legales */}
+              <div className="grid grid-cols-3 gap-6 pt-10 pb-4 text-center text-xs">
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">{transferToViewGuia.responsible || 'Bodega Origen'}</p>
+                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-wider">
+                    Despacho Autorizado (Origen)
+                  </p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">{transferToViewGuia.guiaRemision?.driverName || 'Transportista'}</p>
+                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-wider">
+                    Firma Transportista / Conductor
+                  </p>
+                </div>
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900">{transferToViewGuia.receivedBy || 'Bodega Destino'}</p>
+                  <p className="text-[10px] text-slate-500 uppercase font-black tracking-wider">
+                    Recepción Conforme (Destino)
+                  </p>
+                </div>
+              </div>
+
+              {/* Pie Legal */}
+              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-[10px] text-slate-500 text-center leading-relaxed">
+                Este documento ampara legalmente el traslado de mercadería dentro del territorio ecuatoriano según las disposiciones del Servicio de Rentas Internas (SRI) y la Agencia Nacional de Tránsito (ANT). La mercadería viaja bajo custodia del transportista hasta la entrega formal en la bodega de destino.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL 4: ADMINISTRACIÓN DE BODEGAS, ALMACENES Y SUCURSALES REALES
+         --------------------------------------------------------------------- */}
+      {isWarehouseModalOpen && (
+        <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-slideUp my-auto">
+            {/* Header */}
+            <div className="px-6 py-4 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-gradient-to-br from-blue-500/30 to-indigo-500/20 text-blue-400 rounded-2xl border border-blue-500/30">
+                  <Building className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight text-white">
+                    Gestión de Bodegas y Almacenes Reales
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Crea tus bodegas físicas reales y elimina las de prueba para transferencias y Guías de Remisión.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsWarehouseModalOpen(false);
+                  setEditingWarehouse(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+              {/* Formulario de Alta */}
+              <form onSubmit={handleSaveWarehouse} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3.5">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                  <span className="font-black text-slate-900 uppercase text-[11px] tracking-wider flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5 text-orange-600" />
+                    Agregar Nueva Bodega o Sucursal
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Nombre de la Bodega / Sucursal *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Bodega Matriz Norte / Sucursal Cumbayá"
+                      value={warehouseFormData.name}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, name: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Código Interno (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: BOD-01 / SUC-02"
+                      value={warehouseFormData.code}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, code: e.target.value.toUpperCase() })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Dirección Física (Para Guía de Remisión)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Av. 10 de Agosto N45-12 y Gaspar de Villarroel"
+                      value={warehouseFormData.address}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, address: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Ciudad
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Quito / Guayaquil / Cuenca"
+                      value={warehouseFormData.city}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, city: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Teléfono de Contacto
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: 02 2456789 / 0998765432"
+                      value={warehouseFormData.phone}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, phone: e.target.value })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="isMainWh"
+                      checked={warehouseFormData.isMain}
+                      onChange={(e) => setWarehouseFormData({ ...warehouseFormData, isMain: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <label htmlFor="isMainWh" className="text-xs font-bold text-slate-800 cursor-pointer">
+                      Es Bodega Principal / Matriz
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Guardar Bodega Real</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* Lista de Bodegas Registradas */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                    Bodegas Registradas en el Sistema ({(warehouses || []).length})
+                  </h4>
+                  <span className="text-[10px] text-slate-500">
+                    Puedes editar o eliminar las bodegas con los botones de acción.
+                  </span>
+                </div>
+
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white">
+                  {(warehouses || []).map((wh) => (
+                    <div key={wh.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50 transition">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <Building className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span className="font-black text-slate-900 text-xs">{wh.name}</span>
+                          {wh.code && (
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 font-mono text-[10px] font-bold text-slate-600">
+                              {wh.code}
+                            </span>
+                          )}
+                          {wh.isMain && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Matriz Principal
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 pl-6">
+                          {wh.address ? `${wh.address} • ` : ''}{wh.city || 'Ecuador'} {wh.phone ? `• Tel: ${wh.phone}` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingWarehouse(wh);
+                            setWarehouseFormData({
+                              name: wh.name,
+                              code: wh.code || '',
+                              address: wh.address || '',
+                              city: wh.city || 'Quito',
+                              phone: wh.phone || '',
+                              isMain: wh.isMain || false,
+                            });
+                            setIsEditWarehouseModalOpen(true);
+                          }}
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                          title="Editar datos de la bodega"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWarehouse(wh)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                          title="Eliminar bodega"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          MODAL 5: EDITAR BODEGA O SUCURSAL
+         --------------------------------------------------------------------- */}
+      {isEditWarehouseModalOpen && editingWarehouse && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-slideUp my-auto">
+            {/* Header */}
+            <div className="px-6 py-4 bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-gradient-to-br from-amber-500/30 to-orange-500/20 text-amber-400 rounded-2xl border border-amber-500/30">
+                  <Edit2 className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight text-white">
+                    Editar Bodega / Sucursal
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Modifica los datos de "{editingWarehouse.name}"
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditWarehouseModalOpen(false);
+                  setEditingWarehouse(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Form */}
+            <form onSubmit={handleSaveWarehouse} className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Nombre de la Bodega / Sucursal *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Bodega Matriz Norte"
+                  value={warehouseFormData.name}
+                  onChange={(e) => setWarehouseFormData({ ...warehouseFormData, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Código Interno
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: BOD-01"
+                    value={warehouseFormData.code}
+                    onChange={(e) => setWarehouseFormData({ ...warehouseFormData, code: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 uppercase focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Ciudad
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Quito"
+                    value={warehouseFormData.city}
+                    onChange={(e) => setWarehouseFormData({ ...warehouseFormData, city: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Dirección Física (Para Guía de Remisión)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Av. 10 de Agosto N45-12"
+                  value={warehouseFormData.address}
+                  onChange={(e) => setWarehouseFormData({ ...warehouseFormData, address: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Teléfono de Contacto
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: 02 2456789"
+                  value={warehouseFormData.phone}
+                  onChange={(e) => setWarehouseFormData({ ...warehouseFormData, phone: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="isMainWhEdit"
+                  checked={warehouseFormData.isMain}
+                  onChange={(e) => setWarehouseFormData({ ...warehouseFormData, isMain: e.target.checked })}
+                  className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500"
+                />
+                <label htmlFor="isMainWhEdit" className="text-xs font-bold text-slate-800 cursor-pointer">
+                  Es Bodega Principal / Matriz
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditWarehouseModalOpen(false);
+                    setEditingWarehouse(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Guardar Cambios</span>
                 </button>
               </div>
             </form>

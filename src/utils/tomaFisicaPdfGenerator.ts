@@ -86,48 +86,62 @@ export const downloadTomaFisicaPdf = (
 
     // Metadata Box (First page only)
     if (isFirstPage) {
+      const boxH = 24;
       doc.setFillColor(248, 250, 252); // slate-50
       doc.setDrawColor(226, 232, 240); // slate-200
-      doc.roundedRect(leftMargin, nextY, contentWidth, 22, 2, 2, 'FD');
+      doc.roundedRect(leftMargin, nextY, contentWidth, boxH, 2, 2, 'FD');
 
       doc.setFontSize(8);
       doc.setTextColor(51, 65, 85);
 
-      // Left Column
+      const col1X = leftMargin + 4;
+      const col2X = leftMargin + 96;
+      const rightLimit = leftMargin + contentWidth - 4; // 194mm
+
+      // Row 1: Fecha & Responsable
       doc.setFont('helvetica', 'bold');
-      doc.text('Fecha de Auditoría:', leftMargin + 4, nextY + 5.5);
+      doc.text('Fecha Auditoría:', col1X, nextY + 6);
       doc.setFont('helvetica', 'normal');
-      doc.text(formatFullDate(new Date().toISOString()), leftMargin + 32, nextY + 5.5);
+      doc.text(formatFullDate(new Date().toISOString()), col1X + 27, nextY + 6);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Categoría / Sector:', leftMargin + 4, nextY + 11);
+      doc.text('Responsable Conteo:', col2X, nextY + 6);
       doc.setFont('helvetica', 'normal');
-      doc.text(options?.categoryFilter || 'Todas las Categorías del Catálogo', leftMargin + 32, nextY + 11);
+      if (options?.auditorName) {
+        doc.text(options.auditorName, col2X + 31, nextY + 6);
+      } else {
+        doc.setDrawColor(148, 163, 184);
+        doc.setLineWidth(0.3);
+        doc.line(col2X + 31, nextY + 6.5, rightLimit, nextY + 6.5);
+      }
+
+      // Row 2: Categoría & Supervisor
+      doc.setFont('helvetica', 'bold');
+      doc.text('Categoría / Sector:', col1X, nextY + 12);
+      doc.setFont('helvetica', 'normal');
+      const catText = options?.categoryFilter || 'Todas las Categorías';
+      doc.text(catText.length > 27 ? catText.substring(0, 25) + '..' : catText, col1X + 27, nextY + 12);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Almacén / Bodega:', leftMargin + 4, nextY + 16.5);
+      doc.text('Supervisor de Turno:', col2X, nextY + 12);
       doc.setFont('helvetica', 'normal');
-      doc.text('Almacén Principal & Tienda', leftMargin + 32, nextY + 16.5);
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.3);
+      doc.line(col2X + 31, nextY + 12.5, rightLimit, nextY + 12.5);
 
-      // Right Column
-      const midX = leftMargin + 105;
+      // Row 3: Almacén & Instrucción
       doc.setFont('helvetica', 'bold');
-      doc.text('Responsable del Conteo:', midX, nextY + 5.5);
+      doc.text('Almacén / Bodega:', col1X, nextY + 18);
       doc.setFont('helvetica', 'normal');
-      doc.text(options?.auditorName || '__________________________________', midX + 38, nextY + 5.5);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text('Supervisor de Turno:', midX, nextY + 11);
-      doc.setFont('helvetica', 'normal');
-      doc.text('__________________________________', midX + 38, nextY + 11);
+      doc.text('Almacén Principal & Tienda', col1X + 27, nextY + 18);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Instrucción:', midX, nextY + 16.5);
-      doc.setFont('helvetica', 'normal');
       doc.setTextColor(194, 65, 12); // orange-700
-      doc.text('Anotar a mano en el recuadro blanco la cantidad física contada.', midX + 20, nextY + 16.5);
+      doc.text('Instrucción:', col2X, nextY + 18);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Escribir a mano en la casilla blanca la cantidad contada.', col2X + 18, nextY + 18);
 
-      nextY += 25;
+      nextY += boxH + 3;
     }
 
     // Render Table Header

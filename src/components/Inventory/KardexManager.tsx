@@ -11,14 +11,18 @@ import {
   RotateCcw, 
   AlertCircle, 
   TrendingUp, 
+  TrendingDown,
   Package, 
   DollarSign, 
   Boxes, 
   Calendar,
   Layers,
   Sliders,
-  CheckCircle2,
-  X
+  CheckCircle2, 
+  X,
+  Percent,
+  Building,
+  ArrowRightLeft
 } from 'lucide-react';
 import { Product, StoreSettings, Invoice, ProductCategory } from '../../types';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
@@ -42,9 +46,10 @@ export interface StockAdjustmentRecord {
 export interface KardexMovement {
   id: string;
   date: string;
-  type: 'SALDO_INICIAL' | 'COMPRA' | 'VENTA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SALIDA' | 'DEVOLUCION_VENTA' | 'MERMA_DANO';
+  type: 'SALDO_INICIAL' | 'COMPRA' | 'VENTA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SALIDA' | 'DEVOLUCION_VENTA' | 'MERMA_DANO' | 'TRANSFERENCIA_ENTRADA' | 'TRANSFERENCIA_SALIDA';
   typeLabel: string;
   docNumber: string;
+  warehouse?: string; // Bodega / Sucursal / Ubicación
   entityName: string; // Cliente, Proveedor o Motivo
   user: string;
   inQty: number;
@@ -84,6 +89,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     'ferreteria_stock_adjustments', 
     []
   );
+  const [transfers] = useFirestoreSync<any[]>('ferreteria_transfers', []);
 
   // ── Selection & Filter State ───────────────────────────────────────────────
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -92,6 +98,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState<string>('TODOS');
+  const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('TODAS');
   const [filterText, setFilterText] = useState('');
 
   // ── Quick Adjust Modal State ───────────────────────────────────────────────
@@ -119,6 +126,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       type: KardexMovement['type'];
       typeLabel: string;
       docNumber: string;
+      warehouse?: string;
       entityName: string;
       user: string;
       qty: number;
@@ -148,6 +156,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             type: 'VENTA',
             typeLabel: inv.documentType === 'FACTURA' ? 'Venta Factura' : 'Venta POS',
             docNumber: docNum,
+            warehouse: (inv as any).branch || 'Tienda POS / Salón de Ventas',
             entityName: inv.customer?.name || 'Consumidor Final',
             user: inv.sellerName || 'Caja POS',
             qty: item.quantity,
@@ -177,6 +186,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               type: 'COMPRA',
               typeLabel: 'Compra Proveedor',
               docNumber: docNum,
+              warehouse: (purch as any).warehouse || 'Bodega Central Norte',
               entityName: purch.supplier?.name || 'Proveedor Directo',
               user: purch.receivedBy || 'Bodega',
               qty: item.quantity,
@@ -203,6 +213,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           type: isEntry ? 'AJUSTE_ENTRADA' : (isMerma ? 'MERMA_DANO' : 'AJUSTE_SALIDA'),
           typeLabel: isEntry ? 'Ajuste Entrada (+)' : (isMerma ? 'Salida por Merma (-)' : 'Ajuste Salida (-)'),
           docNumber: `AJU-${adj.id.substring(adj.id.length - 6)}`,
+          warehouse: selectedProduct.location || 'Bodega Principal',
           entityName: adj.reason || 'Ajuste Manual de Inventario',
           user: adj.user || 'Administrador',
           qty: Math.abs(adj.qty),
@@ -227,12 +238,73 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               type: 'DEVOLUCION_VENTA',
               typeLabel: 'Devolución Cliente (+)',
               docNumber: cn.creditNoteNumber || `NC-${cn.id.substring(0, 8)}`,
+              warehouse: 'Tienda POS / Salón de Ventas',
               entityName: cn.customerName || 'Cliente',
               user: cn.createdByName || 'Caja',
               qty: item.quantity,
               cost: selectedProduct.costPrice || 0,
               notes: cn.reason || 'Reingreso a inventario por devolución',
             });
+          }
+        });
+      }
+    });
+
+    // 5. Inter-warehouse Transfers (Doble Fase: Despacho en Tránsito y Recepción en Destino)
+    transfers.forEach((trf: any) => {
+      if (trf.status === 'CANCELADA') return; // Si fue cancelada, no afecta el saldo permanente
+
+      const trfDate = trf.dispatchedAt || trf.date || trf.createdAt || new Date().toISOString();
+      const timestamp = new Date(trfDate).getTime() || Date.now();
+      const origin = trf.originStore || trf.origin || 'Bodega Central Norte';
+      const destination = trf.destinationStore || trf.destination || 'Sucursal Centro POS';
+      const docNum = trf.code || `TRF-${(trf.id || '').substring(0, 6)}`;
+      const guiaNum = trf.guiaRemision?.number ? ` • Guía: ${trf.guiaRemision.number}` : '';
+
+      if (trf.items && Array.isArray(trf.items)) {
+        trf.items.forEach((item: any) => {
+          if (item.productId === prodId || (item.sku && item.sku.toLowerCase() === prodSku)) {
+            const qty = Number(item.quantity) || 1;
+
+            // Fase 1: Salida de Bodega de Origen (Aplica tanto si está EN_TRANSITO como si ya está COMPLETADA)
+            rawMovements.push({
+              id: `trf-out-${trf.id}-${item.productId || Math.random()}`,
+              timestamp,
+              dateStr: trfDate.replace('T', ' ').substring(0, 16),
+              type: 'TRANSFERENCIA_SALIDA',
+              typeLabel: trf.status === 'EN_TRANSITO' ? 'Traslado Salida (En Tránsito)' : 'Transferencia Salida (-)',
+              docNumber: `${docNum}${guiaNum}`,
+              warehouse: origin,
+              entityName: `Despacho hacia ${destination}${trf.status === 'EN_TRANSITO' ? ' (En Tránsito)' : ''}`,
+              user: trf.responsible || 'Bodega Origen',
+              qty,
+              cost: item.costPrice || selectedProduct.costPrice || 0,
+              notes: trf.status === 'EN_TRANSITO'
+                ? `Mercadería en tránsito amparada con Guía de Remisión. Transportista: ${trf.guiaRemision?.driverName || 'N/A'} (Placa: ${trf.guiaRemision?.licensePlate || 'N/A'})`
+                : `Salida física confirmada hacia ${destination}`,
+            });
+
+            // Fase 2: Entrada a Bodega de Destino (Solo cuando la recepción física ha sido CONFIRMADA / COMPLETADA)
+            if (trf.status === 'COMPLETADA') {
+              const recDate = trf.receivedAt || trfDate;
+              const recTimestamp = new Date(recDate).getTime() || (timestamp + 1000);
+              const recQty = Number(item.receivedQuantity !== undefined ? item.receivedQuantity : qty);
+
+              rawMovements.push({
+                id: `trf-in-${trf.id}-${item.productId || Math.random()}`,
+                timestamp: recTimestamp,
+                dateStr: recDate.replace('T', ' ').substring(0, 16),
+                type: 'TRANSFERENCIA_ENTRADA',
+                typeLabel: 'Transferencia Entrada (+)',
+                docNumber: `${docNum}${guiaNum}`,
+                warehouse: destination,
+                entityName: `Recepción desde ${origin}`,
+                user: trf.receivedBy || 'Recepción Sucursal',
+                qty: recQty,
+                cost: item.costPrice || selectedProduct.costPrice || 0,
+                notes: `Mercadería recibida físicamente en ${destination}. ${trf.receptionNotes ? 'Obs: ' + trf.receptionNotes : ''}`,
+              });
+            }
           }
         });
       }
@@ -247,7 +319,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     // Determine initial balance if movements do not account for full current stock
     const netMovementsQty = rawMovements.reduce((acc, m) => {
-      if (['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA'].includes(m.type)) {
+      if (['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type)) {
         return acc + m.qty;
       } else {
         return acc - m.qty;
@@ -266,6 +338,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       type: 'SALDO_INICIAL',
       typeLabel: 'Inventario Inicial',
       docNumber: 'INV-INI-2026',
+      warehouse: 'Bodega Central Norte',
       entityName: 'Apertura de Sistema / Saldo Inicial',
       user: 'Sistema',
       inQty: initialEstimatedQty,
@@ -282,7 +355,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     // Process all chronological events with Weighted Average Cost (Promedio Ponderado)
     rawMovements.forEach((m) => {
-      const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA'].includes(m.type);
+      const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
 
       if (isInput) {
         const inQty = m.qty;
@@ -300,6 +373,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           type: m.type,
           typeLabel: m.typeLabel,
           docNumber: m.docNumber,
+          warehouse: m.warehouse || 'Bodega Central Norte',
           entityName: m.entityName,
           user: m.user,
           inQty,
@@ -315,7 +389,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         });
       } else {
         const outQty = m.qty;
-        const outCost = runningCost; // Sales exit at current weighted average cost
+        const outCost = runningCost; // Sales/Transfers exit at current weighted average cost
         const outTotal = outQty * outCost;
 
         runningQty = Math.max(0, runningQty - outQty);
@@ -326,6 +400,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           type: m.type,
           typeLabel: m.typeLabel,
           docNumber: m.docNumber,
+          warehouse: m.warehouse || 'Tienda POS / Salón de Ventas',
           entityName: m.entityName,
           user: m.user,
           inQty: 0,
@@ -343,7 +418,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     });
 
     return kardexRows;
-  }, [selectedProduct, invoices, purchases, stockAdjustments, creditNotes]);
+  }, [selectedProduct, invoices, purchases, stockAdjustments, creditNotes, transfers]);
 
   // ── Filtered Movements ─────────────────────────────────────────────────────
   const filteredMovements = useMemo(() => {
@@ -352,11 +427,19 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       if (dateFrom && m.date.substring(0, 10) < dateFrom) return false;
       if (dateTo && m.date.substring(0, 10) > dateTo) return false;
 
+      // Warehouse Filter
+      if (selectedWarehouseFilter !== 'TODAS') {
+        const term = selectedWarehouseFilter.toLowerCase();
+        const mWarehouse = (m.warehouse || '').toLowerCase();
+        if (!mWarehouse.includes(term)) return false;
+      }
+
       // Type Filter
       if (movementTypeFilter === 'VENTAS' && m.type !== 'VENTA') return false;
       if (movementTypeFilter === 'COMPRAS' && m.type !== 'COMPRA') return false;
       if (movementTypeFilter === 'AJUSTES' && !['AJUSTE_ENTRADA', 'AJUSTE_SALIDA', 'MERMA_DANO'].includes(m.type)) return false;
       if (movementTypeFilter === 'DEVOLUCIONES' && m.type !== 'DEVOLUCION_VENTA') return false;
+      if (movementTypeFilter === 'TRANSFERENCIAS' && !['TRANSFERENCIA_SALIDA', 'TRANSFERENCIA_ENTRADA'].includes(m.type)) return false;
 
       // Text Search
       if (filterText) {
@@ -365,12 +448,13 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         const matchesEntity = m.entityName.toLowerCase().includes(term);
         const matchesUser = m.user.toLowerCase().includes(term);
         const matchesType = m.typeLabel.toLowerCase().includes(term);
-        if (!matchesDoc && !matchesEntity && !matchesUser && !matchesType) return false;
+        const matchesWarehouse = (m.warehouse || '').toLowerCase().includes(term);
+        if (!matchesDoc && !matchesEntity && !matchesUser && !matchesType && !matchesWarehouse) return false;
       }
 
       return true;
     });
-  }, [allMovements, dateFrom, dateTo, movementTypeFilter, filterText]);
+  }, [allMovements, dateFrom, dateTo, selectedWarehouseFilter, movementTypeFilter, filterText]);
 
   // ── Summary Totals for Selected Product ────────────────────────────────────
   const totals = useMemo(() => {
@@ -403,6 +487,42 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       totalValuation,
     };
   }, [allMovements, selectedProduct]);
+
+  // ── Cost & Profitability Analysis (Historical vs Current CPP vs PVP) ───────
+  const costAnalysis = useMemo(() => {
+    if (!selectedProduct) return null;
+
+    const initialCost = selectedProduct.costPrice || 0;
+    const purchaseMovements = allMovements.filter((m) => m.type === 'COMPRA');
+    const lastPurchase = purchaseMovements.length > 0 ? purchaseMovements[purchaseMovements.length - 1] : null;
+    const lastPurchaseCost = lastPurchase ? lastPurchase.inCost : initialCost;
+    const currentAvgCost = totals.avgCost;
+    const salePrice = selectedProduct.price || 0;
+
+    const unitGrossProfit = Math.max(0, salePrice - currentAvgCost);
+    const grossMarginPercent = salePrice > 0 ? (unitGrossProfit / salePrice) * 100 : 0;
+    const markupPercent = currentAvgCost > 0 ? ((salePrice - currentAvgCost) / currentAvgCost) * 100 : 0;
+
+    const costVariationPercent = initialCost > 0
+      ? ((currentAvgCost - initialCost) / initialCost) * 100
+      : 0;
+
+    const lastPurchaseDiffPercent = currentAvgCost > 0
+      ? ((lastPurchaseCost - currentAvgCost) / currentAvgCost) * 100
+      : 0;
+
+    return {
+      initialCost,
+      lastPurchaseCost,
+      currentAvgCost,
+      salePrice,
+      unitGrossProfit,
+      grossMarginPercent,
+      markupPercent,
+      costVariationPercent,
+      lastPurchaseDiffPercent,
+    };
+  }, [selectedProduct, allMovements, totals]);
 
   // ── Handle Register Quick Adjustment ───────────────────────────────────────
   const handleSaveStockAdjustment = (e: React.FormEvent) => {
@@ -450,6 +570,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       { header: 'Fecha y Hora', key: 'date', width: 18 },
       { header: 'Tipo Movimiento', key: 'typeLabel', width: 22 },
       { header: 'Documento / Comprobante', key: 'docNumber', width: 20 },
+      { header: 'Bodega / Sucursal', key: 'warehouse', width: 22 },
       { header: 'Detalle / Cliente / Proveedor', key: 'entityName', width: 35 },
       { header: 'Responsable', key: 'user', width: 18 },
       { header: 'Entrada Cant.', key: 'inQty', width: 14 },
@@ -467,6 +588,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       date: m.date,
       typeLabel: m.typeLabel,
       docNumber: m.docNumber,
+      warehouse: m.warehouse || 'Bodega Central',
       entityName: m.entityName,
       user: m.user,
       inQty: m.inQty > 0 ? m.inQty : '-',
@@ -707,6 +829,107 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         </div>
       )}
 
+      {/* Historical Cost vs Price & Profitability Comparison Panel */}
+      {selectedProduct && costAnalysis && (
+        <div className="bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-3xl p-5 text-white shadow-xl">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-4 mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-orange-500/20 text-orange-400 rounded-2xl border border-orange-500/30 shadow-xs">
+                <Percent className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white tracking-wide flex items-center gap-2">
+                  <span>Análisis Financiero de Rentabilidad & Comparativo de Costos</span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    Costo Promedio Ponderado (CPP)
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Comparación en tiempo real entre el costo de reposición, costo promedio y margen sobre el PVP de venta.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider border flex items-center gap-1.5 ${
+                costAnalysis.grossMarginPercent >= 25
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : costAnalysis.grossMarginPercent >= 12
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+              }`}>
+                {costAnalysis.grossMarginPercent >= 25 ? (
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                )}
+                <span>Margen {costAnalysis.grossMarginPercent >= 25 ? 'Saludable' : costAnalysis.grossMarginPercent >= 12 ? 'Moderado' : 'Crítico / Riesgo'}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+            {/* 1. Costo Inicial */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Costo Apertura</span>
+              <span className="text-base font-black font-mono text-slate-300 mt-0.5 block">
+                {formatCurrency(costAnalysis.initialCost, settings.currencySymbol)}
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium">Saldo inicial</span>
+            </div>
+
+            {/* 2. Última Compra */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Última Compra</span>
+              <span className="text-base font-black font-mono text-sky-400 mt-0.5 block">
+                {formatCurrency(costAnalysis.lastPurchaseCost, settings.currencySymbol)}
+              </span>
+              <span className="text-[10px] text-sky-500 font-medium">Reposición</span>
+            </div>
+
+            {/* 3. Costo Promedio Ponderado */}
+            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3">
+              <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block">Costo Promedio (CPP)</span>
+              <span className="text-lg font-black font-mono text-emerald-300 mt-0.5 block">
+                {formatCurrency(costAnalysis.currentAvgCost, settings.currencySymbol)}
+              </span>
+              <span className="text-[10px] text-emerald-400/80 font-bold">
+                {costAnalysis.costVariationPercent >= 0 ? `+${costAnalysis.costVariationPercent.toFixed(1)}%` : `${costAnalysis.costVariationPercent.toFixed(1)}%`} vs inicio
+              </span>
+            </div>
+
+            {/* 4. PVP Venta */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">PVP al Público</span>
+              <span className="text-lg font-black font-mono text-orange-400 mt-0.5 block">
+                {formatCurrency(costAnalysis.salePrice, settings.currencySymbol)}
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium">Precio factura</span>
+            </div>
+
+            {/* 5. Ganancia Unitaria */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ganancia Bruta</span>
+              <span className="text-base font-black font-mono text-white mt-0.5 block">
+                {formatCurrency(costAnalysis.unitGrossProfit, settings.currencySymbol)}
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium">Por unidad</span>
+            </div>
+
+            {/* 6. Margen Real % */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Margen Bruto</span>
+              <span className={`text-lg font-black font-mono mt-0.5 block ${
+                costAnalysis.grossMarginPercent >= 25 ? 'text-emerald-400' : costAnalysis.grossMarginPercent >= 12 ? 'text-amber-400' : 'text-rose-400'
+              }`}>
+                {costAnalysis.grossMarginPercent.toFixed(1)}%
+              </span>
+              <span className="text-[10px] text-slate-500 font-medium">Sobre venta</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter Toolbar */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2 flex-1">
@@ -714,24 +937,38 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Filtrar por comprobante, cliente o motivo..."
+              placeholder="Filtrar por comprobante, bodega, cliente o motivo..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none"
             />
           </div>
 
-          <div className="w-44">
+          <div className="w-48">
+            <Select
+              value={selectedWarehouseFilter}
+              onChange={(e: any) => setSelectedWarehouseFilter(e.target.value)}
+              className="bg-slate-50 border-slate-200 font-bold text-xs"
+            >
+              <option value="TODAS">Todas las Bodegas & Sucursales</option>
+              <option value="Bodega Central">Bodega Central Norte</option>
+              <option value="Tienda POS">Salón de Ventas / Tienda POS</option>
+              <option value="Sucursal">Sucursales Externas</option>
+            </Select>
+          </div>
+
+          <div className="w-48">
             <Select
               value={movementTypeFilter}
               onChange={(e: any) => setMovementTypeFilter(e.target.value)}
-              className="bg-slate-50 border-slate-200 font-bold"
+              className="bg-slate-50 border-slate-200 font-bold text-xs"
             >
               <option value="TODOS">Todos los Movimientos</option>
               <option value="VENTAS">Solo Ventas (POS)</option>
               <option value="COMPRAS">Solo Compras (Proveedores)</option>
-              <option value="AJUSTES">Solo Ajustes & Mermas</option>
+              <option value="AJUSTES">Solo Ajustes & Toma Física</option>
               <option value="DEVOLUCIONES">Solo Devoluciones</option>
+              <option value="TRANSFERENCIAS">Solo Transferencias Bodega</option>
             </Select>
           </div>
         </div>
@@ -759,13 +996,14 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             />
           </div>
 
-          {(dateFrom || dateTo || movementTypeFilter !== 'TODOS' || filterText) && (
+          {(dateFrom || dateTo || movementTypeFilter !== 'TODOS' || selectedWarehouseFilter !== 'TODAS' || filterText) && (
             <button
               type="button"
               onClick={() => {
                 setDateFrom('');
                 setDateTo('');
                 setMovementTypeFilter('TODOS');
+                setSelectedWarehouseFilter('TODAS');
                 setFilterText('');
               }}
               className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition cursor-pointer"
@@ -784,7 +1022,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             <thead className="bg-slate-950 text-white font-black uppercase text-[10px] sticky top-0 z-10">
               {/* Top grouping row */}
               <tr className="border-b border-slate-800">
-                <th colSpan={4} className="py-2.5 px-3 bg-slate-950 text-slate-400 border-r border-slate-800">
+                <th colSpan={5} className="py-2.5 px-3 bg-slate-950 text-slate-400 border-r border-slate-800">
                   Datos de la Transacción
                 </th>
                 <th colSpan={3} className="py-2.5 px-3 bg-emerald-950/70 text-emerald-300 text-center border-r border-slate-800">
@@ -802,6 +1040,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 <th className="py-2.5 px-3">Fecha & Hora</th>
                 <th className="py-2.5 px-3">Operación</th>
                 <th className="py-2.5 px-3">Comprobante</th>
+                <th className="py-2.5 px-3">Bodega / Sucursal</th>
                 <th className="py-2.5 px-3 border-r border-slate-800">Detalle / Cliente / Prov.</th>
                 
                 {/* Entradas */}
@@ -823,7 +1062,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             <tbody className="divide-y divide-slate-100 bg-white font-medium text-slate-800">
               {!selectedProduct ? (
                 <tr>
-                  <td colSpan={13} className="py-16 text-center text-slate-500">
+                  <td colSpan={14} className="py-16 text-center text-slate-500">
                     <Search className="w-10 h-10 mx-auto mb-2 text-orange-500 opacity-60" />
                     <p className="font-black text-slate-800 text-sm">Ningún producto seleccionado</p>
                     <p className="text-xs text-slate-400 mt-1">
@@ -833,7 +1072,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 </tr>
               ) : filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-400">
+                  <td colSpan={14} className="py-12 text-center text-slate-400">
                     <AlertCircle className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     No se encontraron movimientos registrados para los filtros seleccionados.
                   </td>
@@ -843,7 +1082,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                   const isSale = m.type === 'VENTA';
                   const isPurchase = m.type === 'COMPRA';
                   const isInitial = m.type === 'SALDO_INICIAL';
-                  const isEntry = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA'].includes(m.type);
+                  const isTransfer = m.type === 'TRANSFERENCIA_SALIDA' || m.type === 'TRANSFERENCIA_ENTRADA';
+                  const isEntry = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
 
                   return (
                     <tr
@@ -869,12 +1109,20 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                               ? 'bg-sky-50 text-sky-700 border border-sky-200'
                               : m.type === 'DEVOLUCION_VENTA'
                               ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : isTransfer
+                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
                               : isEntry
                               ? 'bg-teal-50 text-teal-700 border border-teal-200'
                               : 'bg-rose-50 text-rose-700 border border-rose-200'
                           }`}
                         >
-                          {isEntry ? <ArrowDownLeft className="w-3 h-3 text-emerald-600" /> : <ArrowUpRight className="w-3 h-3 text-rose-600" />}
+                          {isTransfer ? (
+                            <ArrowRightLeft className="w-3 h-3 text-indigo-600" />
+                          ) : isEntry ? (
+                            <ArrowDownLeft className="w-3 h-3 text-emerald-600" />
+                          ) : (
+                            <ArrowUpRight className="w-3 h-3 text-rose-600" />
+                          )}
                           <span>{m.typeLabel}</span>
                         </span>
                       </td>
@@ -884,8 +1132,16 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                         {m.docNumber}
                       </td>
 
+                      {/* Bodega / Sucursal */}
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-md font-semibold text-[10px] inline-flex items-center gap-1">
+                          <Building className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span className="truncate max-w-[140px]">{m.warehouse || 'Bodega Central'}</span>
+                        </span>
+                      </td>
+
                       {/* Detalle */}
-                      <td className="py-2.5 px-3 max-w-[220px] truncate border-r border-slate-100 text-slate-600" title={`${m.entityName} (${m.user})`}>
+                      <td className="py-2.5 px-3 max-w-[200px] truncate border-r border-slate-100 text-slate-600" title={`${m.entityName} (${m.user})`}>
                         <div className="font-semibold text-slate-800 truncate">{m.entityName}</div>
                         <div className="text-[10px] text-slate-400 truncate">Resp: {m.user}</div>
                       </td>

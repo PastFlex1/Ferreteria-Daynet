@@ -403,11 +403,13 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
     // Initial pool of workers from HR employees & Users
     const staffPool: { name: string; role: string; code: string }[] = [];
     (employees || defaultEmployees || []).forEach((emp: any) => {
-      if (emp.fullName) staffPool.push({ name: emp.fullName, role: emp.positionName || 'Ventas', code: emp.code || 'EMP' });
+      const n = emp.fullName || emp.name;
+      if (n) staffPool.push({ name: n, role: emp.positionName || 'Ventas', code: emp.code || 'EMP' });
     });
     (usersList || defaultUsersList || []).forEach((u: any) => {
-      if (u.name && !staffPool.some(s => s.name.toLowerCase() === u.name.toLowerCase())) {
-        staffPool.push({ name: u.name, role: u.role || 'Usuario', code: u.username || 'USR' });
+      const un = u.name || u.fullName;
+      if (un && !staffPool.some(s => s.name.toLowerCase() === un.toLowerCase())) {
+        staffPool.push({ name: un, role: u.role || 'Usuario', code: u.username || 'USR' });
       }
     });
 

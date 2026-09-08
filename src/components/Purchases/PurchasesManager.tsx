@@ -445,11 +445,6 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       return;
     }
 
-    if (!currentBatch.trim() || !currentExpiry) {
-      showAlert('El número de lote y la fecha de caducidad son obligatorios para ingresar la mercadería.', 'Campos Requeridos', 'warning');
-      return;
-    }
-
     const sub = qty * cost;
     const taxVal = sub * (tax / 100);
     const tot = sub + taxVal;
@@ -463,8 +458,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       taxPercent: tax,
       subtotal: sub,
       total: tot,
-      batchNumber: currentBatch || undefined,
-      expiryDate: currentExpiry || undefined
+      batchNumber: currentBatch.trim() ? currentBatch.trim() : undefined,
+      expiryDate: currentExpiry ? currentExpiry : undefined
     };
 
     setPurchaseItems([...purchaseItems, newItem]);
@@ -494,15 +489,16 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     const taxTotal = purchaseItems.reduce((acc, item) => acc + (item.total - item.subtotal), 0);
     const total = subtotal + taxTotal;
 
+    const finalPurchaseDate = purchaseDateInput || new Date().toISOString().split('T')[0];
     const days = paymentCondition === 'CREDITO' ? parseInt(creditDaysInput) || 30 : 0;
-    const dueDateObj = new Date(purchaseDateInput);
+    const dueDateObj = new Date(finalPurchaseDate);
     dueDateObj.setDate(dueDateObj.getDate() + days);
 
     const newInvoice: PurchaseInvoice = {
       id: `pur-${Date.now()}`,
       invoiceNumber: invoiceNumberInput,
       supplier,
-      purchaseDate: purchaseDateInput,
+      purchaseDate: finalPurchaseDate,
       dueDate: dueDateObj.toISOString().split('T')[0],
       items: purchaseItems,
       subtotal,
@@ -527,20 +523,22 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       }
     });
 
-    // Process Purchase & Save Batches
+    // Process Purchase & Save Batches (si se especificó número de lote)
     const newBatchesList = [...batches];
     purchaseItems.forEach((item) => {
-      if (item.batchNumber && item.expiryDate) {
-        const today = new Date();
-        const expiry = new Date(item.expiryDate);
-        const diffTime = expiry.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+      if (item.batchNumber) {
         let status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDO' = 'VIGENTE';
-        if (diffDays < 0) {
-          status = 'VENCIDO';
-        } else if (diffDays <= 30) {
-          status = 'POR_VENCER';
+        if (item.expiryDate) {
+          const today = new Date();
+          const expiry = new Date(item.expiryDate);
+          const diffTime = expiry.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          if (diffDays < 0) {
+            status = 'VENCIDO';
+          } else if (diffDays <= 30) {
+            status = 'POR_VENCER';
+          }
         }
 
         const prod = products.find(p => p.id === item.productId);
@@ -550,7 +548,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
           productId: item.productId,
           productName: item.productName,
           batchNumber: item.batchNumber,
-          expiryDate: item.expiryDate,
+          expiryDate: item.expiryDate || 'Sin caducidad',
           quantity: item.quantity,
           location: prod?.location || 'Bodega Principal',
           status
@@ -931,7 +929,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
               </div>
 
               <div>
-                <label className="block font-black text-slate-800 mb-1">Fecha Emisión</label>
+                <label className="block font-black text-slate-800 mb-1">
+                  Fecha de Compra / Emisión <span className="text-[10px] font-normal text-slate-400">(Opcional)</span>
+                </label>
                 <CustomDatePicker value={purchaseDateInput} onChange={setPurchaseDateInput} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold" />
               </div>
 
@@ -1036,10 +1036,11 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">N° Lote *</label>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    N° Lote <span className="text-[10px] font-normal text-slate-400">(Opcional)</span>
+                  </label>
                   <input
                     type="text"
-                    required
                     placeholder="ej: LOT-901"
                     value={currentBatch}
                     onChange={(e) => setCurrentBatch(e.target.value)}
@@ -1048,7 +1049,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">F. Caducidad *</label>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    F. Caducidad <span className="text-[10px] font-normal text-slate-400">(Opcional)</span>
+                  </label>
                   <CustomDatePicker value={currentExpiry} onChange={setCurrentExpiry} align="right" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono" />
                 </div>
 
@@ -1110,8 +1113,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-500">
-                          <span className="block font-bold text-slate-800">{item.batchNumber}</span>
-                          {item.expiryDate}
+                          <span className="block font-bold text-slate-800">{item.batchNumber || 'S/L'}</span>
+                          <span>{item.expiryDate || 'Sin caducidad'}</span>
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
                           {formatCurrency(item.subtotal, settings.currencySymbol)}
