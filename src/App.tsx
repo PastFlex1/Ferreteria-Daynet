@@ -179,6 +179,7 @@ export default function App() {
     totalSalesCredit: 0,
     totalInvoicesCount: 0,
   });
+  const [cashSessionsHistory, setCashSessionsHistory] = useFirestoreSync<any[]>('ferreteria_cash_sessions_history', []);
 
   // Active Invoice Viewer Modal State
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState<Invoice | null>(null);
@@ -470,7 +471,7 @@ export default function App() {
     const expected = cashSession.initialCash + salesCash;
     const difference = actualCashCount - expected;
 
-    setCashSession({
+    const closedSession = {
       ...cashSession,
       closedAt: new Date().toISOString(),
       actualCash: actualCashCount,
@@ -481,8 +482,11 @@ export default function App() {
       totalSalesCredit: salesCredit,
       totalInvoicesCount: sessionInvoices.length,
       difference,
-      status: 'CERRADA',
-    });
+      status: 'CERRADA' as const,
+    };
+
+    setCashSession(closedSession);
+    setCashSessionsHistory((prev) => [closedSession, ...(prev || [])]);
   };
 
   const handleClearAllData = async () => {
@@ -684,6 +688,7 @@ export default function App() {
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onOpenViewer={handleOpenInvoiceViewer}
             onInvoiceOrder={handleInvoiceOrder}
+            onUpdateInvoice={handleUpdateInvoice}
           />
         )}
 

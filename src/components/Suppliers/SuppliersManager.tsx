@@ -29,7 +29,10 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
+  Landmark,
+  Receipt
 } from 'lucide-react';
+import { getNextCorrelativeCheck } from '../../utils/checkUtils';
 import { StoreSettings, SuppliersSubTab } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
@@ -101,6 +104,11 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
 
   // Payment History Log
   const [paymentHistory, setPaymentHistory] = useFirestoreSync<PaymentRecord[]>('ferreteria_supplier_payments', []);
+
+  // Integración Contable y Tesorería (Cheques Girados y Asientos)
+  const [issuedChecks, setIssuedChecks] = useFirestoreSync<any[]>('ferreteria_issued_checks', []);
+  const [journalEntries, setJournalEntries] = useFirestoreSync<any[]>('ferreteria_journal_entries', []);
+  const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
 
 
 
@@ -183,9 +191,13 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
   const [selectedPayableForPayment, setSelectedPayableForPayment] = useState<PayableInvoice | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
-    method: 'TRANSFERENCIA' as PaymentRecord['paymentMethod'],
+    method: 'TRANSFERENCIA' as 'TRANSFERENCIA' | 'EFECTIVO' | 'CHEQUE' | 'TARJETA',
     reference: '',
-    paymentDate: new Date().toISOString().split('T')[0]
+    paymentDate: new Date().toISOString().split('T')[0],
+    bankName: 'Banco Pichincha',
+    checkNumber: '',
+    checkPaymentDate: new Date().toISOString().split('T')[0],
+    checkConcept: ''
   });
 
   // View Supplier Details Modal
@@ -288,14 +300,12 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
     if (!selectedPayableForPayment) return;
 
     const amount = parseFloat(paymentForm.amount) || 0;
-    const pendingBalance = selectedPayableForPayment.totalAmount - selectedPayableForPayment.paidAmount;
-
     if (amount <= 0) return;
 
     const newPaidAmount = selectedPayableForPayment.paidAmount + amount;
     const isFullyPaid = newPaidAmount >= selectedPayableForPayment.totalAmount;
 
-    // Update Payable Invoice
+    // 1. Actualizar Factura por Pagar
     const updatedPayable: PayableInvoice = {
       ...selectedPayableForPayment,
       paidAmount: Math.min(newPaidAmount, selectedPayableForPayment.totalAmount),
@@ -304,7 +314,7 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
 
     setPayables(payables.map((p) => (p.id === updatedPayable.id ? updatedPayable : p)));
 
-    // Update Supplier Balance
+    // 2. Actualizar Saldo con el Proveedor
     setSuppliers(
       suppliers.map((sup) => {
         if (sup.id === selectedPayableForPayment.supplierId) {
@@ -317,7 +327,80 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       })
     );
 
-    // Log Payment Record
+    let checkNum = paymentForm.reference || 'REF-N/A';
+    const journalEntryId = `entry-${Date.now()}`;
+    const nextEntryNum = `AS-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`;
+
+    // 3. INTEGRACIÓN CON CHEQUES GIRADOS: Si es pago con cheque, registrar documento correlativo
+    if (paymentForm.method === 'CHEQUE') {
+      const bankName = paymentForm.bankName || 'Banco Pichincha';
+      checkNum = paymentForm.checkNumber?.trim() || getNextCorrelativeCheck(issuedChecks, bankName);
+
+      const newCheckItem: any = {
+        id: `chk-${Date.now()}`,
+        checkNumber: checkNum,
+        bankName,
+        issueDate: paymentForm.paymentDate,
+        paymentDate: paymentForm.checkPaymentDate || paymentForm.paymentDate,
+        beneficiary: selectedPayableForPayment.supplierName,
+        supplierId: selectedPayableForPayment.supplierId,
+        payableInvoiceId: selectedPayableForPayment.id,
+        invoiceNumber: selectedPayableForPayment.invoiceNumber,
+        amount,
+        concept: paymentForm.checkConcept || `Pago Factura Prov. ${selectedPayableForPayment.invoiceNumber} - ${selectedPayableForPayment.supplierName}`,
+        status: 'EMITIDO',
+        journalEntryId,
+        notes: `Generado automáticamente desde Cuentas por Pagar. Factura: ${selectedPayableForPayment.invoiceNumber}`
+      };
+
+      setIssuedChecks([newCheckItem, ...issuedChecks]);
+    }
+
+    // 4. INTEGRACIÓN CONTABLE AUTOMÁTICA: Generar Asiento Contable (Debe: Proveedores / Haber: Banco o Caja)
+    let creditAccountCode = '1.1.01.02.01';
+    let creditAccountName = 'Banco Pichincha Cta Cte (Cheques en Tránsito)';
+
+    if (paymentForm.method === 'EFECTIVO') {
+      creditAccountCode = '1.1.01.01.01';
+      creditAccountName = 'Caja General Mostrador';
+    } else if (paymentForm.method === 'CHEQUE') {
+      const isGuayaquil = (paymentForm.bankName || '').toLowerCase().includes('guayaquil');
+      creditAccountCode = isGuayaquil ? '1.1.01.02.02' : '1.1.01.02.01';
+      creditAccountName = `${paymentForm.bankName || 'Banco'} Cta Cte (Cheques en Tránsito)`;
+    } else if (paymentForm.method === 'TRANSFERENCIA') {
+      creditAccountCode = '1.1.01.02.01';
+      creditAccountName = 'Banco Pichincha Cta Cte (Transferencia Saliente)';
+    }
+
+    const newJournalEntry: any = {
+      id: journalEntryId,
+      entryNumber: nextEntryNum,
+      date: paymentForm.paymentDate,
+      concept: paymentForm.method === 'CHEQUE'
+        ? `Emisión Cheque N° ${checkNum} - Liquidación Factura Prov. ${selectedPayableForPayment.invoiceNumber} (${selectedPayableForPayment.supplierName})`
+        : `Pago Factura Prov. ${selectedPayableForPayment.invoiceNumber} - ${selectedPayableForPayment.supplierName} (${paymentForm.method})`,
+      type: 'EGRESO',
+      items: [
+        {
+          accountCode: '2.1.01.01.01',
+          accountName: 'Cuentas por Pagar Proveedores Locales',
+          debit: amount,
+          credit: 0
+        },
+        {
+          accountCode: creditAccountCode,
+          accountName: creditAccountName,
+          debit: 0,
+          credit: amount
+        }
+      ],
+      totalDebit: amount,
+      totalCredit: amount,
+      status: 'ASENTADO'
+    };
+    setJournalEntries([newJournalEntry, ...journalEntries]);
+
+    // 5. Historial de Pagos
     const newLog: PaymentRecord = {
       id: `pym-${Date.now()}`,
       payableInvoiceId: selectedPayableForPayment.id,
@@ -326,18 +409,18 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
       paymentDate: paymentForm.paymentDate,
       amountPaid: amount,
       paymentMethod: paymentForm.method,
-      referenceNumber: paymentForm.reference || 'REF-N/A',
+      referenceNumber: paymentForm.method === 'CHEQUE' ? `Cheque #${checkNum}` : (paymentForm.reference || 'REF-N/A'),
       registeredBy: 'Administrador POS'
     };
 
     setPaymentHistory([newLog, ...paymentHistory]);
     setSelectedPayableForPayment(null);
-    setPaymentForm({
-      amount: '',
-      method: 'TRANSFERENCIA',
-      reference: '',
-      paymentDate: new Date().toISOString().split('T')[0]
-    });
+    showToast(
+      paymentForm.method === 'CHEQUE'
+        ? `Pago registrado. Cheque N° ${checkNum} emitido (en tránsito) y Asiento ${nextEntryNum} mayorizado.`
+        : `Pago registrado exitosamente. Asiento contable ${nextEntryNum} mayorizado.`,
+      'success'
+    );
   };
 
   // Calculations for Cuentas Por Pagar Overview
@@ -677,11 +760,17 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                             <button
                               onClick={() => {
                                 setSelectedPayableForPayment(pay);
+                                const defaultBank = 'Banco Pichincha';
+                                const nextCheck = getNextCorrelativeCheck(issuedChecks, defaultBank);
                                 setPaymentForm({
                                   amount: balance.toString(),
                                   method: 'TRANSFERENCIA',
                                   reference: '',
-                                  paymentDate: new Date().toISOString().split('T')[0]
+                                  paymentDate: new Date().toISOString().split('T')[0],
+                                  bankName: defaultBank,
+                                  checkNumber: nextCheck,
+                                  checkPaymentDate: new Date().toISOString().split('T')[0],
+                                  checkConcept: `Pago Factura ${pay.invoiceNumber} - ${pay.supplierName}`
                                 });
                               }}
                               className="px-3 py-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black rounded-lg text-[11px] shadow-sm transition cursor-pointer flex items-center gap-1 mx-auto"
@@ -1008,26 +1097,95 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
                 <label className="block font-black text-slate-800 mb-1">Forma de Pago</label>
                 <Select
                   value={paymentForm.method}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value as any })}
+                  onChange={(e) => {
+                    const newMethod = e.target.value as any;
+                    const nextCheck = getNextCorrelativeCheck(issuedChecks, paymentForm.bankName);
+                    setPaymentForm({
+                      ...paymentForm,
+                      method: newMethod,
+                      checkNumber: nextCheck
+                    });
+                  }}
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold"
                 >
                   <option value="TRANSFERENCIA">Transferencia Bancaria</option>
                   <option value="EFECTIVO">Efectivo de Caja</option>
-                  <option value="CHEQUE">Cheque Corporativo</option>
+                  <option value="CHEQUE">Cheque Corporativo (Tesorería)</option>
                   <option value="TARJETA">Tarjeta de Crédito Empresa</option>
                 </Select>
               </div>
 
-              <div>
-                <label className="block font-black text-slate-800 mb-1">N° Comprobante / Lote / Ref</label>
-                <input
-                  type="text"
-                  placeholder="ej: TRF-9021845"
-                  value={paymentForm.reference}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
-                />
-              </div>
+              {/* CAMPOS ESPECÍFICOS PARA PAGO CON CHEQUE */}
+              {paymentForm.method === 'CHEQUE' ? (
+                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-bold text-[11px]">
+                    <Landmark className="w-4 h-4 text-amber-700" />
+                    <span>Emisión de Cheque y Salida de Libros Bancarios</span>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1 text-[11px]">Banco / Cuenta Corriente Emisora</label>
+                    <Select
+                      value={paymentForm.bankName}
+                      onChange={(e) => {
+                        const newBank = e.target.value;
+                        const nextCheck = getNextCorrelativeCheck(issuedChecks, newBank);
+                        setPaymentForm({
+                          ...paymentForm,
+                          bankName: newBank,
+                          checkNumber: nextCheck
+                        });
+                      }}
+                      className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold"
+                    >
+                      <option value="Banco Pichincha">Banco Pichincha (Cta Cte #2100876543)</option>
+                      <option value="Banco Guayaquil">Banco Guayaquil (Cta Cte #0012876451)</option>
+                      <option value="Produbanco">Produbanco (Cta Cte #1009845120)</option>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-bold text-slate-700 text-[11px]">N° Cheque</label>
+                        <span className="text-[9px] font-bold text-amber-700 bg-amber-100/80 px-1.5 py-0.2 rounded">Correlativo</span>
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={paymentForm.checkNumber}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, checkNumber: e.target.value })}
+                        className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg font-mono font-bold text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1 text-[11px]">Fecha Cobro Estimada</label>
+                      <input
+                        type="date"
+                        value={paymentForm.checkPaymentDate}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, checkPaymentDate: e.target.value })}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-amber-800 leading-tight bg-amber-100/50 p-2 rounded-lg border border-amber-200/60">
+                    <strong>Integración ERP Automática:</strong> Se registrará el cheque en estado <strong>EMITIDO</strong> (fondos en tránsito), se liquidará el pasivo y se generará el asiento contable (Debe: Proveedores / Haber: Banco).
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">N° Comprobante / Lote / Ref</label>
+                  <input
+                    type="text"
+                    placeholder="ej: TRF-9021845"
+                    value={paymentForm.reference}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
                 <button

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { CustomSelect } from '../CustomSelect';
 import { 
@@ -33,7 +33,9 @@ import {
   Save,
   Minus,
   Layers,
-  Percent
+  Percent,
+  RotateCcw,
+  FileText
 } from 'lucide-react';
 import { InventorySubTab, Product, ProductCategory, Promotion, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
@@ -44,6 +46,7 @@ import { KardexManager } from './KardexManager';
 import { Select } from '../Shared/Select';
 import { useModal } from '../../context/ModalContext';
 import { defaultCategories } from '../../data/initialData';
+import { downloadTomaFisicaPdf, PhysicalInventoryPdfItem } from '../../utils/tomaFisicaPdfGenerator';
 
 interface InventoryModuleViewProps {
   subTab: InventorySubTab;
@@ -102,8 +105,12 @@ interface AuditItem {
   productId: string;
   productName: string;
   sku: string;
+  barcode?: string;
+  category: string;
+  location?: string;
+  unit?: string;
   systemStock: number;
-  physicalStock: number;
+  physicalStock: number | '';
   diff: number;
   unitCost: number;
 }
@@ -121,7 +128,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   categories,
   onUpdateCategories
 }) => {
-  const { showAlert, showToast } = useModal();
+  const { showAlert, showToast, showConfirm } = useModal();
   const currentCategories = categories || [];
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -391,18 +398,134 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   // 9. Kardex managed by KardexManager
 
   // 10. Toma Física Audit State
-  const [auditItems, setAuditItems] = useState<AuditItem[]>(
-    products.slice(0, 8).map((p) => ({
+  const [selectedAuditCategory, setSelectedAuditCategory] = useState<string>('TODAS');
+  const [auditSearchTerm, setAuditSearchTerm] = useState<string>('');
+  const [auditorName, setAuditorName] = useState<string>('');
+  const [auditSuccessMsg, setAuditSuccessMsg] = useState<string | null>(null);
+  const [auditItems, setAuditItems] = useState<AuditItem[]>(() =>
+    products.map((p) => ({
       productId: p.id,
       productName: p.name,
       sku: p.sku,
+      barcode: p.barcode,
+      category: p.category,
+      location: p.location,
+      unit: p.unit,
       systemStock: p.stock,
       physicalStock: p.stock,
       diff: 0,
-      unitCost: p.costPrice
+      unitCost: p.costPrice || 0
     }))
   );
-  const [auditSuccessMsg, setAuditSuccessMsg] = useState<string | null>(null);
+
+  // Sync if products load asynchronously
+  useEffect(() => {
+    if (auditItems.length === 0 && products.length > 0) {
+      setAuditItems(
+        products.map((p) => ({
+          productId: p.id,
+          productName: p.name,
+          sku: p.sku,
+          barcode: p.barcode,
+          category: p.category,
+          location: p.location,
+          unit: p.unit,
+          systemStock: p.stock,
+          physicalStock: p.stock,
+          diff: 0,
+          unitCost: p.costPrice || 0
+        }))
+      );
+    }
+  }, [products]);
+
+  // Set all physical counts blank for manual entry from printed sheet
+  const handleSetAuditBlank = () => {
+    setAuditItems(prev => prev.map(item => ({
+      ...item,
+      physicalStock: '',
+      diff: 0
+    })));
+    showToast('Los campos de conteo físico están ahora en blanco para ingresar manualmente.', 'info');
+  };
+
+  // Pre-fill physical counts with current system stock
+  const handleResetAuditToSystem = () => {
+    setAuditItems(prev => prev.map(item => ({
+      ...item,
+      physicalStock: item.systemStock,
+      diff: 0
+    })));
+    showToast('Conteos físicos restablecidos al stock actual del sistema.', 'info');
+  };
+
+  // Reload products according to category
+  const handleReloadAuditProducts = (category: string = selectedAuditCategory) => {
+    const list = category === 'TODAS' ? products : products.filter(p => p.category === category);
+    setAuditItems(list.map(p => ({
+      productId: p.id,
+      productName: p.name,
+      sku: p.sku,
+      barcode: p.barcode,
+      category: p.category,
+      location: p.location,
+      unit: p.unit,
+      systemStock: p.stock,
+      physicalStock: p.stock,
+      diff: 0,
+      unitCost: p.costPrice || 0
+    })));
+    showToast(`Se cargaron ${list.length} productos en la lista de auditoría.`, 'info');
+  };
+
+  // Filtered audit items for display
+  const filteredAuditItems = useMemo(() => {
+    return auditItems.filter(item => {
+      const matchesCat = selectedAuditCategory === 'TODAS' || item.category === selectedAuditCategory;
+      if (!matchesCat) return false;
+      if (!auditSearchTerm.trim()) return true;
+      const q = auditSearchTerm.toLowerCase();
+      return (
+        item.productName.toLowerCase().includes(q) ||
+        item.sku.toLowerCase().includes(q) ||
+        (item.barcode && item.barcode.toLowerCase().includes(q)) ||
+        (item.location && item.location.toLowerCase().includes(q))
+      );
+    });
+  }, [auditItems, selectedAuditCategory, auditSearchTerm]);
+
+  // Metrics summary
+  const auditMetrics = useMemo(() => {
+    let totalCounted = 0;
+    let pendingCount = 0;
+    let surplusCount = 0;
+    let deficitCount = 0;
+    let matchingCount = 0;
+    let totalFinancialImpact = 0;
+
+    auditItems.forEach(item => {
+      if (item.physicalStock === '') {
+        pendingCount++;
+      } else {
+        totalCounted++;
+        const diff = Number(item.physicalStock) - item.systemStock;
+        totalFinancialImpact += diff * item.unitCost;
+        if (diff > 0) surplusCount++;
+        else if (diff < 0) deficitCount++;
+        else matchingCount++;
+      }
+    });
+
+    return {
+      totalItems: auditItems.length,
+      totalCounted,
+      pendingCount,
+      surplusCount,
+      deficitCount,
+      matchingCount,
+      totalFinancialImpact
+    };
+  }, [auditItems]);
 
   // 11. Cargar Productos Bulk CSV State
   const [rawCsvProducts, setRawCsvProducts] = useState('');
@@ -465,17 +588,73 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     setAdjustQtyVal('10');
   };
 
-  // Execute Physical Audit Adjustment
-  const handleApplyPhysicalAudit = () => {
-    let adjustedCount = 0;
-    auditItems.forEach((item) => {
-      if (item.diff !== 0) {
-        onStockAdjust(item.productId, item.diff);
-        adjustedCount++;
-      }
+  // Download PDF Planilla for Manual Counting
+  const handleDownloadTomaFisicaPdf = () => {
+    const sourceItems = filteredAuditItems.length > 0 ? filteredAuditItems : auditItems;
+
+    if (sourceItems.length === 0) {
+      showAlert('No hay productos disponibles para exportar en la planilla de toma física.', 'Atención', 'warning');
+      return;
+    }
+
+    const itemsForPdf: PhysicalInventoryPdfItem[] = sourceItems.map(it => ({
+      sku: it.sku,
+      barcode: it.barcode,
+      name: it.productName,
+      category: it.category,
+      location: it.location,
+      unit: it.unit,
+      systemStock: it.systemStock,
+    }));
+
+    downloadTomaFisicaPdf(itemsForPdf, settings, {
+      categoryFilter: selectedAuditCategory === 'TODAS' ? 'Todas las Categorías' : selectedAuditCategory,
+      auditorName: auditorName || undefined,
     });
 
-    setAuditSuccessMsg(`¡Auditoría de inventario aplicada! Se corrigieron ${adjustedCount} productos en el sistema.`);
+    showToast(`Planilla PDF descargada (${itemsForPdf.length} productos) con recuadro en blanco para conteo manual.`, 'success');
+  };
+
+  // Execute Physical Audit Adjustment
+  const handleApplyPhysicalAudit = () => {
+    const itemsToAdjust = auditItems.filter(
+      item => item.physicalStock !== '' && item.diff !== 0
+    );
+
+    if (itemsToAdjust.length === 0) {
+      showAlert('No hay discrepancias registradas entre el conteo físico y el sistema para ajustar.', 'Sin Diferencias', 'info');
+      return;
+    }
+
+    showConfirm(
+      `Se ajustarán ${itemsToAdjust.length} productos que presentan discrepancias entre el conteo físico y el sistema.\n\n¿Desea aplicar los ajustes al inventario real?`,
+      () => {
+        let adjustedCount = 0;
+        itemsToAdjust.forEach((item) => {
+          onStockAdjust(item.productId, item.diff);
+          adjustedCount++;
+        });
+
+        // Update local items so systemStock now matches physicalStock
+        setAuditItems(prev => prev.map(item => {
+          if (item.physicalStock !== '' && item.diff !== 0) {
+            const newStock = Number(item.physicalStock);
+            return {
+              ...item,
+              systemStock: newStock,
+              diff: 0
+            };
+          }
+          return item;
+        }));
+
+        showToast(`¡Ajuste de inventario aplicado! Se corrigieron ${adjustedCount} productos en el sistema.`, 'success');
+        setAuditSuccessMsg(`¡Auditoría aplicada exitosamente! Se corrigieron las existencias de ${adjustedCount} productos.`);
+      },
+      'Confirmar Ajuste de Auditoría Física',
+      'Sí, Aplicar Ajustes',
+      'Cancelar'
+    );
   };
 
   // CSV Importer for Products
@@ -1679,84 +1858,410 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
          --------------------------------------------------------------------- */}
       {subTab === 'TOMA_FISICA' && (
         <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <ClipboardCheck className="w-5 h-5 text-lime-500" />
-                <span>Toma Física de Inventario Auditoría</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Compara las existencias registradas en el sistema contra la recolección física en perchas.
-              </p>
+          {/* Header Banner */}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+            <div className="flex items-start space-x-3.5">
+              <div className="p-3 bg-gradient-to-br from-lime-500/20 to-emerald-500/10 text-lime-600 rounded-2xl border border-lime-500/30 shadow-xs mt-0.5">
+                <ClipboardCheck className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">Toma Física de Inventario & Auditoría</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-lime-50 text-lime-700 border border-lime-200">
+                    Conteo en Perchas
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-0.5 max-w-2xl">
+                  Descarga la planilla en PDF con recuadros en blanco para hacer el conteo a mano con lápiz en almacén, y luego ingresa manualmente los datos en el sistema para ajustar existencias.
+                </p>
+              </div>
             </div>
 
-            <button
-              onClick={handleApplyPhysicalAudit}
-              className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Aplicar Ajuste Auditoría</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+              <button
+                type="button"
+                onClick={handleDownloadTomaFisicaPdf}
+                className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer"
+                title="Descargar hoja en PDF con recuadros en blanco para imprimir y contar a mano"
+              >
+                <Download className="w-4 h-4 text-orange-400 stroke-[2.5]" />
+                <span>Descargar Planilla PDF (Conteo en Blanco)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApplyPhysicalAudit}
+                className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                <span>Aplicar Ajuste Auditoría</span>
+              </button>
+            </div>
           </div>
 
           {auditSuccessMsg && (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center justify-between">
-              <span>{auditSuccessMsg}</span>
-              <button onClick={() => setAuditSuccessMsg(null)}>✕</button>
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs font-bold flex items-center justify-between shadow-xs">
+              <div className="flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{auditSuccessMsg}</span>
+              </div>
+              <button
+                onClick={() => setAuditSuccessMsg(null)}
+                className="p-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
           )}
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          {/* 5 KPI Metric Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Total en Auditoría</p>
+              <div className="flex items-baseline space-x-1 mt-1">
+                <span className="text-2xl font-black text-slate-900 font-mono">{auditMetrics.totalItems}</span>
+                <span className="text-xs text-slate-500 font-bold">ítems</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Catálogo seleccionado</p>
+            </div>
+
+            <div className="p-4 bg-blue-50/70 border border-blue-200/80 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-blue-700 tracking-wider">Digitados / Contados</p>
+              <div className="flex items-baseline space-x-1 mt-1">
+                <span className="text-2xl font-black text-blue-900 font-mono">{auditMetrics.totalCounted}</span>
+                <span className="text-xs text-blue-600 font-bold">/ {auditMetrics.totalItems}</span>
+              </div>
+              <div className="w-full bg-blue-200/60 rounded-full h-1.5 mt-2 overflow-hidden">
+                <div 
+                  className="bg-blue-600 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${auditMetrics.totalItems > 0 ? (auditMetrics.totalCounted / auditMetrics.totalItems) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-amber-700 tracking-wider">Pendientes de Conteo</p>
+              <div className="flex items-baseline space-x-1 mt-1">
+                <span className="text-2xl font-black text-amber-900 font-mono">{auditMetrics.pendingCount}</span>
+                <span className="text-xs text-amber-600 font-bold">en blanco</span>
+              </div>
+              <p className="text-[10px] text-amber-600/90 mt-0.5">Por ingresar de la hoja</p>
+            </div>
+
+            <div className="p-4 bg-purple-50/70 border border-purple-200/80 rounded-2xl">
+              <p className="text-[10px] font-black uppercase text-purple-700 tracking-wider">Discrepancias</p>
+              <div className="flex items-center space-x-2 mt-1">
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono font-bold text-xs" title="Sobrantes">
+                  +{auditMetrics.surplusCount}
+                </span>
+                <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded font-mono font-bold text-xs" title="Faltantes">
+                  -{auditMetrics.deficitCount}
+                </span>
+              </div>
+              <p className="text-[10px] text-purple-600 mt-1">{auditMetrics.matchingCount} coinciden exacto</p>
+            </div>
+
+            <div className="p-4 bg-slate-900 text-white border border-slate-800 rounded-2xl col-span-2 sm:col-span-1">
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Impacto Neto ($)</p>
+              <p className={`text-xl font-black font-mono mt-1 ${auditMetrics.totalFinancialImpact >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {formatCurrency(auditMetrics.totalFinancialImpact, settings.currencySymbol)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Costo de mercadería</p>
+            </div>
+          </div>
+
+          {/* Controls & Quick Actions Bar */}
+          <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3.5">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+              {/* Search Bar */}
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por producto, SKU, código de barras o percha..."
+                  value={auditSearchTerm}
+                  onChange={(e) => setAuditSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 shadow-xs"
+                />
+                {auditSearchTerm && (
+                  <button
+                    onClick={() => setAuditSearchTerm('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Category Filter */}
+              <div className="min-w-[190px]">
+                <select
+                  value={selectedAuditCategory}
+                  onChange={(e) => {
+                    const cat = e.target.value;
+                    setSelectedAuditCategory(cat);
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-orange-500 shadow-xs cursor-pointer"
+                >
+                  <option value="TODAS">Todas las Categorías</option>
+                  {currentCategories.map((c) => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Auditor Name (Optional for PDF) */}
+              <div className="min-w-[180px]">
+                <input
+                  type="text"
+                  placeholder="Nombre de quien cuenta..."
+                  value={auditorName}
+                  onChange={(e) => setAuditorName(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500 shadow-xs"
+                  title="Nombre del responsable que aparecerá en el PDF"
+                />
+              </div>
+            </div>
+
+            {/* Quick Bulk Tools */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleSetAuditBlank}
+                className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                title="Deja todos los casilleros de conteo en blanco para ir digitando uno por uno lo que dice la hoja de papel"
+              >
+                <FileText className="w-3.5 h-3.5 text-orange-600" />
+                <span>Poner Conteos en Blanco</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetAuditToSystem}
+                className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                title="Rellena las casillas con el stock actual del sistema para que solo cambies las diferencias"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                <span>Copiar Stock Sistema</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleReloadAuditProducts(selectedAuditCategory)}
+                className="p-2 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-xl text-xs transition cursor-pointer"
+                title="Recargar productos desde la base de datos"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Audit Table */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-xs">
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
                 <tr>
-                  <th className="py-2.5 px-3">SKU</th>
-                  <th className="py-2.5 px-3">Producto</th>
-                  <th className="py-2.5 px-3 text-right">Stock Sistema</th>
-                  <th className="py-2.5 px-3 text-right">Stock Físico Real</th>
-                  <th className="py-2.5 px-3 text-right">Diferencia</th>
-                  <th className="py-2.5 px-3 text-right">Impacto Financiero</th>
+                  <th className="py-3 px-3 text-center w-10">#</th>
+                  <th className="py-3 px-3">SKU / Código</th>
+                  <th className="py-3 px-3">Producto & Ubicación</th>
+                  <th className="py-3 px-3 text-center">Unidad</th>
+                  <th className="py-3 px-3 text-right">Stock Sistema</th>
+                  <th className="py-3 px-4 text-center bg-orange-600 text-white min-w-[150px]">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>Stock Físico Real (Conteo)</span>
+                    </div>
+                  </th>
+                  <th className="py-3 px-3 text-right">Diferencia</th>
+                  <th className="py-3 px-3 text-right">Impacto Costo</th>
+                  <th className="py-3 px-3 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {auditItems.map((item, idx) => {
-                  const diffVal = item.physicalStock - item.systemStock;
-                  const financialImpact = diffVal * item.unitCost;
+                {filteredAuditItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      <ClipboardList className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                      <p className="font-bold text-sm text-slate-600">No se encontraron productos en esta auditoría</p>
+                      <p className="text-xs text-slate-400 mt-1">Prueba seleccionando otra categoría o borrando el término de búsqueda.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAuditItems.map((item, idx) => {
+                    const isBlank = item.physicalStock === '';
+                    const diffVal = isBlank ? 0 : (Number(item.physicalStock) - item.systemStock);
+                    const financialImpact = isBlank ? 0 : (diffVal * item.unitCost);
 
-                  return (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="py-2 px-3 font-mono font-bold text-slate-800">{item.sku}</td>
-                      <td className="py-2 px-3 font-bold text-slate-900">{item.productName}</td>
-                      <td className="py-2 px-3 text-right font-mono font-bold text-slate-700">{item.systemStock} u.</td>
-                      <td className="py-2 px-3 text-right">
-                        <input
-                          type="number"
-                          value={item.physicalStock}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            const updated = [...auditItems];
-                            updated[idx].physicalStock = val;
-                            updated[idx].diff = val - updated[idx].systemStock;
-                            setAuditItems(updated);
-                          }}
-                          className="w-20 px-2 py-1 bg-slate-50 border border-slate-300 rounded font-mono font-black text-right text-slate-900"
-                        />
-                      </td>
-                      <td
-                        className={`py-2 px-3 text-right font-mono font-black ${
-                          diffVal === 0 ? 'text-slate-400' : diffVal > 0 ? 'text-emerald-600' : 'text-rose-600'
+                    return (
+                      <tr 
+                        key={item.productId} 
+                        className={`hover:bg-slate-50/90 transition-colors ${
+                          !isBlank && diffVal !== 0 ? 'bg-amber-50/30' : ''
                         }`}
                       >
-                        {diffVal > 0 ? `+${diffVal}` : diffVal}
-                      </td>
-                      <td className="py-2 px-3 text-right font-mono font-bold">
-                        {formatCurrency(financialImpact, settings.currencySymbol)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        {/* Index */}
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-400 font-bold text-[11px]">
+                          {idx + 1}
+                        </td>
+
+                        {/* SKU / Barcode */}
+                        <td className="py-2.5 px-3">
+                          <span className="font-mono font-black text-slate-900 block">{item.sku}</span>
+                          {item.barcode && (
+                            <span className="font-mono text-[10px] text-slate-400 block">{item.barcode}</span>
+                          )}
+                        </td>
+
+                        {/* Product Name & Location / Category */}
+                        <td className="py-2.5 px-3">
+                          <span className="font-bold text-slate-900 block">{item.productName}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {item.category}
+                            </span>
+                            {item.location && (
+                              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                                {item.location}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Unit */}
+                        <td className="py-2.5 px-3 text-center font-bold text-slate-600">
+                          {item.unit || 'u.'}
+                        </td>
+
+                        {/* System Stock */}
+                        <td className="py-2.5 px-3 text-right">
+                          <span className="font-mono font-black text-slate-800 text-sm">
+                            {item.systemStock}
+                          </span>
+                          <span className="text-[10px] text-slate-400 ml-1 font-bold">u.</span>
+                        </td>
+
+                        {/* Physical Stock Real (Interactive Input for Manual Entry) */}
+                        <td className="py-2 px-4 text-center bg-orange-50/40">
+                          <div className="flex items-center justify-center">
+                            <input
+                              type="number"
+                              step="any"
+                              placeholder="En blanco"
+                              value={item.physicalStock === '' ? '' : item.physicalStock}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => {
+                                const rawVal = e.target.value;
+                                const updated = [...auditItems];
+                                const targetIdx = updated.findIndex((it) => it.productId === item.productId);
+                                if (targetIdx !== -1) {
+                                  if (rawVal === '') {
+                                    updated[targetIdx].physicalStock = '';
+                                    updated[targetIdx].diff = 0;
+                                  } else {
+                                    const num = parseFloat(rawVal) || 0;
+                                    updated[targetIdx].physicalStock = num;
+                                    updated[targetIdx].diff = num - updated[targetIdx].systemStock;
+                                  }
+                                  setAuditItems(updated);
+                                }
+                              }}
+                              className={`w-28 px-3 py-1.5 bg-white border-2 rounded-xl font-mono font-black text-right text-sm shadow-xs transition focus:outline-none focus:ring-2 focus:ring-orange-500/20 ${
+                                isBlank
+                                  ? 'border-slate-300 text-slate-400 placeholder-slate-400'
+                                  : diffVal === 0
+                                  ? 'border-slate-300 text-slate-900'
+                                  : diffVal > 0
+                                  ? 'border-emerald-500 text-emerald-700 bg-emerald-50/20'
+                                  : 'border-rose-500 text-rose-700 bg-rose-50/20'
+                              }`}
+                            />
+                          </div>
+                        </td>
+
+                        {/* Difference */}
+                        <td className="py-2.5 px-3 text-right">
+                          {isBlank ? (
+                            <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-400">
+                              Pendiente
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-block font-mono font-black px-2 py-0.5 rounded-lg text-xs ${
+                                diffVal === 0
+                                  ? 'text-slate-600 bg-slate-100'
+                                  : diffVal > 0
+                                  ? 'text-emerald-800 bg-emerald-100 border border-emerald-200'
+                                  : 'text-rose-800 bg-rose-100 border border-rose-200'
+                              }`}
+                            >
+                              {diffVal > 0 ? `+${diffVal}` : diffVal}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Financial Impact */}
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-xs">
+                          {isBlank ? (
+                            <span className="text-slate-300">—</span>
+                          ) : (
+                            <span className={diffVal === 0 ? 'text-slate-400' : diffVal > 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                              {formatCurrency(financialImpact, settings.currencySymbol)}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Action: Quick Match */}
+                        <td className="py-2.5 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...auditItems];
+                              const targetIdx = updated.findIndex((it) => it.productId === item.productId);
+                              if (targetIdx !== -1) {
+                                updated[targetIdx].physicalStock = updated[targetIdx].systemStock;
+                                updated[targetIdx].diff = 0;
+                                setAuditItems(updated);
+                              }
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                            title="Marcar como exacto / conforme al sistema"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
+          </div>
+
+          {/* Bottom Summary Bar */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-slate-600 font-medium">
+              Mostrando <span className="font-bold text-slate-900">{filteredAuditItems.length}</span> productos en esta vista •{' '}
+              <span className="text-orange-600 font-bold">{auditItems.filter(i => i.physicalStock !== '' && i.diff !== 0).length}</span> con discrepancia listos para ajuste.
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadTomaFisicaPdf}
+                className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-orange-500" />
+                <span>Descargar PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApplyPhysicalAudit}
+                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Aplicar Ajuste</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

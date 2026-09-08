@@ -134,6 +134,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
 
   // Payment Methods State
@@ -614,23 +615,74 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     showToast(`XML de prueba generado con clave: ${claveAcceso}`, 'success');
   };
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.name || !newUser.email || !newUser.username || !newUser.password) return;
-    setUsersList([
-      ...usersList,
-      {
-        id: `USR-0${usersList.length + 1}`,
-        name: newUser.name,
-        email: newUser.email,
-        username: newUser.username,
-        role: newUser.role,
-        status: 'Activo',
-        password: newUser.password
-      }
-    ]);
+    if (editingUser) {
+      setUsersList(
+        usersList.map(u => u.id === editingUser.id ? { ...u, ...newUser } : u)
+      );
+      showToast('Usuario actualizado correctamente', 'success');
+    } else {
+      setUsersList([
+        ...usersList,
+        {
+          id: `USR-0${usersList.length + 1}`,
+          name: newUser.name,
+          email: newUser.email,
+          username: newUser.username,
+          role: newUser.role,
+          status: 'Activo',
+          password: newUser.password
+        }
+      ]);
+      showToast('Usuario creado correctamente', 'success');
+    }
     setNewUser({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
+    setEditingUser(null);
     setShowAddUserModal(false);
+  };
+
+  const handleEditUser = (user: any) => {
+    setEditingUser(user);
+    setShowNewUserPassword(false);
+    setNewUser({
+      name: user.name,
+      email: user.email,
+      username: user.username,
+      role: user.role,
+      password: user.password || ''
+    });
+    setShowAddUserModal(true);
+  };
+
+  const handleToggleUserStatus = (user: any) => {
+    const adminsActive = usersList.filter(u => u.role === 'Administrador' && u.status === 'Activo').length;
+    if (user.role === 'Administrador' && user.status === 'Activo' && adminsActive <= 1) {
+      showAlert('No puedes deshabilitar al último administrador activo, quedarías sin acceso al sistema.', 'No permitido', 'error');
+      return;
+    }
+    const newStatus = user.status === 'Activo' ? 'Inactivo' : 'Activo';
+    setUsersList(usersList.map(u => u.id === user.id ? { ...u, status: newStatus } : u));
+    showToast(newStatus === 'Activo' ? 'Usuario habilitado' : 'Usuario deshabilitado', 'success');
+  };
+
+  const handleDeleteUser = (user: any) => {
+    const adminsActive = usersList.filter(u => u.role === 'Administrador' && u.status === 'Activo').length;
+    if (user.role === 'Administrador' && adminsActive <= 1) {
+      showAlert('No puedes eliminar al último administrador activo del sistema.', 'No permitido', 'error');
+      return;
+    }
+    showConfirm(
+      `¿Eliminar al usuario "${user.name}" (${user.username})? Esta acción no se puede deshacer.`,
+      () => {
+        setUsersList(usersList.filter(u => u.id !== user.id));
+        showToast('Usuario eliminado correctamente', 'success');
+      },
+      'Confirmar eliminación',
+      'Eliminar usuario',
+      'Cancelar'
+    );
   };
 
   const currentTab = subTab === 'SETTINGS' ? 'CFG_EMPRESA' : subTab;
@@ -2041,7 +2093,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </div>
 
             <button
-              onClick={() => setShowAddUserModal(true)}
+              onClick={() => {
+                setEditingUser(null);
+                setNewUser({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
+                setShowAddUserModal(true);
+              }}
               className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
@@ -2049,37 +2105,74 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </button>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-hidden rounded-2xl border border-slate-800">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
                 <tr>
-                  <th className="p-3">ID</th>
-                  <th className="p-3">Nombre</th>
-                  <th className="p-3">Cédula / RUC</th>
-                  <th className="p-3">Correo Electrónico</th>
-                  <th className="p-3">Rol Asignado</th>
-                  <th className="p-3 text-center">Estado</th>
+                  <th className="px-3 py-2.5">Usuario</th>
+                  <th className="px-3 py-2.5">Cédula / RUC</th>
+                  <th className="px-3 py-2.5">Rol</th>
+                  <th className="px-3 py-2.5 text-center">Estado</th>
+                  <th className="px-3 py-2.5 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
-                {usersList.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-800/40 transition">
-                    <td className="p-3 font-mono font-bold text-slate-400">{u.id}</td>
-                    <td className="p-3 font-bold text-white">{u.name}</td>
-                    <td className="p-3 font-mono text-amber-500 font-bold">{u.username || 'N/A'}</td>
-                    <td className="p-3 text-cyan-400 font-mono">{u.email}</td>
-                    <td className="p-3">
-                      <span className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 text-[11px] font-bold">
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        {u.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {usersList.map((u) => {
+                  const isActive = u.status === 'Activo';
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-800/40 transition">
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-black shrink-0">
+                            {(u.name || '?').trim().charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-white truncate">{u.name}</div>
+                            <div className="text-[10px] text-slate-500 font-mono truncate">{u.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-amber-500 font-bold whitespace-nowrap">{u.username || 'N/A'}</td>
+                      <td className="px-3 py-2">
+                        <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap">
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleUserStatus(u)}
+                          title={isActive ? 'Deshabilitar usuario' : 'Habilitar usuario'}
+                          className={`relative inline-flex items-center w-9 h-4.5 rounded-full transition cursor-pointer ${
+                            isActive ? 'bg-emerald-500/80' : 'bg-slate-700'
+                          }`}
+                        >
+                          <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} />
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleEditUser(u)}
+                            title="Editar usuario"
+                            className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(u)}
+                            title="Eliminar usuario"
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2096,10 +2189,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     </div>
                     <div>
                       <h3 className="text-base font-black text-white tracking-wide">
-                        Crear Nuevo Usuario
+                        {editingUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
                       </h3>
                       <p className="text-[11px] text-slate-400 font-medium">
-                        Asigne credenciales y roles de acceso para el personal
+                        {editingUser ? 'Modifique las credenciales y permisos del usuario' : 'Asigne credenciales y roles de acceso para el personal'}
                       </p>
                     </div>
                   </div>
@@ -2112,7 +2205,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   </button>
                 </div>
 
-                <form onSubmit={handleAddUser} className="space-y-4 text-xs">
+                <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
                   {/* Nombre Completo */}
                   <div>
                     <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
@@ -2245,7 +2338,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       className="px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black rounded-xl shadow-lg shadow-cyan-500/25 transition active:scale-95 flex items-center gap-2 cursor-pointer"
                     >
                       <Save className="w-4 h-4" />
-                      <span>Guardar Usuario</span>
+                      <span>{editingUser ? 'Actualizar Usuario' : 'Guardar Usuario'}</span>
                     </button>
                   </div>
                 </form>

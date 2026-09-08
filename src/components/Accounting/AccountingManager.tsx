@@ -44,8 +44,14 @@ import {
   Printer,
   ChevronRight,
   FileCode,
-  Tag
+  Tag,
+  Copy,
+  Loader2
 } from 'lucide-react';
+import { useModal } from '../../context/ModalContext';
+import { generateAtsXml } from '../../services/sriAtsService';
+import { downloadXML } from '../../services/sriXmlService';
+import { getNextCorrelativeCheck, getCheckStatusBadge, isCheckInTransit } from '../../utils/checkUtils';
 import { AccountingSubTab, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { Select } from '../Shared/Select';
@@ -63,12 +69,20 @@ export interface IssuedCheck {
   id: string;
   checkNumber: string;
   bankName: string;
+  bankAccountId?: string;
   issueDate: string;
+  deliveryDate?: string;
   paymentDate: string;
+  clearedDate?: string;
   beneficiary: string;
+  supplierId?: string;
+  payableInvoiceId?: string;
+  invoiceNumber?: string;
   amount: number;
   concept: string;
-  status: 'GIRADO' | 'COBRADO' | 'ANULADO';
+  status: 'EMITIDO' | 'ENTREGADO' | 'COBRADO' | 'ANULADO' | 'GIRADO';
+  journalEntryId?: string;
+  notes?: string;
 }
 
 export interface PostdatedCheck {
@@ -136,6 +150,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   subTab,
   settings,
 }) => {
+  const { showToast, showAlert, showConfirm } = useModal();
   // -------------------------------------------------------------------------
   // MOCK DATA STATES
   // -------------------------------------------------------------------------
@@ -204,6 +219,9 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   // Search filter
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Cheques Girados Status Filter
+  const [checkStatusFilter, setCheckStatusFilter] = useState<'TODOS' | 'EN_TRANSITO' | 'EMITIDO' | 'ENTREGADO' | 'COBRADO' | 'ANULADO'>('TODOS');
+
   // Modals visibility
   const [isCheckModalOpen, setIsCheckModalOpen] = useState(false);
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
@@ -240,6 +258,119 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   });
 
   // -------------------------------------------------------------------------
+  // ATS (Anexo Transaccional Simplificado SRI) STATES & COMPUTED
+  // -------------------------------------------------------------------------
+  const now = new Date();
+  const [atsYear, setAtsYear] = useState<string>(String(now.getFullYear()));
+  const [atsMonth, setAtsMonth] = useState<string>(String(now.getMonth() + 1).padStart(2, '0'));
+  const [isGeneratingAts, setIsGeneratingAts] = useState<boolean>(false);
+  const [atsPreviewXml, setAtsPreviewXml] = useState<string | null>(null);
+  const [atsActiveDetailTab, setAtsActiveDetailTab] = useState<'VENTAS' | 'COMPRAS' | 'ANULADOS'>('VENTAS');
+  const [xmlCopied, setXmlCopied] = useState<boolean>(false);
+
+  const atsVentasPeriodo = useMemo(() => {
+    return invoices.filter((inv: any) => {
+      if (inv.documentType === 'COTIZACION') return false;
+      const d = new Date(inv.createdAt);
+      if (isNaN(d.getTime())) return false;
+      return String(d.getFullYear()) === atsYear && String(d.getMonth() + 1).padStart(2, '0') === atsMonth;
+    });
+  }, [invoices, atsYear, atsMonth]);
+
+  const atsVentasValidas = useMemo(() => {
+    return atsVentasPeriodo.filter((inv: any) => inv.paymentStatus !== 'ANULADA');
+  }, [atsVentasPeriodo]);
+
+  const atsAnuladas = useMemo(() => {
+    return atsVentasPeriodo.filter((inv: any) => inv.paymentStatus === 'ANULADA');
+  }, [atsVentasPeriodo]);
+
+  const atsComprasPeriodo = useMemo(() => {
+    return purchases.filter((pur: any) => {
+      const d = new Date(pur.purchaseDate || pur.createdAt);
+      if (isNaN(d.getTime())) return false;
+      return String(d.getFullYear()) === atsYear && String(d.getMonth() + 1).padStart(2, '0') === atsMonth;
+    });
+  }, [purchases, atsYear, atsMonth]);
+
+  const totalVentasAts = useMemo(() => atsVentasValidas.reduce((acc: number, v: any) => acc + (v.total || 0), 0), [atsVentasValidas]);
+  const totalIvaVentasAts = useMemo(() => atsVentasValidas.reduce((acc: number, v: any) => acc + (v.taxTotal || 0), 0), [atsVentasValidas]);
+  const totalSubtotalVentasAts = useMemo(() => atsVentasValidas.reduce((acc: number, v: any) => acc + (v.subtotal || 0), 0), [atsVentasValidas]);
+
+  const totalComprasAts = useMemo(() => atsComprasPeriodo.reduce((acc: number, c: any) => acc + (c.total || 0), 0), [atsComprasPeriodo]);
+  const totalIvaComprasAts = useMemo(() => atsComprasPeriodo.reduce((acc: number, c: any) => acc + (c.taxTotal || 0), 0), [atsComprasPeriodo]);
+  const totalSubtotalComprasAts = useMemo(() => atsComprasPeriodo.reduce((acc: number, c: any) => acc + (c.subtotal || 0), 0), [atsComprasPeriodo]);
+
+  const handleGenerateAts = async (onlyPreview: boolean = false) => {
+    setIsGeneratingAts(true);
+    try {
+      const result = await generateAtsXml({
+        mes: atsMonth,
+        anio: atsYear,
+        settings,
+        invoices,
+        purchases,
+        establishment: '001'
+      });
+
+      if (result.success) {
+        if (onlyPreview) {
+          setAtsPreviewXml(result.xml);
+          showToast(`XML generado para vista previa (${result.filename})`, 'info');
+        } else {
+          downloadXML(result.xml, result.filename);
+          showToast(`¡Archivo ${result.filename} generado y descargado con éxito!`, 'success');
+        }
+      } else {
+        showAlert('Error ATS', result.message || 'No se pudo generar el anexo transaccional.');
+      }
+    } catch (err: any) {
+      showAlert('Error al generar ATS', err.message || 'Ocurrió un error al procesar el XML ATS.');
+    } finally {
+      setIsGeneratingAts(false);
+    }
+  };
+
+  const handleCopyXml = () => {
+    if (!atsPreviewXml) return;
+    navigator.clipboard.writeText(atsPreviewXml);
+    setXmlCopied(true);
+    showToast('XML copiado al portapapeles.', 'success');
+    setTimeout(() => setXmlCopied(false), 2500);
+  };
+
+  // -------------------------------------------------------------------------
+  // CHEQUES GIRADOS COMPUTED & LIFECYCLE
+  // -------------------------------------------------------------------------
+  const chequesEnTransito = useMemo(() => issuedChecks.filter(c => isCheckInTransit(c.status)), [issuedChecks]);
+  const chequesEmitidos = useMemo(() => issuedChecks.filter(c => c.status === 'EMITIDO' || c.status === 'GIRADO'), [issuedChecks]);
+  const chequesEntregados = useMemo(() => issuedChecks.filter(c => c.status === 'ENTREGADO'), [issuedChecks]);
+  const chequesCobrados = useMemo(() => issuedChecks.filter(c => c.status === 'COBRADO'), [issuedChecks]);
+  const chequesAnulados = useMemo(() => issuedChecks.filter(c => c.status === 'ANULADO'), [issuedChecks]);
+
+  const totalChequesAmount = useMemo(() => issuedChecks.filter(c => c.status !== 'ANULADO').reduce((acc, c) => acc + (c.amount || 0), 0), [issuedChecks]);
+  const totalEnTransito = useMemo(() => chequesEnTransito.reduce((acc, c) => acc + (c.amount || 0), 0), [chequesEnTransito]);
+  const totalCobrados = useMemo(() => chequesCobrados.reduce((acc, c) => acc + (c.amount || 0), 0), [chequesCobrados]);
+  const totalAnulados = useMemo(() => chequesAnulados.reduce((acc, c) => acc + (c.amount || 0), 0), [chequesAnulados]);
+
+  const filteredChecks = useMemo(() => {
+    return issuedChecks.filter(chk => {
+      const matchesSearch = 
+        (chk.checkNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (chk.beneficiary || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (chk.bankName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (chk.concept || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      if (checkStatusFilter === 'TODOS') return true;
+      if (checkStatusFilter === 'EN_TRANSITO') return isCheckInTransit(chk.status);
+      if (checkStatusFilter === 'EMITIDO') return chk.status === 'EMITIDO' || chk.status === 'GIRADO';
+      return chk.status === checkStatusFilter;
+    });
+  }, [issuedChecks, searchTerm, checkStatusFilter]);
+
+  // -------------------------------------------------------------------------
   // HANDLERS
   // -------------------------------------------------------------------------
 
@@ -247,20 +378,57 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     e.preventDefault();
     if (!newCheck.checkNumber || !newCheck.beneficiary || !newCheck.amount) return;
 
+    const bankName = newCheck.bankName || 'Banco Pichincha';
+    const checkAmount = parseFloat(newCheck.amount.toString()) || 0;
+    const journalEntryId = `entry-${Date.now()}`;
+    const nextEntryNum = `AS-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`;
+
     const chk: IssuedCheck = {
       id: `chk-${Date.now()}`,
       checkNumber: newCheck.checkNumber,
-      bankName: newCheck.bankName || 'Banco Pichincha',
+      bankName,
       issueDate: new Date().toISOString().split('T')[0],
       paymentDate: newCheck.paymentDate || new Date().toISOString().split('T')[0],
       beneficiary: newCheck.beneficiary,
-      amount: parseFloat(newCheck.amount.toString()) || 0,
+      amount: checkAmount,
       concept: newCheck.concept || 'Pago por comprobante',
-      status: 'GIRADO'
+      status: 'EMITIDO',
+      journalEntryId
+    };
+
+    // Generar Asiento Contable Automático (Debe: Proveedores / Haber: Banco)
+    const isGuayaquil = bankName.toLowerCase().includes('guayaquil');
+    const creditAccountCode = isGuayaquil ? '1.1.01.02.02' : '1.1.01.02.01';
+
+    const newJournalEntry: JournalEntry = {
+      id: journalEntryId,
+      entryNumber: nextEntryNum,
+      date: chk.issueDate,
+      concept: `Emisión Cheque N° ${chk.checkNumber} a favor de ${chk.beneficiary} - ${chk.concept}`,
+      type: 'EGRESO',
+      items: [
+        {
+          accountCode: '2.1.01.01.01',
+          accountName: 'Cuentas por Pagar Proveedores Locales',
+          debit: checkAmount,
+          credit: 0
+        },
+        {
+          accountCode: creditAccountCode,
+          accountName: `${bankName} Cta Cte (Cheques en Tránsito)`,
+          debit: 0,
+          credit: checkAmount
+        }
+      ],
+      totalDebit: checkAmount,
+      totalCredit: checkAmount,
+      status: 'ASENTADO'
     };
 
     setIssuedChecks([chk, ...issuedChecks]);
+    setJournalEntries([newJournalEntry, ...journalEntries]);
     setIsCheckModalOpen(false);
+    showToast(`Cheque N° ${chk.checkNumber} emitido en tránsito y Asiento ${nextEntryNum} mayorizado.`, 'success');
     setNewCheck({
       checkNumber: '',
       bankName: 'Banco Pichincha',
@@ -269,6 +437,66 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
       amount: 0,
       concept: ''
     });
+  };
+
+  const handleMarkDelivered = (chk: IssuedCheck) => {
+    const today = new Date().toISOString().split('T')[0];
+    const updated = issuedChecks.map(c => c.id === chk.id ? { ...c, status: 'ENTREGADO' as const, deliveryDate: today } : c);
+    setIssuedChecks(updated);
+    showToast(`Cheque N° ${chk.checkNumber} marcado como ENTREGADO al proveedor.`, 'info');
+  };
+
+  const handleMarkCleared = (chk: IssuedCheck) => {
+    const today = new Date().toISOString().split('T')[0];
+    const updated = issuedChecks.map(c => c.id === chk.id ? { ...c, status: 'COBRADO' as const, clearedDate: today } : c);
+    setIssuedChecks(updated);
+    showToast(`Cheque N° ${chk.checkNumber} COBRADO y conciliado con el extracto bancario.`, 'success');
+  };
+
+  const handleCancelCheck = (chk: IssuedCheck) => {
+    showConfirm(
+      `¿Deseas anular el Cheque N° ${chk.checkNumber} por ${formatCurrency(chk.amount, settings.currencySymbol)}? Se generará el asiento contable de reversa.`,
+      () => {
+        const today = new Date().toISOString().split('T')[0];
+        const updated = issuedChecks.map(c => c.id === chk.id ? { ...c, status: 'ANULADO' as const } : c);
+        setIssuedChecks(updated);
+
+        // Reversing entry: Debe Banco / Haber Proveedores
+        const nextEntryNum = `AS-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`;
+        const isGuayaquil = (chk.bankName || '').toLowerCase().includes('guayaquil');
+        const bankAccountCode = isGuayaquil ? '1.1.01.02.02' : '1.1.01.02.01';
+
+        const revEntry: JournalEntry = {
+          id: `entry-rev-${Date.now()}`,
+          entryNumber: nextEntryNum,
+          date: today,
+          concept: `REVERSA: Anulación Cheque N° ${chk.checkNumber} (${chk.beneficiary})`,
+          type: 'AJUSTE',
+          items: [
+            {
+              accountCode: bankAccountCode,
+              accountName: `${chk.bankName} Cta Cte (Restitución Fondos)`,
+              debit: chk.amount,
+              credit: 0
+            },
+            {
+              accountCode: '2.1.01.01.01',
+              accountName: 'Cuentas por Pagar Proveedores Locales',
+              debit: 0,
+              credit: chk.amount
+            }
+          ],
+          totalDebit: chk.amount,
+          totalCredit: chk.amount,
+          status: 'ASENTADO'
+        };
+        setJournalEntries([revEntry, ...journalEntries]);
+        showToast(`Cheque N° ${chk.checkNumber} anulado y Asiento de reversa ${nextEntryNum} registrado.`, 'warning');
+      },
+      'Anular Cheque Girado',
+      'Sí, Anular Cheque',
+      'Cancelar'
+    );
   };
 
   const handleSaveJournalEntry = (e: React.FormEvent) => {
@@ -447,73 +675,237 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
           SUBTAB 2: CHEQUES_GIRADOS
          --------------------------------------------------------------------- */}
       {subTab === 'CHEQUES_GIRADOS' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+          {/* Header */}
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-rose-500" />
-                <span>Gestión y Registro de Cheques Girados</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Control de cheques emitidos a proveedores, fechas de cobranza y estado de cobro.
-              </p>
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-600">
+                  <Receipt className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">
+                    Gestión y Control de Cheques Girados
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Ciclo de vida corporativo: Emisión, Entrega a Proveedor, Cobro en Banco y Conciliación contable.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <button
-              onClick={() => setIsCheckModalOpen(true)}
+              onClick={() => {
+                const defaultBank = 'Banco Pichincha';
+                const nextCheck = getNextCorrelativeCheck(issuedChecks, defaultBank);
+                setNewCheck({
+                  checkNumber: nextCheck,
+                  bankName: defaultBank,
+                  paymentDate: new Date().toISOString().split('T')[0],
+                  beneficiary: '',
+                  amount: 0,
+                  concept: ''
+                });
+                setIsCheckModalOpen(true);
+              }}
               className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Registrar Cheque Girado</span>
+              <span>Emitir Cheque Girado</span>
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          {/* Top KPI Cards Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1">
+              <span className="text-slate-500 text-[10px] font-bold block uppercase tracking-wider">Total Cheques Girados</span>
+              <div className="text-2xl font-black text-slate-900 font-mono">
+                {formatCurrency(totalChequesAmount, settings.currencySymbol)}
+              </div>
+              <div className="text-xs text-slate-500 font-mono">
+                {issuedChecks.filter(c => c.status !== 'ANULADO').length} Documentos Activos
+              </div>
+            </div>
+
+            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-amber-800 text-[10px] font-bold uppercase tracking-wider">En Tránsito (Libros vs Banco)</span>
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              </div>
+              <div className="text-2xl font-black text-amber-700 font-mono">
+                {formatCurrency(totalEnTransito, settings.currencySymbol)}
+              </div>
+              <div className="text-xs text-amber-800 font-mono font-medium">
+                {chequesEnTransito.length} Cheques pendientes de cobro
+              </div>
+            </div>
+
+            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 space-y-1">
+              <span className="text-emerald-800 text-[10px] font-bold block uppercase tracking-wider">Cobrados / Conciliados</span>
+              <div className="text-2xl font-black text-emerald-700 font-mono">
+                {formatCurrency(totalCobrados, settings.currencySymbol)}
+              </div>
+              <div className="text-xs text-emerald-700 font-mono font-medium">
+                {chequesCobrados.length} Cheques debitados en extracto
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1">
+              <span className="text-slate-500 text-[10px] font-bold block uppercase tracking-wider">Cheques Anulados</span>
+              <div className="text-2xl font-black text-rose-600 font-mono">
+                {chequesAnulados.length} <span className="text-xs font-normal text-slate-400">Cheques</span>
+              </div>
+              <div className="text-xs text-slate-500 font-mono">
+                {formatCurrency(totalAnulados, settings.currencySymbol)} revertidos
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Status Filter Pills */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="Buscar por N° cheque, beneficiario, banco..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:bg-white transition"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+              {(
+                [
+                  { id: 'TODOS', label: 'Todos' },
+                  { id: 'EN_TRANSITO', label: `En Tránsito (${chequesEnTransito.length})` },
+                  { id: 'EMITIDO', label: `Emitidos (${chequesEmitidos.length})` },
+                  { id: 'ENTREGADO', label: `Entregados (${chequesEntregados.length})` },
+                  { id: 'COBRADO', label: `Cobrados (${chequesCobrados.length})` },
+                  { id: 'ANULADO', label: `Anulados (${chequesAnulados.length})` },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setCheckStatusFilter(tab.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition ${
+                    checkStatusFilter === tab.id
+                      ? 'bg-slate-950 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Cheques Girados Table with Interactive Lifecycle */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
             <table className="w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
                 <tr>
                   <th className="py-3 px-4">N° Cheque</th>
                   <th className="py-3 px-4">Banco Emisor</th>
-                  <th className="py-3 px-4">Fecha Emisión</th>
-                  <th className="py-3 px-4">Fecha Cobro</th>
-                  <th className="py-3 px-4">Beneficiario</th>
+                  <th className="py-3 px-4">Fechas</th>
+                  <th className="py-3 px-4">Beneficiario / Proveedor</th>
                   <th className="py-3 px-4">Concepto</th>
                   <th className="py-3 px-4 text-right">Monto</th>
-                  <th className="py-3 px-4 text-center">Estado</th>
+                  <th className="py-3 px-4 text-center">Estado Ciclo de Vida</th>
+                  <th className="py-3 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
-                {issuedChecks.length === 0 ? (
+                {filteredChecks.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400 font-sans text-xs">
-                      No hay cheques girados registrados.
+                    <td colSpan={8} className="py-10 text-center text-slate-400 font-sans text-xs">
+                      No se encontraron cheques girados con los filtros seleccionados.
                     </td>
                   </tr>
                 ) : (
-                  issuedChecks.map((chk) => (
-                    <tr key={chk.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-4 font-black text-slate-900">{chk.checkNumber}</td>
-                      <td className="py-3 px-4 text-slate-800 font-bold">{chk.bankName}</td>
-                      <td className="py-3 px-4 text-slate-500">{chk.issueDate}</td>
-                      <td className="py-3 px-4 text-slate-700 font-bold">{chk.paymentDate}</td>
-                      <td className="py-3 px-4 font-sans font-bold text-slate-800">{chk.beneficiary}</td>
-                      <td className="py-3 px-4 text-slate-600 font-sans truncate max-w-xs">{chk.concept}</td>
-                      <td className="py-3 px-4 text-right font-black text-rose-600 text-sm">
-                        {formatCurrency(chk.amount, settings.currencySymbol)}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
-                          chk.status === 'COBRADO'
-                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                            : chk.status === 'GIRADO'
-                            ? 'bg-amber-50 border-amber-200 text-amber-700'
-                            : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}>
-                          {chk.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                  filteredChecks.map((chk) => {
+                    const badge = getCheckStatusBadge(chk.status);
+                    const isInTransit = isCheckInTransit(chk.status);
+
+                    return (
+                      <tr key={chk.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-4 font-black text-slate-900 flex items-center gap-1.5">
+                          <Landmark className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{chk.checkNumber}</span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-800 font-bold">
+                          {chk.bankName}
+                        </td>
+                        <td className="py-3 px-4 text-slate-500 font-mono text-[10px]">
+                          <div><span className="text-slate-400">Emi:</span> {chk.issueDate}</div>
+                          {chk.deliveryDate && <div><span className="text-indigo-600 font-bold">Ent:</span> {chk.deliveryDate}</div>}
+                          {chk.clearedDate && <div><span className="text-emerald-600 font-bold">Cob:</span> {chk.clearedDate}</div>}
+                        </td>
+                        <td className="py-3 px-4 font-sans font-bold text-slate-900">
+                          {chk.beneficiary}
+                          {chk.invoiceNumber && (
+                            <span className="block text-[10px] font-mono text-orange-600 font-normal">
+                              Factura: {chk.invoiceNumber}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-sans truncate max-w-xs" title={chk.concept}>
+                          {chk.concept}
+                        </td>
+                        <td className="py-3 px-4 text-right font-black text-rose-600 text-sm">
+                          {formatCurrency(chk.amount, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[9px] font-black border uppercase tracking-wider block text-center ${badge.className}`}
+                            title={badge.description}
+                          >
+                            {badge.label}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1 font-sans">
+                            {/* Entregar si está en estado EMITIDO / GIRADO */}
+                            {(chk.status === 'EMITIDO' || chk.status === 'GIRADO') && (
+                              <button
+                                onClick={() => handleMarkDelivered(chk)}
+                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-bold border border-indigo-200 transition cursor-pointer"
+                                title="Marcar como entregado físicamente al proveedor"
+                              >
+                                Entregar
+                              </button>
+                            )}
+
+                            {/* Cobrar / Conciliar en banco */}
+                            {chk.status !== 'COBRADO' && chk.status !== 'ANULADO' && (
+                              <button
+                                onClick={() => handleMarkCleared(chk)}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold border border-emerald-200 transition cursor-pointer"
+                                title="Marcar como cobrado en extracto bancario (Conciliado)"
+                              >
+                                Cobrado
+                              </button>
+                            )}
+
+                            {/* Anular si no está anulado */}
+                            {chk.status !== 'ANULADO' && (
+                              <button
+                                onClick={() => handleCancelCheck(chk)}
+                                className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] font-bold border border-rose-200 transition cursor-pointer"
+                                title="Anular cheque y generar asiento contable de reversa"
+                              >
+                                Anular
+                              </button>
+                            )}
+
+                            {chk.status === 'ANULADO' && (
+                              <span className="text-[10px] text-slate-400 font-mono">Sin acción</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -624,23 +1016,90 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                 </div>
                 <div className="flex justify-between py-1 text-rose-600">
                   <span>(-) Cheques girados en tránsito:</span>
-                  <span className="font-bold">-{formatCurrency(issuedChecks.filter(c => c.status === 'GIRADO').reduce((sum, c) => sum + c.amount, 0), settings.currencySymbol)}</span>
+                  <span className="font-bold">-{formatCurrency(totalEnTransito, settings.currencySymbol)}</span>
                 </div>
               </div>
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-              <h3 className="font-black text-slate-900 uppercase text-xs">Estado de Cuenta Banco</h3>
+              <h3 className="font-black text-slate-900 uppercase text-xs">Estado de Cuenta Banco (Extracto)</h3>
               <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200">
                 <div className="flex justify-between py-1 border-b">
                   <span>Saldo según Banco:</span>
                   <span className="font-black text-slate-900">{formatCurrency(bankAccounts.reduce((sum: number, b: any) => sum + (b.balance || 0), 0), settings.currencySymbol)}</span>
                 </div>
                 <div className="flex justify-between py-1 text-emerald-600 font-black">
-                  <span>Diferencia por Conciliar:</span>
-                  <span>{formatCurrency(0.00, settings.currencySymbol)}</span>
+                  <span>Saldo Conciliado Disponible:</span>
+                  <span>{formatCurrency(Math.max(0, bankAccounts.reduce((sum: number, b: any) => sum + (b.balance || 0), 0) - totalEnTransito), settings.currencySymbol)}</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Listado de Cheques en Tránsito para Conciliar */}
+          <div className="space-y-3 pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-amber-600" />
+                <span>Partidas Conciliatorias: Cheques Girados en Tránsito ({chequesEnTransito.length})</span>
+              </h3>
+              <span className="text-xs font-mono font-bold text-rose-600">
+                Total en Tránsito: -{formatCurrency(totalEnTransito, settings.currencySymbol)}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700 font-mono">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-2.5 px-3">N° Cheque</th>
+                    <th className="py-2.5 px-3">Banco</th>
+                    <th className="py-2.5 px-3">Fecha Emisión</th>
+                    <th className="py-2.5 px-3">Beneficiario</th>
+                    <th className="py-2.5 px-3">Concepto</th>
+                    <th className="py-2.5 px-3 text-right">Monto</th>
+                    <th className="py-2.5 px-3 text-center">Estado</th>
+                    <th className="py-2.5 px-3 text-center">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {chequesEnTransito.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-6 text-center text-slate-400 font-sans italic">
+                        ¡Conciliación al día! No hay cheques girados pendientes de cobro en tránsito.
+                      </td>
+                    </tr>
+                  ) : (
+                    chequesEnTransito.map(chk => (
+                      <tr key={chk.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{chk.checkNumber}</td>
+                        <td className="py-2.5 px-3 text-slate-700">{chk.bankName}</td>
+                        <td className="py-2.5 px-3 text-slate-500">{chk.issueDate}</td>
+                        <td className="py-2.5 px-3 font-sans font-bold text-slate-800">{chk.beneficiary}</td>
+                        <td className="py-2.5 px-3 text-slate-600 font-sans truncate max-w-xs">{chk.concept}</td>
+                        <td className="py-2.5 px-3 text-right font-black text-rose-600">
+                          {formatCurrency(chk.amount, settings.currencySymbol)}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className="px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 border border-amber-200 text-amber-800">
+                            {chk.status === 'ENTREGADO' ? 'ENTREGADO' : 'EMITIDO'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <button
+                            onClick={() => handleMarkCleared(chk)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 mx-auto cursor-pointer shadow-sm transition"
+                            title="Marcar como debitado del extracto bancario y conciliar"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Conciliar en Banco</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -1050,38 +1509,419 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
           SUBTAB 12: ATS (Anexo Transaccional Simplificado SRI)
          --------------------------------------------------------------------- */}
       {subTab === 'ATS' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-5">
             <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <ClipboardCheck className="w-5 h-5 text-lime-500" />
-                <span>Anexo Transaccional Simplificado (ATS - SRI)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Generación y validación del archivo XML para presentación mensual al Servicio de Rentas Internas.
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-lime-50 border border-lime-200 rounded-xl text-lime-700">
+                  <ClipboardCheck className="w-5 h-5 text-lime-600" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">
+                    Anexo Transaccional Simplificado (ATS - SRI)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Generación y validación del archivo XML mensual conforme a la ficha técnica oficial del SRI Ecuador.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+              <button
+                onClick={() => handleGenerateAts(true)}
+                disabled={isGeneratingAts}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title="Inspeccionar el código XML antes de descargar"
+              >
+                <Eye className="w-4 h-4 text-slate-600" />
+                <span>Ver XML</span>
+              </button>
+
+              <button
+                onClick={() => handleGenerateAts(false)}
+                disabled={isGeneratingAts}
+                className="px-5 py-2.5 bg-slate-950 hover:bg-slate-900 active:scale-[0.98] text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isGeneratingAts ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-lime-400 animate-spin" />
+                    <span>Generando XML...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 text-lime-400" />
+                    <span>Generar y Descargar XML ATS SRI</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Period Selector & Contribuyente Info */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-black text-slate-600 uppercase tracking-wider">Período Fiscal:</span>
+              
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 font-bold">Mes:</label>
+                <select
+                  value={atsMonth}
+                  onChange={(e) => setAtsMonth(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-lime-500 cursor-pointer shadow-sm"
+                >
+                  <option value="01">01 - Enero</option>
+                  <option value="02">02 - Febrero</option>
+                  <option value="03">03 - Marzo</option>
+                  <option value="04">04 - Abril</option>
+                  <option value="05">05 - Mayo</option>
+                  <option value="06">06 - Junio</option>
+                  <option value="07">07 - Julio</option>
+                  <option value="08">08 - Agosto</option>
+                  <option value="09">09 - Septiembre</option>
+                  <option value="10">10 - Octubre</option>
+                  <option value="11">11 - Noviembre</option>
+                  <option value="12">12 - Diciembre</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 font-bold">Año:</label>
+                <select
+                  value={atsYear}
+                  onChange={(e) => setAtsYear(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-lime-500 cursor-pointer shadow-sm"
+                >
+                  <option value="2024">2024</option>
+                  <option value="2025">2025</option>
+                  <option value="2026">2026</option>
+                  <option value="2027">2027</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-slate-600">
+              <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                <strong className="text-slate-900">RUC:</strong> {settings.taxId || (settings as any).ruc || '1790012345001'}
+              </span>
+              <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                <strong className="text-slate-900">Razón Social:</strong> {settings.legalName || settings.storeName || 'FERRETERÍA CENTRAL'}
+              </span>
+              <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-lime-700 font-bold">
+                Estab: 001
+              </span>
+            </div>
+          </div>
+
+          {/* KPI Stats Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1">
+              <span className="text-slate-500 text-[10px] font-bold block uppercase tracking-wider">Ventas Locales del Mes</span>
+              <div className="text-xl font-black text-slate-900 font-mono">{atsVentasValidas.length} <span className="text-xs font-normal text-slate-500">Facturas</span></div>
+              <div className="text-xs font-mono text-slate-600 flex justify-between">
+                <span>Total:</span>
+                <span className="font-bold text-slate-900">{formatCurrency(totalVentasAts, settings.currencySymbol)}</span>
+              </div>
+              <div className="text-[11px] font-mono text-slate-500 flex justify-between">
+                <span>IVA 15%:</span>
+                <span className="font-bold text-emerald-600">{formatCurrency(totalIvaVentasAts, settings.currencySymbol)}</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1">
+              <span className="text-slate-500 text-[10px] font-bold block uppercase tracking-wider">Compras Sustento Tributario</span>
+              <div className="text-xl font-black text-slate-900 font-mono">{atsComprasPeriodo.length} <span className="text-xs font-normal text-slate-500">Comprobantes</span></div>
+              <div className="text-xs font-mono text-slate-600 flex justify-between">
+                <span>Total:</span>
+                <span className="font-bold text-slate-900">{formatCurrency(totalComprasAts, settings.currencySymbol)}</span>
+              </div>
+              <div className="text-[11px] font-mono text-slate-500 flex justify-between">
+                <span>IVA Compras:</span>
+                <span className="font-bold text-blue-600">{formatCurrency(totalIvaComprasAts, settings.currencySymbol)}</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1">
+              <span className="text-slate-500 text-[10px] font-bold block uppercase tracking-wider">Comprobantes Anulados</span>
+              <div className="text-xl font-black text-amber-600 font-mono">{atsAnuladas.length} <span className="text-xs font-normal text-slate-500">Documentos</span></div>
+              <p className="text-[11px] text-slate-500 pt-2">
+                Secuenciales dados de baja reportados con código 01 al SRI.
               </p>
             </div>
 
-            <button className="px-4 py-2.5 bg-slate-950 hover:bg-slate-900 text-white font-black text-xs rounded-xl shadow transition flex items-center gap-2 cursor-pointer">
-              <Download className="w-4 h-4 text-lime-400" />
-              <span>Generar XML ATS SRI</span>
-            </button>
+            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 space-y-1">
+              <span className="text-emerald-800 text-[10px] font-bold block uppercase tracking-wider">Saldo Estimado de IVA</span>
+              <div className="text-xl font-black text-emerald-700 font-mono">
+                {formatCurrency(totalIvaVentasAts - totalIvaComprasAts, settings.currencySymbol)}
+              </div>
+              <div className="text-[11px] font-mono text-emerald-700 flex justify-between pt-2">
+                <span>Estado:</span>
+                <span className="font-bold">{(totalIvaVentasAts - totalIvaComprasAts) >= 0 ? 'IVA a Pagar' : 'Crédito Tributario'}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <span className="text-slate-500 text-[10px] font-bold block uppercase">Ventas Locales Registradas</span>
-              <span className="text-lg font-black text-slate-900">{invoices.filter((i: any) => i.paymentStatus !== 'ANULADA' && i.documentType !== 'COTIZACION').length} Transacciones</span>
+          {/* Interactive Details Section */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setAtsActiveDetailTab('VENTAS')}
+                  className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 cursor-pointer ${
+                    atsActiveDetailTab === 'VENTAS'
+                      ? 'border-slate-950 text-slate-950 font-black'
+                      : 'border-transparent text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  Detalle de Ventas ({atsVentasValidas.length})
+                </button>
+                <button
+                  onClick={() => setAtsActiveDetailTab('COMPRAS')}
+                  className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 cursor-pointer ${
+                    atsActiveDetailTab === 'COMPRAS'
+                      ? 'border-slate-950 text-slate-950 font-black'
+                      : 'border-transparent text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  Detalle de Compras ({atsComprasPeriodo.length})
+                </button>
+                <button
+                  onClick={() => setAtsActiveDetailTab('ANULADOS')}
+                  className={`pb-2.5 px-3 text-xs font-bold transition border-b-2 cursor-pointer ${
+                    atsActiveDetailTab === 'ANULADOS'
+                      ? 'border-slate-950 text-slate-950 font-black'
+                      : 'border-transparent text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  Comprobantes Anulados ({atsAnuladas.length})
+                </button>
+              </div>
+
+              <span className="text-[11px] text-slate-500 font-mono hidden md:inline">
+                Periodo: {atsMonth}/{atsYear}
+              </span>
             </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <span className="text-slate-500 text-[10px] font-bold block uppercase">Compras con Sustento Tributario</span>
-              <span className="text-lg font-black text-slate-900">{purchases.length} Comprobantes</span>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <span className="text-slate-500 text-[10px] font-bold block uppercase">Comprobantes Anulados</span>
-              <span className="text-lg font-black text-amber-600">{invoices.filter((i: any) => i.paymentStatus === 'ANULADA').length} Documentos</span>
-            </div>
+
+            {/* TAB CONTENT: VENTAS */}
+            {atsActiveDetailTab === 'VENTAS' && (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3">Fecha</th>
+                      <th className="py-2.5 px-3">Comprobante</th>
+                      <th className="py-2.5 px-3">Cliente</th>
+                      <th className="py-2.5 px-3">Identificación</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-right">IVA</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
+                      <th className="py-2.5 px-3 text-center">F. Pago</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {atsVentasValidas.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="py-8 text-center text-slate-400 italic">
+                          No se registran ventas para el período seleccionado ({atsMonth}/{atsYear}).
+                        </td>
+                      </tr>
+                    ) : (
+                      atsVentasValidas.map((inv: any) => (
+                        <tr key={inv.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-2.5 px-3 whitespace-nowrap text-slate-500">
+                            {new Date(inv.createdAt).toLocaleDateString('es-EC')}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            {inv.fullNumber || `${inv.series || '001-001'}-${String(inv.number || 1).padStart(9, '0')}`}
+                          </td>
+                          <td className="py-2.5 px-3 max-w-[180px] truncate text-slate-800" title={inv.customer?.name}>
+                            {inv.customer?.name || 'CONSUMIDOR FINAL'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {inv.customer?.docNumber || '9999999999999'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {formatCurrency(inv.subtotal || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-emerald-600 font-bold">
+                            {formatCurrency(inv.taxTotal || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-slate-950">
+                            {formatCurrency(inv.total || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="px-2 py-0.5 bg-slate-100 rounded text-[10px] text-slate-600 font-bold">
+                              {inv.paymentMethod || 'EFECTIVO'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* TAB CONTENT: COMPRAS */}
+            {atsActiveDetailTab === 'COMPRAS' && (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3">Fecha</th>
+                      <th className="py-2.5 px-3">N° Factura Proveedor</th>
+                      <th className="py-2.5 px-3">Proveedor</th>
+                      <th className="py-2.5 px-3">RUC Proveedor</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-right">IVA</th>
+                      <th className="py-2.5 px-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {atsComprasPeriodo.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400 italic">
+                          No se registran compras para el período seleccionado ({atsMonth}/{atsYear}).
+                        </td>
+                      </tr>
+                    ) : (
+                      atsComprasPeriodo.map((pur: any) => (
+                        <tr key={pur.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-2.5 px-3 whitespace-nowrap text-slate-500">
+                            {pur.purchaseDate || new Date(pur.createdAt || Date.now()).toLocaleDateString('es-EC')}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            {pur.invoiceNumber || 'S/N'}
+                          </td>
+                          <td className="py-2.5 px-3 max-w-[180px] truncate text-slate-800">
+                            {pur.supplier?.name || pur.supplier?.contactPerson || 'Proveedor General'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {pur.supplier?.taxId || '9999999999999'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-slate-700">
+                            {formatCurrency(pur.subtotal || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-blue-600 font-bold">
+                            {formatCurrency(pur.taxTotal || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-slate-950">
+                            {formatCurrency(pur.total || 0, settings.currencySymbol)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* TAB CONTENT: ANULADOS */}
+            {atsActiveDetailTab === 'ANULADOS' && (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3">Fecha Anulación</th>
+                      <th className="py-2.5 px-3">N° Secuencial Anulado</th>
+                      <th className="py-2.5 px-3">Tipo Comprobante</th>
+                      <th className="py-2.5 px-3">Cliente</th>
+                      <th className="py-2.5 px-3">Autorización / Clave Acceso</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {atsAnuladas.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-400 italic">
+                          No hay comprobantes anulados en este período fiscal.
+                        </td>
+                      </tr>
+                    ) : (
+                      atsAnuladas.map((anul: any) => (
+                        <tr key={anul.id} className="hover:bg-amber-50/50 transition">
+                          <td className="py-2.5 px-3 whitespace-nowrap text-slate-500">
+                            {new Date(anul.createdAt).toLocaleDateString('es-EC')}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-amber-700">
+                            {anul.fullNumber || `${anul.series || '001-001'}-${String(anul.number || 1).padStart(9, '0')}`}
+                          </td>
+                          <td className="py-2.5 px-3">01 (Factura)</td>
+                          <td className="py-2.5 px-3 text-slate-600">{anul.customer?.name || 'CONSUMIDOR FINAL'}</td>
+                          <td className="py-2.5 px-3 text-slate-500 text-[11px] truncate max-w-[260px]">
+                            {anul.sriClaveAcceso || anul.sriNumeroAutorizacion || 'Sin clave SRI'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
+
+          {/* Modal Previa del XML */}
+          {atsPreviewXml && (
+            <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                  <div className="flex items-center gap-2">
+                    <FileCode className="w-5 h-5 text-lime-600" />
+                    <div>
+                      <h3 className="font-black text-sm text-slate-900">
+                        Estructura XML ATS Generada
+                      </h3>
+                      <p className="text-[11px] font-mono text-slate-500">
+                        ATS_{settings.taxId || '1790012345001'}_{atsMonth}_{atsYear}.xml
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyXml}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    >
+                      {xmlCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                      <span>{xmlCopied ? '¡Copiado!' : 'Copiar'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        downloadXML(atsPreviewXml, `ATS_${settings.taxId || '1790012345001'}_${atsMonth}_${atsYear}.xml`);
+                        showToast('Archivo XML descargado exitosamente.', 'success');
+                      }}
+                      className="px-3.5 py-1.5 bg-slate-950 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    >
+                      <Download className="w-3.5 h-3.5 text-lime-400" />
+                      <span>Descargar</span>
+                    </button>
+
+                    <button
+                      onClick={() => setAtsPreviewXml(null)}
+                      className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-700 rounded-xl transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-4 overflow-auto bg-slate-950 text-lime-300 font-mono text-xs leading-relaxed flex-1">
+                  <pre className="whitespace-pre-wrap select-all">{atsPreviewXml}</pre>
+                </div>
+
+                <div className="p-3 bg-slate-100 border-t border-slate-200 text-[11px] text-slate-600 flex items-center justify-between">
+                  <span>Cumple con especificación técnica de Anexo Transaccional Simplificado SRI Ecuador.</span>
+                  <button
+                    onClick={() => setAtsPreviewXml(null)}
+                    className="px-3 py-1 bg-white border border-slate-300 text-slate-700 rounded-lg font-bold hover:bg-slate-50 cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1339,28 +2179,41 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
 
             <form onSubmit={handleSaveIssuedCheck} className="space-y-3 text-xs">
               <div>
-                <label className="block font-black text-slate-800 mb-1">N° de Cheque *</label>
+                <label className="block font-black text-slate-800 mb-1">Banco Emisor *</label>
+                <Select
+                  value={newCheck.bankName}
+                  onChange={(e) => {
+                    const newBank = e.target.value;
+                    const nextCheckNum = getNextCorrelativeCheck(issuedChecks, newBank);
+                    setNewCheck({
+                      ...newCheck,
+                      bankName: newBank,
+                      checkNumber: nextCheckNum
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                >
+                  <option value="Banco Pichincha">Banco Pichincha (Cta Cte #2100876543)</option>
+                  <option value="Banco Guayaquil">Banco Guayaquil (Cta Cte #0012876451)</option>
+                  <option value="Produbanco">Produbanco (Cta Cte #1009845120)</option>
+                </Select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-black text-slate-800">N° de Cheque (Correlativo) *</label>
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                    Siguiente automático
+                  </span>
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="0004524"
+                  placeholder="000101"
                   value={newCheck.checkNumber}
                   onChange={(e) => setNewCheck({ ...newCheck, checkNumber: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
                 />
-              </div>
-
-              <div>
-                <label className="block font-black text-slate-800 mb-1">Banco Emisor *</label>
-                <Select
-                  value={newCheck.bankName}
-                  onChange={(e) => setNewCheck({ ...newCheck, bankName: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                >
-                  <option value="Banco Pichincha">Banco Pichincha</option>
-                  <option value="Banco Guayaquil">Banco Guayaquil</option>
-                  <option value="Produbanco">Produbanco</option>
-                </Select>
               </div>
 
               <div>

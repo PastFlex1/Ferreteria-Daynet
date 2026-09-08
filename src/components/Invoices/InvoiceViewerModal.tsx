@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   Send,
   Sparkles,
-  Key
+  Key,
+  AlertCircle
 } from 'lucide-react';
 import { Invoice, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate, getDocumentTypeName, getPaymentMethodLabel } from '../../utils/formatters';
@@ -20,10 +21,12 @@ import { SriTotalsTable } from '../POS/SriTotalsTable';
 import { calculateSriTotals } from '../../utils/sriCalculations';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { downloadXML, convertERPInvoiceToSRI, generateInvoiceXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
+import { SriBackendService } from '../../services/sriBackendService';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
+import QRCode from 'qrcode';
 
 interface InvoiceViewerModalProps {
   isOpen: boolean;
@@ -46,11 +49,13 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(invoice);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isAnulando, setIsAnulando] = useState(false);
 
   const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
   const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
   const barcodeRef = React.useRef<SVGSVGElement | null>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
   React.useEffect(() => {
     setCurrentInvoice(invoice);
@@ -123,6 +128,28 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     }
   }, [claveAccesoCalculada, currentInvoice, ticketFormat, isOpen]);
 
+  React.useEffect(() => {
+    if (claveAccesoCalculada && claveAccesoCalculada.length === 49 && isOpen) {
+      QRCode.toDataURL(claveAccesoCalculada, {
+        width: 160,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      })
+        .then((url) => {
+          setQrCodeDataUrl(url);
+        })
+        .catch((err) => {
+          console.error('Error generating SRI QR code:', err);
+        });
+    } else {
+      setQrCodeDataUrl('');
+    }
+  }, [claveAccesoCalculada, isOpen]);
+
   if (!isOpen || !currentInvoice) return null;
 
   const activeInvoice = currentInvoice;
@@ -177,6 +204,35 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     }
   };
 
+  const handleAnular = async () => {
+    if (!claveAccesoCalculada) {
+      alert("No se pudo determinar la clave de acceso para anular.");
+      return;
+    }
+    const confirmacion = window.confirm(`¿Está seguro que desea anular la factura SRI ${activeInvoice.fullNumber}? Esta acción no se puede deshacer.`);
+    if (!confirmacion) return;
+
+    setIsAnulando(true);
+    try {
+      const res = await SriBackendService.anularFactura(claveAccesoCalculada, activeInvoice.customer?.email);
+      if (res.success) {
+        alert(res.mensaje || "Factura anulada exitosamente en el SRI.");
+        if (onUpdateInvoice) {
+          onUpdateInvoice({
+            ...activeInvoice,
+            sriStatus: 'ANULADO' as any,
+          });
+        }
+      } else {
+        alert("Error al anular: " + res.error);
+      }
+    } catch (error: any) {
+      alert("Error inesperado: " + error.message);
+    } finally {
+      setIsAnulando(false);
+    }
+  };
+
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fadeIn">
@@ -196,10 +252,18 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 inline-flex items-center gap-1 ${
                       activeInvoice.sriStatus === 'AUTORIZADO'
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        : 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
+                        : activeInvoice.sriStatus === 'DEVUELTA'
+                          ? 'bg-red-500/20 text-red-300 border-red-500/30 animate-pulse'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
                     }`}>
                       <ShieldCheck className="w-3 h-3" />
-                      <span>{activeInvoice.sriStatus === 'AUTORIZADO' ? 'SRI AUTORIZADO' : 'SRI PENDIENTE'}</span>
+                      <span>
+                        {activeInvoice.sriStatus === 'AUTORIZADO' 
+                          ? 'SRI AUTORIZADO' 
+                          : activeInvoice.sriStatus === 'DEVUELTA' 
+                            ? 'SRI DEVUELTA' 
+                            : 'SRI PENDIENTE'}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -254,6 +318,20 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   Ticket 80mm
                 </button>
               </div>
+
+              {/* Botón para Anular Factura SRI */}
+              {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion) && (
+                <button
+                  type="button"
+                  onClick={handleAnular}
+                  disabled={isAnulando}
+                  className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-50"
+                  title="Anular comprobante electrónico en el SRI"
+                >
+                  <X className="w-3.5 h-3.5 text-red-400" />
+                  <span>{isAnulando ? 'Anulando...' : 'Anular SRI'}</span>
+                </button>
+              )}
 
               {/* Descargar XML Autorizado */}
               {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion || !!activeInvoice.sriXmlFirmado) && (
@@ -315,6 +393,30 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
         {/* Printable Area Container */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 custom-scrollbar bg-slate-100/80">
+          {activeInvoice.sriStatus === 'DEVUELTA' && (
+            <div className="max-w-4xl mx-auto mb-5 bg-red-50 border border-red-200 rounded-2xl p-4 shadow-xs flex items-start gap-3.5">
+              <div className="p-2 bg-red-100 text-red-700 rounded-xl shrink-0">
+                <AlertCircle className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div className="text-xs space-y-1 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-red-950 uppercase tracking-wide">
+                    Comprobante Devuelto por el SRI (Inconsistencia en el Documento)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-red-200 text-red-900">
+                    DEVUELTA
+                  </span>
+                </div>
+                <div className="font-mono text-red-900 bg-white/90 p-2.5 rounded-xl border border-red-200 font-bold text-[11px] leading-relaxed">
+                  {activeInvoice.sriMensaje || 'El SRI devolvió el comprobante para su subsanación y corrección de datos.'}
+                </div>
+                <p className="text-red-700 font-medium text-[11px] mt-1">
+                  Nota: Puedes corregir este comprobante en la sección <strong className="text-red-950">Ventas &gt; Devueltas (SRI)</strong> o pulsar "Transmitir SRI" para reintentar la emisión.
+                </p>
+              </div>
+            </div>
+          )}
+
           {ticketFormat === 'A4' ? (
             /* Official SRI Ecuador RIDE Layout */
             <div id="printable-invoice" className="bg-white text-black p-4 sm:p-6 mx-auto max-w-4xl font-sans text-xs">
@@ -733,6 +835,39 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   </>
                 )}
               </div>
+
+              {/* ── CÓDIGO QR AUTORIZADO POR EL SRI (49 DÍGITOS) ────────────────── */}
+              {activeInvoice.documentType !== 'COTIZACION' && (
+                <div className="py-3 border-b border-dashed border-slate-400 flex flex-col items-center justify-center text-center space-y-1.5">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-800">
+                    AUTORIZACIÓN SRI - COMPROBANTE ELECTRÓNICO
+                  </span>
+                  {qrCodeDataUrl ? (
+                    <div className="p-1.5 bg-white border border-slate-300 rounded-lg inline-block shadow-2xs">
+                      <img
+                        src={qrCodeDataUrl}
+                        alt="Código QR SRI - 49 Dígitos"
+                        className="w-28 h-28 object-contain mx-auto"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-28 h-28 bg-slate-50 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[9px] text-slate-400">
+                      Generando QR...
+                    </div>
+                  )}
+                  <div className="space-y-0.5 max-w-[260px] px-1">
+                    <span className="text-[8px] font-bold text-slate-500 uppercase block">
+                      Clave de Acceso (49 Dígitos):
+                    </span>
+                    <p className="text-[8.5px] font-mono font-bold tracking-tight text-slate-900 break-all leading-tight select-all">
+                      {claveAccesoCalculada}
+                    </p>
+                  </div>
+                  <span className="text-[7.5px] text-slate-500 block">
+                    Escanee el código QR para validar su comprobante en sri.gob.ec
+                  </span>
+                </div>
+              )}
 
               <div className="pt-3 text-center text-[10px] space-y-1">
                 <p className="font-bold">{settings.footerNotes}</p>

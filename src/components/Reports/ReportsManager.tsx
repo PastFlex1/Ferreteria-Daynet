@@ -6,6 +6,8 @@ import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { CustomSelect } from '../CustomSelect';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { formatCurrency } from '../../utils/formatters';
+import { generateAtsXml } from '../../services/sriAtsService';
+import { downloadXML } from '../../services/sriXmlService';
 import { 
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
   Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
@@ -45,8 +47,12 @@ import {
   Sparkles,
   Layers,
   Store,
-  X
+  X,
+  UserCheck,
+  Eye,
+  ArrowLeftRight
 } from 'lucide-react';
+import { defaultEmployees, defaultUsersList } from '../../data/initialData';
 
 interface ReportsManagerProps {
   subTab: ReportsSubTab;
@@ -104,11 +110,21 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
   const [sellers] = useFirestoreSync<any[]>('ferreteria_sellers', []);
   const [sellerGoals] = useFirestoreSync<any[]>('ferreteria_seller_goals', []);
-  const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', []);
+  const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
+  const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [payrollRoles] = useFirestoreSync<any[]>('ferreteria_hr_payroll_roles', []);
   const [cashSession] = useFirestoreSync<any>('ferreteria_cash_session', null);
+  const [cashSessionsHistory] = useFirestoreSync<any[]>('ferreteria_cash_sessions_history', []);
   const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
   const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
+
+  // Caja / Arqueo specific states
+  const [cajaWorkerFilter, setCajaWorkerFilter] = useState<string>('TODOS');
+  const [cajaPaymentFilter, setCajaPaymentFilter] = useState<string>('TODOS');
+  const [cajaActiveTab, setCajaActiveTab] = useState<'TRABAJADORES' | 'COMPROBANTES' | 'HISTORIAL'>('TRABAJADORES');
+  const [cajaSearchTerm, setCajaSearchTerm] = useState<string>('');
+  const [selectedWorkerVouchersModal, setSelectedWorkerVouchersModal] = useState<any | null>(null);
+  const [printingWorkerArqueo, setPrintingWorkerArqueo] = useState<any | null>(null);
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -366,6 +382,127 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   }, [filteredProducts]);
 
   // ---------------------------------------------------------------------------
+  // CAJA & ARQUEO POR TRABAJADOR CALCULATIONS
+  // ---------------------------------------------------------------------------
+  const workersCajaSummary = useMemo(() => {
+    const map: Record<string, {
+      name: string;
+      role: string;
+      code: string;
+      invoicesCount: number;
+      cash: number;
+      card: number;
+      transfer: number;
+      credit: number;
+      subtotal: number;
+      taxTotal: number;
+      total: number;
+      invoices: Invoice[];
+    }> = {};
+
+    // Initial pool of workers from HR employees & Users
+    const staffPool: { name: string; role: string; code: string }[] = [];
+    (employees || defaultEmployees || []).forEach((emp: any) => {
+      if (emp.fullName) staffPool.push({ name: emp.fullName, role: emp.positionName || 'Ventas', code: emp.code || 'EMP' });
+    });
+    (usersList || defaultUsersList || []).forEach((u: any) => {
+      if (u.name && !staffPool.some(s => s.name.toLowerCase() === u.name.toLowerCase())) {
+        staffPool.push({ name: u.name, role: u.role || 'Usuario', code: u.username || 'USR' });
+      }
+    });
+
+    staffPool.forEach(staff => {
+      map[staff.name.toLowerCase().trim()] = {
+        name: staff.name,
+        role: staff.role,
+        code: staff.code,
+        invoicesCount: 0,
+        cash: 0,
+        card: 0,
+        transfer: 0,
+        credit: 0,
+        subtotal: 0,
+        taxTotal: 0,
+        total: 0,
+        invoices: []
+      };
+    });
+
+    // Aggregate from filteredInvoices within the selected period (startDate, endDate)
+    filteredInvoices.forEach(inv => {
+      const seller = (inv.sellerName || 'Caja General').trim();
+      const key = seller.toLowerCase();
+      if (!map[key]) {
+        map[key] = {
+          name: seller,
+          role: 'Cajero / Asesor',
+          code: 'POS',
+          invoicesCount: 0,
+          cash: 0,
+          card: 0,
+          transfer: 0,
+          credit: 0,
+          subtotal: 0,
+          taxTotal: 0,
+          total: 0,
+          invoices: []
+        };
+      }
+      map[key].invoicesCount += 1;
+      map[key].subtotal += (inv.subtotal || 0);
+      map[key].taxTotal += (inv.taxTotal || 0);
+      map[key].total += (inv.total || 0);
+      map[key].invoices.push(inv);
+
+      const pm = inv.paymentMethod;
+      if (pm === 'EFECTIVO' && inv.paymentStatus === 'PAGADA') {
+        map[key].cash += (inv.total || 0);
+      } else if ((pm === 'TARJETA_DEBITO' || pm === 'TARJETA_CREDITO') && inv.paymentStatus === 'PAGADA') {
+        map[key].card += (inv.total || 0);
+      } else if (pm === 'TRANSFERENCIA' && inv.paymentStatus === 'PAGADA') {
+        map[key].transfer += (inv.total || 0);
+      } else if (pm === 'CREDITO_CLIENTE') {
+        map[key].credit += (inv.total || 0);
+      }
+    });
+
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [employees, usersList, filteredInvoices]);
+
+  // Filtered emitted invoices for Arqueo view
+  const cajaFilteredInvoices = useMemo(() => {
+    return filteredInvoices.filter((inv) => {
+      if (cajaWorkerFilter !== 'TODOS') {
+        const sName = (inv.sellerName || 'Caja General').toLowerCase().trim();
+        if (sName !== cajaWorkerFilter.toLowerCase().trim()) return false;
+      }
+      if (cajaPaymentFilter !== 'TODOS') {
+        const pm = inv.paymentMethod || 'EFECTIVO';
+        if (cajaPaymentFilter === 'EFECTIVO' && pm !== 'EFECTIVO') return false;
+        if (cajaPaymentFilter === 'TARJETA' && !pm.includes('TARJETA')) return false;
+        if (cajaPaymentFilter === 'TRANSFERENCIA' && !pm.includes('TRANSFERENCIA')) return false;
+        if (cajaPaymentFilter === 'CREDITO' && !pm.includes('CREDITO')) return false;
+      }
+      if (cajaSearchTerm) {
+        const q = cajaSearchTerm.toLowerCase();
+        const num = String(inv.fullNumber || inv.number || '').toLowerCase();
+        const client = (inv.customer?.name || '').toLowerCase();
+        const ruc = (inv.customer?.docNumber || '').toLowerCase();
+        const seller = (inv.sellerName || '').toLowerCase();
+        return num.includes(q) || client.includes(q) || ruc.includes(q) || seller.includes(q);
+      }
+      return true;
+    });
+  }, [filteredInvoices, cajaWorkerFilter, cajaPaymentFilter, cajaSearchTerm]);
+
+  // Aggregated totals for the active Arqueo filters
+  const cajaTotalCash = useMemo(() => cajaFilteredInvoices.filter(i => i.paymentMethod === 'EFECTIVO' && i.paymentStatus === 'PAGADA').reduce((s, i) => s + (i.total || 0), 0), [cajaFilteredInvoices]);
+  const cajaTotalCard = useMemo(() => cajaFilteredInvoices.filter(i => (i.paymentMethod === 'TARJETA_DEBITO' || i.paymentMethod === 'TARJETA_CREDITO') && i.paymentStatus === 'PAGADA').reduce((s, i) => s + (i.total || 0), 0), [cajaFilteredInvoices]);
+  const cajaTotalTransfer = useMemo(() => cajaFilteredInvoices.filter(i => i.paymentMethod === 'TRANSFERENCIA' && i.paymentStatus === 'PAGADA').reduce((s, i) => s + (i.total || 0), 0), [cajaFilteredInvoices]);
+  const cajaTotalCredit = useMemo(() => cajaFilteredInvoices.filter(i => i.paymentMethod === 'CREDITO_CLIENTE').reduce((s, i) => s + (i.total || 0), 0), [cajaFilteredInvoices]);
+  const cajaGrandTotal = useMemo(() => cajaFilteredInvoices.reduce((s, i) => s + (i.total || 0), 0), [cajaFilteredInvoices]);
+
+  // ---------------------------------------------------------------------------
   // EXPORT EXCEL HANDLER
   // ---------------------------------------------------------------------------
   const handleExportExcel = () => {
@@ -445,6 +582,38 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
           price: p.price || 0,
           totalCost: (p.costPrice || 0) * (p.stock || 0),
           totalPvp: (p.price || 0) * (p.stock || 0)
+        }))
+      });
+    } else if (subTab === 'REP_CAJA') {
+      exportToModernExcel({
+        filename: `Reporte_Arqueo_Caja_${startDate}_al_${endDate}.xlsx`,
+        sheetName: 'Arqueo por Trabajador',
+        title: `REPORTE DE ARQUEO Y CIERRE DE CAJA POR TRABAJADOR (${startDate} AL ${endDate})`,
+        columns: [
+          { header: 'N° Comprobante', key: 'number', width: 18 },
+          { header: 'Tipo Documento', key: 'type', width: 15, format: 'center' },
+          { header: 'Fecha y Hora', key: 'date', width: 18, format: 'center' },
+          { header: 'Cajero / Trabajador', key: 'seller', width: 25 },
+          { header: 'Cliente', key: 'customerName', width: 30 },
+          { header: 'RUC / Cédula', key: 'docNumber', width: 16 },
+          { header: 'Forma de Pago', key: 'paymentMethod', width: 16, format: 'center' },
+          { header: 'Subtotal ($)', key: 'subtotal', width: 14, format: 'currency' },
+          { header: 'IVA 15% ($)', key: 'taxTotal', width: 14, format: 'currency' },
+          { header: 'Total ($)', key: 'total', width: 15, format: 'currency' },
+          { header: 'Estado', key: 'paymentStatus', width: 14, format: 'center' }
+        ],
+        data: cajaFilteredInvoices.map(i => ({
+          number: i.fullNumber || i.number,
+          type: i.documentType,
+          date: i.createdAt ? i.createdAt.substring(0, 16).replace('T', ' ') : '-',
+          seller: i.sellerName || 'Caja General',
+          customerName: i.customer?.name || 'Consumidor Final',
+          docNumber: i.customer?.docNumber || '9999999999999',
+          paymentMethod: (i.paymentMethod || 'EFECTIVO').replace('_', ' '),
+          subtotal: i.subtotal || 0,
+          taxTotal: i.taxTotal || 0,
+          total: i.total || 0,
+          paymentStatus: i.paymentStatus || 'PAGADA'
         }))
       });
     } else {
@@ -1160,66 +1329,932 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
         </div>
       )}
 
-      {/* 4. REPORTE DE ARQUEOS DE CAJA */}
+      {/* 4. REPORTE DE ARQUEOS DE CAJA POR TRABAJADOR */}
       {subTab === 'REP_CAJA' && (
         <div className="space-y-6">
+          {/* Header & Filter Card */}
           <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-teal-500" />
-                <span>Historial de Sesiones & Arqueos de Caja</span>
-              </h3>
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-teal-600" />
+                  <span>Reporte de Arqueos & Cierre de Caja por Trabajador</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Arqueo de turnos, conciliación por medio de pago y detalle de comprobantes emitidos por cada cajero.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Exportar Excel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPrintingWorkerArqueo({
+                    name: cajaWorkerFilter === 'TODOS' ? 'CONSOLIDADO - TODOS LOS CAJEROS' : cajaWorkerFilter,
+                    role: 'Reporte General de Turno / Arqueo',
+                    code: 'CAJA-ALL',
+                    invoicesCount: cajaFilteredInvoices.length,
+                    cash: cajaTotalCash,
+                    card: cajaTotalCard,
+                    transfer: cajaTotalTransfer,
+                    credit: cajaTotalCredit,
+                    total: cajaGrandTotal,
+                    invoices: cajaFilteredInvoices
+                  })}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Printer className="w-4 h-4 text-orange-400" />
+                  <span>Imprimir Arqueo</span>
+                </button>
+              </div>
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs text-slate-700 font-mono">
-                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                  <tr>
-                    <th className="py-3 px-4">Sesión ID</th>
-                    <th className="py-3 px-4">Apertura</th>
-                    <th className="py-3 px-4 text-right">Saldo Inicial</th>
-                    <th className="py-3 px-4 text-right">Ventas Efectivo</th>
-                    <th className="py-3 px-4 text-right">Ventas Tarjeta/Transf.</th>
-                    <th className="py-3 px-4 text-right">Total Esperado</th>
-                    <th className="py-3 px-4 text-center">Estado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                  {!cashSession ? (
-                    <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400 font-sans text-xs">
-                        No hay registros de arqueos o sesiones de caja en el período.
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr className="hover:bg-slate-50 transition">
-                      <td className="py-3 px-4 font-black text-slate-900">{cashSession.id || 'CASH-001'}</td>
-                      <td className="py-3 px-4 text-slate-500">{cashSession.openedAt ? cashSession.openedAt.substring(0, 16).replace('T', ' ') : '-'}</td>
-                      <td className="py-3 px-4 text-right font-medium text-slate-700">
-                        {formatCurrency(cashSession.initialCash || 0, settings.currencySymbol)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-bold text-emerald-600">
-                        {formatCurrency(cashSession.totalSalesCash || 0, settings.currencySymbol)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-bold text-blue-600">
-                        {formatCurrency((cashSession.totalSalesCard || 0) + (cashSession.totalSalesTransfer || 0), settings.currencySymbol)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">
-                        {formatCurrency((cashSession.initialCash || 0) + (cashSession.totalSalesCash || 0), settings.currencySymbol)}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full font-black text-[10px] ${
-                          cashSession.status === 'ABIERTA' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {cashSession.status || 'CERRADA'}
-                        </span>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            {/* Filter controls row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Filtrar por Trabajador / Cajero</label>
+                <select
+                  value={cajaWorkerFilter}
+                  onChange={(e) => setCajaWorkerFilter(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                >
+                  <option value="TODOS">Todos los Trabajadores ({workersCajaSummary.length})</option>
+                  {workersCajaSummary.map((w, idx) => (
+                    <option key={idx} value={w.name}>
+                      {w.name} ({w.invoicesCount} docs - {formatCurrency(w.total, settings.currencySymbol)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Medio de Pago</label>
+                <select
+                  value={cajaPaymentFilter}
+                  onChange={(e) => setCajaPaymentFilter(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                >
+                  <option value="TODOS">Todos los Medios de Pago</option>
+                  <option value="EFECTIVO">Solo Efectivo</option>
+                  <option value="TARJETA">Tarjetas Débito / Crédito</option>
+                  <option value="TRANSFERENCIA">Transferencias Bancarias</option>
+                  <option value="CREDITO">Ventas a Crédito</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Buscador Rápido</label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="N° Comprobante, cliente o RUC..."
+                    value={cajaSearchTerm}
+                    onChange={(e) => setCajaSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  />
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* KPI Metrics Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-1 shadow-2xs">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">
+                <span>Efectivo</span>
+                <DollarSign className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+              </div>
+              <div className="text-lg font-black text-emerald-600 font-mono">
+                {formatCurrency(cajaTotalCash, settings.currencySymbol)}
+              </div>
+              <div className="text-[10px] text-slate-400">Recaudación física</div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-1 shadow-2xs">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">
+                <span>Tarjetas</span>
+                <CreditCard className="w-3.5 h-3.5 text-blue-600 stroke-[2.5]" />
+              </div>
+              <div className="text-lg font-black text-blue-600 font-mono">
+                {formatCurrency(cajaTotalCard, settings.currencySymbol)}
+              </div>
+              <div className="text-[10px] text-slate-400">POS / Vouchers</div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-1 shadow-2xs">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">
+                <span>Transferencias</span>
+                <ArrowLeftRight className="w-3.5 h-3.5 text-purple-600 stroke-[2.5]" />
+              </div>
+              <div className="text-lg font-black text-purple-600 font-mono">
+                {formatCurrency(cajaTotalTransfer, settings.currencySymbol)}
+              </div>
+              <div className="text-[10px] text-slate-400">Bancos acreditados</div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-1 shadow-2xs">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">
+                <span>Crédito Cliente</span>
+                <Users className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+              </div>
+              <div className="text-lg font-black text-amber-600 font-mono">
+                {formatCurrency(cajaTotalCredit, settings.currencySymbol)}
+              </div>
+              <div className="text-[10px] text-slate-400">Cuentas por cobrar</div>
+            </div>
+
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-1 shadow-2xs">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">
+                <span>Total Facturado</span>
+                <Award className="w-3.5 h-3.5 text-teal-600 stroke-[2.5]" />
+              </div>
+              <div className="text-lg font-black text-slate-900 font-mono">
+                {formatCurrency(cajaGrandTotal, settings.currencySymbol)}
+              </div>
+              <div className="text-[10px] text-slate-400">Ingreso global</div>
+            </div>
+
+            <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1 shadow-md">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">
+                <span>Comprobantes</span>
+                <Receipt className="w-3.5 h-3.5 text-orange-400 stroke-[2.5]" />
+              </div>
+              <div className="text-xl font-black text-orange-400 font-mono">
+                {cajaFilteredInvoices.length}
+              </div>
+              <div className="text-[10px] text-slate-400">Documentos emitidos</div>
+            </div>
+          </div>
+
+          {/* Subtabs for Arqueo views */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+            <button
+              type="button"
+              onClick={() => setCajaActiveTab('TRABAJADORES')}
+              className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                cajaActiveTab === 'TRABAJADORES'
+                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <UserCheck className="w-4 h-4" />
+              <span>Arqueo por Trabajador</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                cajaActiveTab === 'TRABAJADORES' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+              }`}>
+                {workersCajaSummary.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCajaActiveTab('COMPROBANTES')}
+              className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                cajaActiveTab === 'COMPROBANTES'
+                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <Receipt className="w-4 h-4" />
+              <span>Detalle de Comprobantes Emitidos</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                cajaActiveTab === 'COMPROBANTES' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+              }`}>
+                {cajaFilteredInvoices.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCajaActiveTab('HISTORIAL')}
+              className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                cajaActiveTab === 'HISTORIAL'
+                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>Historial de Sesiones de Caja</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                cajaActiveTab === 'HISTORIAL' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+              }`}>
+                {(cashSessionsHistory?.length || 0) + (cashSession ? 1 : 0)}
+              </span>
+            </button>
+          </div>
+
+          {/* ── TAB 1: ARQUEO POR TRABAJADOR ─────────────────────────────────── */}
+          {cajaActiveTab === 'TRABAJADORES' && (
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-teal-600" />
+                  <span>Resumen de Arqueo por Trabajador ({workersCajaSummary.length})</span>
+                </h3>
+                <span className="text-[11px] text-slate-400 font-medium">Período: {startDate} al {endDate}</span>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Trabajador / Asesor</th>
+                      <th className="py-3 px-4 text-center">Docs</th>
+                      <th className="py-3 px-4 text-right">Efectivo ($)</th>
+                      <th className="py-3 px-4 text-right">Tarjetas ($)</th>
+                      <th className="py-3 px-4 text-right">Transf. ($)</th>
+                      <th className="py-3 px-4 text-right">Crédito ($)</th>
+                      <th className="py-3 px-4 text-right">Total Facturado</th>
+                      <th className="py-3 px-4 text-center">% Aporte</th>
+                      <th className="py-3 px-4 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {workersCajaSummary.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-12 text-center text-slate-400 font-sans text-xs">
+                          No hay trabajadores con comprobantes emitidos en el período seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      workersCajaSummary.map((w, idx) => {
+                        const percent = cajaGrandTotal > 0 ? ((w.total / cajaGrandTotal) * 100).toFixed(1) : '0.0';
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 transition">
+                            <td className="py-3 px-4 font-sans font-black text-slate-900 flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-800 font-black text-xs flex items-center justify-center">
+                                {w.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <span className="block leading-tight text-slate-900 font-bold">{w.name}</span>
+                                <span className="text-[10px] font-normal text-slate-400 font-mono">{w.role} • {w.code}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 font-black text-[10px]">
+                                {w.invoicesCount} doc{w.invoicesCount !== 1 ? 's' : ''}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-emerald-600">
+                              {formatCurrency(w.cash, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-blue-600">
+                              {formatCurrency(w.card, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-purple-600">
+                              {formatCurrency(w.transfer, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-amber-600">
+                              {formatCurrency(w.credit, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-black text-slate-950 text-xs">
+                              {formatCurrency(w.total, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-center font-bold text-slate-500">
+                              {percent}%
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedWorkerVouchersModal(w)}
+                                  className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 font-black text-[10px] rounded-lg border border-teal-200 transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                  title="Ver todos los comprobantes emitidos por este trabajador"
+                                >
+                                  <Receipt className="w-3 h-3" />
+                                  <span>Ver Comprobantes</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPrintingWorkerArqueo(w)}
+                                  className="p-1 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                                  title="Imprimir arqueo del trabajador"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {workersCajaSummary.length > 0 && (
+                    <tfoot className="bg-slate-50 font-black border-t border-slate-200 text-xs">
+                      <tr>
+                        <td className="py-3 px-4 uppercase text-slate-700">Total Consolidado:</td>
+                        <td className="py-3 px-4 text-center text-slate-900">{cajaFilteredInvoices.length} docs</td>
+                        <td className="py-3 px-4 text-right text-emerald-600">{formatCurrency(cajaTotalCash, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-right text-blue-600">{formatCurrency(cajaTotalCard, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-right text-purple-600">{formatCurrency(cajaTotalTransfer, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-right text-amber-600">{formatCurrency(cajaTotalCredit, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-right text-slate-950 text-sm">{formatCurrency(cajaGrandTotal, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-center text-slate-500">100%</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB 2: DETALLE DE COMPROBANTES EMITIDOS ───────────────────────── */}
+          {cajaActiveTab === 'COMPROBANTES' && (
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-teal-600" />
+                  <span>Comprobantes Emitidos en el Período ({cajaFilteredInvoices.length})</span>
+                </h3>
+                <span className="text-[11px] text-slate-400 font-medium">Período: {startDate} al {endDate}</span>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">N° Comprobante</th>
+                      <th className="py-3 px-4">Tipo</th>
+                      <th className="py-3 px-4">Fecha y Hora</th>
+                      <th className="py-3 px-4">Cajero / Trabajador</th>
+                      <th className="py-3 px-4">Cliente</th>
+                      <th className="py-3 px-4 text-center">Medio de Pago</th>
+                      <th className="py-3 px-4 text-right">Subtotal</th>
+                      <th className="py-3 px-4 text-right">IVA (15%)</th>
+                      <th className="py-3 px-4 text-right">Total Facturado</th>
+                      <th className="py-3 px-4 text-center">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {cajaFilteredInvoices.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="py-12 text-center text-slate-400 font-sans text-xs">
+                          No hay comprobantes que coincidan con los filtros de fecha, trabajador o medio de pago.
+                        </td>
+                      </tr>
+                    ) : (
+                      cajaFilteredInvoices.map((inv) => {
+                        const pm = inv.paymentMethod || 'EFECTIVO';
+                        const dateStr = inv.createdAt ? inv.createdAt.substring(0, 16).replace('T', ' ') : '-';
+                        return (
+                          <tr key={inv.id} className="hover:bg-slate-50 transition">
+                            <td className="py-3 px-4 font-black text-slate-900">
+                              {inv.fullNumber || `F-${inv.number}`}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
+                                inv.documentType === 'FACTURA'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : 'bg-purple-50 text-purple-700 border-purple-200'
+                              }`}>
+                                {inv.documentType || 'FACTURA'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-500 font-medium">{dateStr}</td>
+                            <td className="py-3 px-4 font-sans font-bold text-slate-800">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold text-[10px]">
+                                {inv.sellerName || 'Caja General'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 font-sans">
+                              <span className="font-bold text-slate-900 block truncate max-w-[150px]">
+                                {inv.customer?.name || 'Consumidor Final'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {inv.customer?.docNumber || '9999999999999'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                pm === 'EFECTIVO'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : pm.includes('TARJETA')
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : pm === 'TRANSFERENCIA'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {pm.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-600">
+                              {formatCurrency(inv.subtotal || 0, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-600">
+                              {formatCurrency(inv.taxTotal || 0, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-black text-slate-950 text-xs">
+                              {formatCurrency(inv.total || 0, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                inv.paymentStatus === 'PAGADA'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-amber-50 text-amber-700'
+                              }`}>
+                                {inv.paymentStatus || 'PAGADA'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {cajaFilteredInvoices.length > 0 && (
+                    <tfoot className="bg-slate-50 font-black border-t border-slate-200 text-xs">
+                      <tr>
+                        <td colSpan={6} className="py-3 px-4 uppercase text-slate-700 text-right">Totales Comprobantes:</td>
+                        <td className="py-3 px-4 text-right text-slate-700">
+                          {formatCurrency(cajaFilteredInvoices.reduce((s, i) => s + (i.subtotal || 0), 0), settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-right text-slate-700">
+                          {formatCurrency(cajaFilteredInvoices.reduce((s, i) => s + (i.taxTotal || 0), 0), settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-right text-slate-950 text-sm">
+                          {formatCurrency(cajaGrandTotal, settings.currencySymbol)}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB 3: HISTORIAL DE SESIONES DE CAJA ──────────────────────────── */}
+          {cajaActiveTab === 'HISTORIAL' && (
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-teal-600" />
+                  <span>Historial de Sesiones & Arqueos Físicos de Caja</span>
+                </h3>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Sesión ID</th>
+                      <th className="py-3 px-4">Apertura</th>
+                      <th className="py-3 px-4">Cierre</th>
+                      <th className="py-3 px-4 text-right">Fondo Inicial</th>
+                      <th className="py-3 px-4 text-right">Ventas Efectivo</th>
+                      <th className="py-3 px-4 text-right">Electrónico</th>
+                      <th className="py-3 px-4 text-right">Esperado</th>
+                      <th className="py-3 px-4 text-right">Contado Real</th>
+                      <th className="py-3 px-4 text-center">Diferencia</th>
+                      <th className="py-3 px-4 text-center">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {/* Combine active session and historical sessions */}
+                    {(() => {
+                      const allSessions: any[] = [];
+                      if (cashSession && cashSession.openedAt) {
+                        allSessions.push(cashSession);
+                      }
+                      (cashSessionsHistory || []).forEach((s: any) => {
+                        if (s.id && !allSessions.some(item => item.id === s.id)) {
+                          allSessions.push(s);
+                        }
+                      });
+
+                      if (allSessions.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={10} className="py-12 text-center text-slate-400 font-sans text-xs">
+                              No hay sesiones de caja registradas.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return allSessions.map((ses, idx) => {
+                        const openStr = ses.openedAt ? ses.openedAt.substring(0, 16).replace('T', ' ') : '-';
+                        const closeStr = ses.closedAt ? ses.closedAt.substring(0, 16).replace('T', ' ') : (ses.status === 'ABIERTA' ? 'En Curso' : '-');
+                        const diff = ses.difference !== undefined ? ses.difference : 0;
+                        const diffClass = Math.abs(diff) < 0.01
+                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                          : diff > 0
+                          ? 'text-blue-700 bg-blue-50 border-blue-200'
+                          : 'text-rose-700 bg-rose-50 border-rose-200';
+
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 transition">
+                            <td className="py-3 px-4 font-black text-slate-900">{ses.id || `SES-${idx + 1}`}</td>
+                            <td className="py-3 px-4 text-slate-500">{openStr}</td>
+                            <td className="py-3 px-4 text-slate-500">{closeStr}</td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-700">
+                              {formatCurrency(ses.initialCash || 0, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-emerald-600">
+                              {formatCurrency(ses.totalSalesCash || 0, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-blue-600">
+                              {formatCurrency((ses.totalSalesCard || 0) + (ses.totalSalesTransfer || 0), settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-slate-900">
+                              {formatCurrency(ses.expectedCash || (ses.initialCash || 0) + (ses.totalSalesCash || 0), settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-orange-600">
+                              {ses.actualCash !== undefined ? formatCurrency(ses.actualCash, settings.currencySymbol) : '-'}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              {ses.status === 'ABIERTA' ? (
+                                <span className="text-slate-400 text-[10px]">Turno en curso</span>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded border text-[10px] font-black ${diffClass}`}>
+                                  {diff === 0 ? 'Cuadre ($0.00)' : diff > 0 ? `+${formatCurrency(diff, settings.currencySymbol)}` : formatCurrency(diff, settings.currencySymbol)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2.5 py-0.5 rounded-full font-black text-[10px] ${
+                                ses.status === 'ABIERTA' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {ses.status || 'CERRADA'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── MODAL: COMPROBANTES EMITIDOS POR UN TRABAJADOR EN EL ARQUEO ──── */}
+          {selectedWorkerVouchersModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/70 backdrop-blur-sm no-print">
+              <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-7 space-y-4 shadow-2xl max-h-[90vh] flex flex-col animate-fadeIn">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-teal-600 text-white font-black text-base flex items-center justify-center shadow-md shadow-teal-600/20">
+                      {selectedWorkerVouchersModal.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-950">
+                        Comprobantes Emitidos por {selectedWorkerVouchersModal.name}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        {selectedWorkerVouchersModal.role || 'Cajero'} • Período: {startDate} al {endDate}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWorkerVouchersModal(null)}
+                    className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Worker Summary Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
+                  <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100">
+                    <span className="text-[10px] text-emerald-700 font-bold uppercase block">Efectivo</span>
+                    <span className="text-sm font-black text-emerald-800 font-mono">
+                      {formatCurrency(selectedWorkerVouchersModal.cash, settings.currencySymbol)}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-blue-50 border border-blue-100">
+                    <span className="text-[10px] text-blue-700 font-bold uppercase block">Tarjetas</span>
+                    <span className="text-sm font-black text-blue-800 font-mono">
+                      {formatCurrency(selectedWorkerVouchersModal.card, settings.currencySymbol)}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-purple-50 border border-purple-100">
+                    <span className="text-[10px] text-purple-700 font-bold uppercase block">Transferencias</span>
+                    <span className="text-sm font-black text-purple-800 font-mono">
+                      {formatCurrency(selectedWorkerVouchersModal.transfer, settings.currencySymbol)}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-100">
+                    <span className="text-[10px] text-amber-700 font-bold uppercase block">Crédito</span>
+                    <span className="text-sm font-black text-amber-800 font-mono">
+                      {formatCurrency(selectedWorkerVouchersModal.credit, settings.currencySymbol)}
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-slate-900 text-white col-span-2 sm:col-span-1">
+                    <span className="text-[10px] text-orange-400 font-bold uppercase block">Total Emitido</span>
+                    <span className="text-sm font-black text-white font-mono">
+                      {formatCurrency(selectedWorkerVouchersModal.total, settings.currencySymbol)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Table of vouchers emitted by this worker */}
+                <div className="flex-1 overflow-y-auto border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-xs text-slate-700 font-mono">
+                    <thead className="bg-slate-950 text-white font-black uppercase text-[10px] sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-3">Comprobante</th>
+                        <th className="py-2.5 px-3">Tipo</th>
+                        <th className="py-2.5 px-3">Fecha y Hora</th>
+                        <th className="py-2.5 px-3">Cliente</th>
+                        <th className="py-2.5 px-3 text-center">Medio</th>
+                        <th className="py-2.5 px-3 text-right">Total</th>
+                        <th className="py-2.5 px-3 text-center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                      {selectedWorkerVouchersModal.invoices.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400 font-sans">
+                            No hay comprobantes emitidos por este trabajador en el período.
+                          </td>
+                        </tr>
+                      ) : (
+                        selectedWorkerVouchersModal.invoices.map((inv: Invoice) => {
+                          const dateStr = inv.createdAt ? inv.createdAt.substring(0, 16).replace('T', ' ') : '-';
+                          const pm = inv.paymentMethod || 'EFECTIVO';
+                          return (
+                            <tr key={inv.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 font-black text-slate-900">
+                                {inv.fullNumber || `F-${inv.number}`}
+                              </td>
+                              <td className="py-2 px-3">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                                  inv.documentType === 'FACTURA' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
+                                }`}>
+                                  {inv.documentType || 'FACTURA'}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-slate-500">{dateStr}</td>
+                              <td className="py-2 px-3 font-sans truncate max-w-[150px]">
+                                <strong className="text-slate-900 block">{inv.customer?.name || 'Consumidor Final'}</strong>
+                                <span className="text-[10px] text-slate-400">{inv.customer?.docNumber || '9999999999999'}</span>
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-700">
+                                  {pm.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-right font-black text-slate-950">
+                                {formatCurrency(inv.total || 0, settings.currencySymbol)}
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700">
+                                  {inv.paymentStatus || 'PAGADA'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <span className="text-xs text-slate-500 font-bold">
+                    Total: {selectedWorkerVouchersModal.invoicesCount} comprobante{selectedWorkerVouchersModal.invoicesCount !== 1 ? 's' : ''} emitido{selectedWorkerVouchersModal.invoicesCount !== 1 ? 's' : ''}
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedWorkerVouchersModal(null)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPrintingWorkerArqueo(selectedWorkerVouchersModal);
+                        setSelectedWorkerVouchersModal(null);
+                      }}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white font-black text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-teal-600/20"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Imprimir Arqueo Individual</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── MODAL: IMPRESIÓN OFICIAL DEL ARQUEO / CIERRE ─────────────────── */}
+          {printingWorkerArqueo && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl p-6 sm:p-8 space-y-6 shadow-2xl my-auto">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-4 no-print">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2.5 bg-teal-600 text-white rounded-2xl shadow-sm">
+                      <Printer className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-950">
+                        Comprobante de Arqueo y Cierre de Caja
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium">
+                        Responsable: {printingWorkerArqueo.name} • Período: {startDate} al {endDate}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <Printer className="w-4 h-4 text-orange-400" />
+                      <span>Imprimir / Descargar PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPrintingWorkerArqueo(null)}
+                      className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Printable Document Formatted */}
+                <div id="printable-worker-caja" className="space-y-6 text-xs text-slate-900 bg-white p-4">
+                  {/* Membrete */}
+                  <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      {settings.logoUrl ? (
+                        <img src={settings.logoUrl} alt="Logo" className="w-14 h-14 object-contain border border-slate-200 rounded-xl p-1" />
+                      ) : (
+                        <div className="p-2.5 bg-slate-900 text-white rounded-xl font-black text-base">
+                          <DollarSign className="w-6 h-6 text-orange-400" />
+                        </div>
+                      )}
+                      <div>
+                        <h2 className="text-base font-black text-slate-950 uppercase tracking-tight">
+                          {settings.storeName || 'FERRETERÍA INDUSTRIAL'}
+                        </h2>
+                        <p className="text-xs font-bold text-slate-700">{settings.legalName || settings.storeName}</p>
+                        <p className="text-[11px] text-slate-600">RUC: <strong className="font-mono text-slate-900">{settings.taxId}</strong> • Tel: {settings.phone}</p>
+                      </div>
+                    </div>
+
+                    <div className="text-right sm:border-l sm:border-slate-200 sm:pl-4 space-y-0.5">
+                      <span className="px-2.5 py-0.5 bg-teal-700 text-white font-black text-[9px] rounded uppercase tracking-wider block text-center">
+                        ARQUEO OFICIAL DE CAJA
+                      </span>
+                      <p className="text-[11px] font-bold text-slate-900">Auditoría de Turno / Cajero</p>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        Emisión: {new Date().toLocaleString('es-EC')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Datos del Responsable */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Cajero(a) Responsable:</span>
+                      <strong className="text-slate-900 font-bold">{printingWorkerArqueo.name}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Período Auditado:</span>
+                      <strong className="text-slate-800">{startDate} al {endDate}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Comprobantes:</span>
+                      <strong className="font-mono text-slate-900 text-sm">{printingWorkerArqueo.invoicesCount} documentos</strong>
+                    </div>
+                  </div>
+
+                  {/* Resumen por Medio de Pago */}
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">Recaudación por Medio de Pago</h4>
+                    <div className="border border-slate-300 rounded-xl overflow-hidden text-xs">
+                      <table className="w-full text-left font-mono">
+                        <thead className="bg-slate-900 text-white font-black text-[10px] uppercase">
+                          <tr>
+                            <th className="p-2.5">Medio de Pago</th>
+                            <th className="p-2.5 text-center">Tipo de Movimiento</th>
+                            <th className="p-2.5 text-right">Monto Recaudado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          <tr>
+                            <td className="p-2 font-bold font-sans">Efectivo en Ventas</td>
+                            <td className="p-2 text-center text-slate-600">Dinero Físico en Cajón</td>
+                            <td className="p-2 text-right font-bold text-emerald-700">{formatCurrency(printingWorkerArqueo.cash, settings.currencySymbol)}</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-bold font-sans">Tarjetas Débito / Crédito</td>
+                            <td className="p-2 text-center text-slate-600">Datafast / Medianet</td>
+                            <td className="p-2 text-right font-bold">{formatCurrency(printingWorkerArqueo.card, settings.currencySymbol)}</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-bold font-sans">Transferencias Bancarias</td>
+                            <td className="p-2 text-center text-slate-600">Depósito / Transferencia</td>
+                            <td className="p-2 text-right font-bold">{formatCurrency(printingWorkerArqueo.transfer, settings.currencySymbol)}</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-bold font-sans">Ventas a Crédito</td>
+                            <td className="p-2 text-center text-slate-600">Cartera Cuentas por Cobrar</td>
+                            <td className="p-2 text-right font-bold">{formatCurrency(printingWorkerArqueo.credit, settings.currencySymbol)}</td>
+                          </tr>
+                          <tr className="bg-slate-100 font-black border-t border-slate-300">
+                            <td colSpan={2} className="p-2.5 text-slate-900 uppercase">Total Recaudado en el Arqueo:</td>
+                            <td className="p-2.5 text-right font-mono text-base text-slate-950">{formatCurrency(printingWorkerArqueo.total, settings.currencySymbol)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Tabla Detallada de Comprobantes Emitidos */}
+                  {printingWorkerArqueo.invoices && printingWorkerArqueo.invoices.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                        Detalle de Comprobantes Emitidos ({printingWorkerArqueo.invoices.length})
+                      </h4>
+                      <div className="border border-slate-300 rounded-xl overflow-hidden text-xs">
+                        <table className="w-full text-left font-mono">
+                          <thead className="bg-slate-800 text-white font-black text-[9px] uppercase">
+                            <tr>
+                              <th className="p-2">N° Comprobante</th>
+                              <th className="p-2">Tipo</th>
+                              <th className="p-2">Fecha/Hora</th>
+                              <th className="p-2">Cliente</th>
+                              <th className="p-2 text-center">Medio</th>
+                              <th className="p-2 text-right">Subtotal</th>
+                              <th className="p-2 text-right">IVA (15%)</th>
+                              <th className="p-2 text-right">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 text-[10px]">
+                            {printingWorkerArqueo.invoices.map((inv: Invoice) => (
+                              <tr key={inv.id}>
+                                <td className="p-2 font-bold text-slate-900">{inv.fullNumber || `F-${inv.number}`}</td>
+                                <td className="p-2 font-sans">{inv.documentType}</td>
+                                <td className="p-2 text-slate-500">{inv.createdAt ? inv.createdAt.substring(0, 16).replace('T', ' ') : '-'}</td>
+                                <td className="p-2 font-sans truncate max-w-[140px]">{inv.customer?.name || 'Consumidor Final'}</td>
+                                <td className="p-2 text-center">{inv.paymentMethod}</td>
+                                <td className="p-2 text-right">{formatCurrency(inv.subtotal || 0, settings.currencySymbol)}</td>
+                                <td className="p-2 text-right">{formatCurrency(inv.taxTotal || 0, settings.currencySymbol)}</td>
+                                <td className="p-2 text-right font-black text-slate-950">{formatCurrency(inv.total || 0, settings.currencySymbol)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Firmas de Responsabilidad */}
+                  <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+                    <div className="border-t border-slate-400 pt-2">
+                      <p className="font-bold text-slate-900">Firma Cajero(a) Responsable</p>
+                      <p className="text-slate-500 text-[10px]">{printingWorkerArqueo.name}</p>
+                      <p className="text-slate-400 text-[9px]">Entregué conforme</p>
+                    </div>
+                    <div className="border-t border-slate-400 pt-2">
+                      <p className="font-bold text-slate-900">Firma Supervisor / Contador</p>
+                      <p className="text-slate-500 text-[10px]">Auditoría Interna de Caja</p>
+                      <p className="text-slate-400 text-[9px]">Recibí y verifiqué conforme</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-4 border-t border-slate-200 no-print">
+                  <button
+                    type="button"
+                    onClick={() => setPrintingWorkerArqueo(null)}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-6 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black rounded-xl text-xs transition shadow-lg shadow-teal-600/20 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Imprimir / Descargar PDF</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1354,6 +2389,32 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">Información preparada para declaración mensual en DIMM Formularios / SRI en Línea.</p>
               </div>
+
+              <button
+                onClick={async () => {
+                  const targetDate = new Date(startDate || Date.now());
+                  const mes = String(targetDate.getMonth() + 1).padStart(2, '0');
+                  const anio = String(targetDate.getFullYear());
+                  const res = await generateAtsXml({
+                    mes,
+                    anio,
+                    settings,
+                    invoices,
+                    purchases,
+                    establishment: '001'
+                  });
+                  if (res.success) {
+                    downloadXML(res.xml, res.filename);
+                    showToast(`¡Archivo ${res.filename} generado y descargado!`, 'success');
+                  } else {
+                    showAlert('Error ATS', res.message);
+                  }
+                }}
+                className="px-4 py-2.5 bg-slate-950 hover:bg-slate-900 text-white text-xs font-black rounded-xl shadow transition flex items-center gap-2 cursor-pointer shrink-0"
+              >
+                <Download className="w-4 h-4 text-lime-400" />
+                <span>Generar XML ATS SRI ({startDate.substring(0, 7)})</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -1386,83 +2447,143 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
       )}
 
       {/* 8. RESTO DE REPORTES (REP_COMISIONES, REP_RENTABILIDAD, REP_NOMINA, REP_DEVOLUCIONES, REP_ROTACION, REP_FLUJO_CAJA) */}
-      {!['REP_VENTAS', 'REP_PRODUCTOS', 'REP_INVENTARIO', 'REP_CAJA', 'REP_COMPRAS', 'REP_STOCK_MUERTO', 'REP_ATS', 'REP_FORMULARIO_104', 'REP_FORMULARIO_103'].includes(subTab) && (
-        <div className="space-y-6">
-          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                {currentMeta.icon}
-                <span>Detalle Analítico - {currentMeta.title}</span>
-              </h3>
-              <span className="text-[11px] font-bold text-slate-400">{startDate} al {endDate}</span>
-            </div>
+      {!['REP_VENTAS', 'REP_PRODUCTOS', 'REP_INVENTARIO', 'REP_CAJA', 'REP_COMPRAS', 'REP_STOCK_MUERTO', 'REP_ATS', 'REP_FORMULARIO_104', 'REP_FORMULARIO_103'].includes(subTab) && (() => {
+        const isDevolucionesReport = subTab === 'REP_DEVOLUCIONES';
+        const displayList = isDevolucionesReport
+          ? invoices.filter((i) => i.documentType === 'FACTURA' && (i.sriStatus === 'DEVUELTA' || i.sriStatus === 'NO AUTORIZADO' || (i.sriStatus === 'ERROR' && !!i.sriMensaje)))
+          : filteredInvoices;
+        const totalMontoDisplay = isDevolucionesReport
+          ? displayList.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
+          : totalVentasPeriodo;
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Registros</span>
-                <div className="text-2xl font-black text-slate-900 font-mono">{filteredInvoices.length}</div>
-                <div className="text-xs text-slate-500 font-bold">Documentos auditados</div>
+        return (
+          <div className="space-y-6">
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  {currentMeta.icon}
+                  <span>Detalle Analítico - {currentMeta.title}</span>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-400">{startDate} al {endDate}</span>
               </div>
 
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Monto Operacional</span>
-                <div className="text-2xl font-black text-emerald-600 font-mono">{formatCurrency(totalVentasPeriodo, settings.currencySymbol)}</div>
-                <div className="text-xs text-slate-500 font-bold">Volumen financiero procesado</div>
-              </div>
-
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Estado de Verificación</span>
-                <div className="text-sm font-black text-emerald-600 flex items-center gap-1.5 mt-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>SIN DISCREPANCIAS</span>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                    {isDevolucionesReport ? 'Total Facturas Devueltas' : 'Total Registros'}
+                  </span>
+                  <div className={`text-2xl font-black font-mono ${isDevolucionesReport ? 'text-red-600' : 'text-slate-900'}`}>
+                    {displayList.length}
+                  </div>
+                  <div className="text-xs text-slate-500 font-bold">
+                    {isDevolucionesReport ? 'Comprobantes observados por SRI' : 'Documentos auditados'}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 font-bold">Consistencia contable al 100%</div>
-              </div>
-            </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full text-left text-xs text-slate-700 font-mono">
-                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                  <tr>
-                    <th className="py-3 px-4">Referencia</th>
-                    <th className="py-3 px-4">Fecha</th>
-                    <th className="py-3 px-4">Concepto Detallado</th>
-                    <th className="py-3 px-4 text-right">Monto ($)</th>
-                    <th className="py-3 px-4 text-center">Estado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                  {filteredInvoices.length === 0 ? (
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                    {isDevolucionesReport ? 'Monto Total Observado' : 'Monto Operacional'}
+                  </span>
+                  <div className={`text-2xl font-black font-mono ${isDevolucionesReport ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {formatCurrency(totalMontoDisplay, settings.currencySymbol)}
+                  </div>
+                  <div className="text-xs text-slate-500 font-bold">
+                    {isDevolucionesReport ? 'Volumen retenido pendiente de subsanar' : 'Volumen financiero procesado'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Estado de Verificación</span>
+                  <div className={`text-sm font-black flex items-center gap-1.5 mt-2 ${
+                    isDevolucionesReport && displayList.length > 0 ? 'text-amber-600' : 'text-emerald-600'
+                  }`}>
+                    {isDevolucionesReport && displayList.length > 0 ? (
+                      <>
+                        <RotateCcw className="w-4 h-4 text-amber-500 animate-pulse" />
+                        <span>REVISIÓN REQUERIDA</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>SIN DISCREPANCIAS</span>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 font-bold">
+                    {isDevolucionesReport && displayList.length > 0
+                      ? `${displayList.length} comprobantes devueltos para corregir`
+                      : 'Consistencia contable al 100%'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700 font-mono">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
                     <tr>
-                      <td colSpan={5} className="py-12 text-center text-slate-400 font-sans text-xs">
-                        No hay movimientos registrados para este reporte en el período seleccionado.
-                      </td>
+                      <th className="py-3 px-4">Referencia</th>
+                      <th className="py-3 px-4">Fecha</th>
+                      <th className="py-3 px-4">
+                        {isDevolucionesReport ? 'Cliente & Motivo de Devolución SRI' : 'Concepto Detallado'}
+                      </th>
+                      <th className="py-3 px-4 text-right">Monto ($)</th>
+                      <th className="py-3 px-4 text-center">
+                        {isDevolucionesReport ? 'Estado SRI' : 'Estado'}
+                      </th>
                     </tr>
-                  ) : (
-                    filteredInvoices.slice(0, 20).map((inv) => (
-                      <tr key={inv.id} className="hover:bg-slate-50 transition">
-                        <td className="py-3 px-4 font-black text-slate-900">{inv.fullNumber || inv.number}</td>
-                        <td className="py-3 px-4 text-slate-500">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
-                        <td className="py-3 px-4 font-sans text-slate-800">
-                          {currentMeta.title}: {inv.customer?.name || 'Consumidor Final'}
-                        </td>
-                        <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">
-                          {formatCurrency(inv.total || 0, settings.currencySymbol)}
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded">
-                            {inv.paymentStatus || 'COMPLETADO'}
-                          </span>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {displayList.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-slate-400 font-sans text-xs">
+                          {isDevolucionesReport
+                            ? 'No hay facturas devueltas por el SRI registradas en el sistema.'
+                            : 'No hay movimientos registrados para este reporte en el período seleccionado.'}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      displayList.slice(0, 30).map((inv) => (
+                        <tr key={inv.id} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4 font-black text-slate-900">{inv.fullNumber || inv.number}</td>
+                          <td className="py-3 px-4 text-slate-500">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
+                          <td className="py-3 px-4 font-sans text-slate-800">
+                            {isDevolucionesReport ? (
+                              <div className="space-y-0.5">
+                                <div className="font-bold text-slate-900">
+                                  {inv.customer?.name || 'CONSUMIDOR FINAL'} ({inv.customer?.docNumber || inv.customer?.idNumber || '9999999999999'})
+                                </div>
+                                <div className="text-[10px] font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200/60 font-semibold inline-block">
+                                  {inv.sriMensaje || 'Comprobante devuelto por el SRI'}
+                                </div>
+                              </div>
+                            ) : (
+                              `${currentMeta.title}: ${inv.customer?.name || 'Consumidor Final'}`
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">
+                            {formatCurrency(inv.total || 0, settings.currencySymbol)}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {isDevolucionesReport ? (
+                              <span className="px-2 py-0.5 bg-red-100 text-red-700 font-black text-[10px] rounded-full border border-red-200">
+                                DEVUELTA
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded">
+                                {inv.paymentStatus || 'COMPLETADO'}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       </div>
 
       {/* ── MODAL: REPORTE FORMAL IMPRIMIBLE / PDF ────────────────────────── */}

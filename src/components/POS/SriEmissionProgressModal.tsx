@@ -117,10 +117,43 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
       const rRes = await SriBackendService.recepcionarSri(fRes.xmlFirmado);
       console.log('📡 [SRI 2. RECEPCIÓN RAW]:', rRes.recepcion || rRes.error);
 
-      if (!rRes.success) {
+      const isRecepcionDevuelta = rRes.recepcion && rRes.recepcion.toUpperCase().includes('DEVUELTA');
+      if (!rRes.success || isRecepcionDevuelta) {
+        // Extraer mensajes de devolución del SRI
+        const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
+        const devMsgs: string[] = [];
+        let dm;
+        const rawContent = rRes.recepcion || '';
+        while ((dm = devMsgRegex.exec(rawContent)) !== null) {
+          const block = dm[1];
+          const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
+          const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
+          const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
+          const idStr = identM ? `[ERROR ${identM[1]}] ` : '';
+          const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
+          const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
+          if (msgStr) devMsgs.push(`${idStr}${msgStr}${infoStr}`);
+        }
+
+        const errorFinal = devMsgs.length > 0 
+          ? devMsgs.join(' | ') 
+          : (rRes.error || 'El comprobante fue devuelto por el SRI en Recepción.');
+
         setStep2Status('ERROR');
-        setStep2Details(rRes.error || 'El SRI rechazó la recepción del comprobante.');
-        throw new Error(rRes.error || 'Fallo en la recepción del SRI.');
+        setStep2Details(`SRI DEVUELTA: ${errorFinal}`);
+
+        if (onInvoiceUpdated) {
+          const updatedDevuelta: Invoice = {
+            ...invoice,
+            sriStatus: 'DEVUELTA',
+            sriClaveAcceso: claveCalculada,
+            sriXmlFirmado: fRes.xmlFirmado,
+            sriMensaje: errorFinal,
+          };
+          onInvoiceUpdated(updatedDevuelta);
+        }
+
+        throw new Error(`El SRI devolvió el comprobante en Recepción: ${errorFinal}`);
       }
 
       setStep2Status('SUCCESS');
@@ -181,6 +214,18 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
       if (!isAutorizado) {
         setStep3Status('ERROR');
         setStep3Details(`SRI: ${estadoReal} — ${mensajeError}`);
+
+        if (onInvoiceUpdated) {
+          const updatedDevuelta: Invoice = {
+            ...invoice,
+            sriStatus: 'DEVUELTA',
+            sriClaveAcceso: claveCalculada,
+            sriXmlFirmado: fRes.xmlFirmado,
+            sriMensaje: `${estadoReal}: ${mensajeError}`,
+          };
+          onInvoiceUpdated(updatedDevuelta);
+        }
+
         throw new Error(`El SRI devolvió: ${estadoReal} — ${mensajeError}`);
       }
 

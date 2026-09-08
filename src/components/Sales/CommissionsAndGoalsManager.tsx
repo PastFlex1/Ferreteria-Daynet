@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Target, 
   TrendingUp, 
@@ -23,12 +24,13 @@ import {
   Clock,
   X,
   FileText,
-  Send
+  Send,
+  Eye
 } from 'lucide-react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { useModal } from '../../context/ModalContext';
 import { Invoice, SalesSubTab, StoreSettings } from '../../types';
-import { formatCurrency, formatFullDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatFullDate, getPaymentMethodLabel } from '../../utils/formatters';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { defaultEmployees, defaultUsersList } from '../../data/initialData';
 import { Select } from '../Shared/Select';
@@ -41,18 +43,31 @@ export interface SellerGoalRecord {
   notes?: string;
 }
 
+export interface ViewingEmployeeSalesInfo {
+  id: string;
+  name: string;
+  position?: string;
+  department?: string;
+  commissionRatePercent?: number;
+  totalSold?: number;
+  totalCommission?: number;
+  salesCount?: number;
+}
+
 const defaultGoals: SellerGoalRecord[] = [];
 
 interface CommissionsAndGoalsManagerProps {
   invoices: Invoice[];
   settings: StoreSettings;
   onNavigateToTab?: (tab: SalesSubTab) => void;
+  onOpenViewer?: (invoice: Invoice) => void;
 }
 
 export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProps> = ({
   invoices,
   settings,
   onNavigateToTab,
+  onOpenViewer,
 }) => {
   const { showAlert, showToast, showConfirm } = useModal();
 
@@ -69,7 +84,7 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
   // Modals
   const [editingGoal, setEditingGoal] = useState<SellerGoalRecord | null>(null);
   const [editingEmployeeName, setEditingEmployeeName] = useState<string>('');
-  const [viewingEmployeeSales, setViewingEmployeeSales] = useState<{ id: string; name: string } | null>(null);
+  const [viewingEmployeeSales, setViewingEmployeeSales] = useState<ViewingEmployeeSalesInfo | null>(null);
 
   // Form State for Editing Goal
   const [targetInput, setTargetInput] = useState('');
@@ -312,7 +327,7 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6">
       {/* Top Banner Header */}
       <div className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
@@ -581,10 +596,21 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
 
                       <button
                         type="button"
-                        onClick={() => setViewingEmployeeSales({ id: item.staff.id, name: item.staff.name })}
+                        onClick={() =>
+                          setViewingEmployeeSales({
+                            id: item.staff.id,
+                            name: item.staff.name,
+                            position: item.staff.position,
+                            department: item.staff.department,
+                            commissionRatePercent: item.goal.commissionRatePercent,
+                            totalSold: item.totalSold,
+                            totalCommission: item.totalCommission,
+                            salesCount: item.salesCount,
+                          })
+                        }
                         className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg flex items-center gap-1 transition cursor-pointer"
                       >
-                        <FileText className="w-3.5 h-3.5" />
+                        <FileText className="w-3.5 h-3.5 text-orange-500" />
                         <span>Ver Facturas ({item.salesCount})</span>
                       </button>
                     </div>
@@ -611,9 +637,9 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
       </div>
 
       {/* Modal: Edit Goal & Commission */}
-      {editingGoal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fadeIn">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden">
+      {editingGoal && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden my-auto">
             <div className="bg-slate-950 text-white p-5 flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-orange-500/20 text-orange-400 rounded-xl border border-orange-500/30">
@@ -710,93 +736,211 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Modal: View Invoices for Selected Employee */}
-      {viewingEmployeeSales && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fadeIn">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="bg-slate-950 text-white p-5 flex items-center justify-between border-b border-slate-800">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-orange-500/20 text-orange-400 rounded-xl border border-orange-500/30">
+      {/* Modal: View Invoices for Selected Employee (Rediseñado) */}
+      {viewingEmployeeSales && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-3 sm:p-6 overflow-y-auto animate-fadeIn">
+          <div className="bg-white border border-slate-200/90 rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden my-auto">
+            {/* Header del Modal */}
+            <div className="bg-slate-950 text-white px-6 py-4 sm:py-5 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center space-x-3.5">
+                <div className="p-3 bg-gradient-to-br from-orange-500/20 to-amber-500/10 text-orange-400 rounded-2xl border border-orange-500/30 shadow-xs">
                   <FileText className="w-5 h-5 stroke-[2.5]" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-white">Facturas Emitidas</h3>
-                  <p className="text-xs text-slate-400 font-medium">Vendedor: {viewingEmployeeSales.name}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-black text-white tracking-tight">Comprobantes de Venta Emitidos</h3>
+                    {viewingEmployeeSales.department && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                        {viewingEmployeeSales.department}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    Asesor Comercial: <span className="font-bold text-slate-200">{viewingEmployeeSales.name}</span>
+                    {viewingEmployeeSales.position && (
+                      <span className="text-slate-400 font-normal"> • {viewingEmployeeSales.position}</span>
+                    )}
+                  </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setViewingEmployeeSales(null)}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-xl transition cursor-pointer"
+                title="Cerrar modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              {(() => {
-                const empInvoices = filteredInvoices.filter(inv => {
-                  if (!inv.sellerName) return false;
-                  const sName = inv.sellerName.toLowerCase().trim();
-                  const empName = viewingEmployeeSales.name.toLowerCase().trim();
-                  return sName.includes(empName) || empName.includes(sName);
-                });
+            {(() => {
+              const empInvoices = filteredInvoices.filter(inv => {
+                if (!inv.sellerName) return false;
+                const sName = inv.sellerName.toLowerCase().trim();
+                const empName = viewingEmployeeSales.name.toLowerCase().trim();
+                return sName.includes(empName) || empName.includes(sName);
+              });
 
-                if (empInvoices.length === 0) {
-                  return (
-                    <div className="text-center py-10 bg-slate-50 rounded-2xl border border-slate-200 text-slate-500 text-xs font-medium">
-                      No hay comprobantes emitidos por {viewingEmployeeSales.name} en el período seleccionado.
+              const totalAmount = empInvoices.reduce((acc, curr) => acc + Number(curr.total || 0), 0);
+              const commRate = viewingEmployeeSales.commissionRatePercent ?? 2;
+              const estCommission = (totalAmount * commRate) / 100;
+
+              return (
+                <>
+                  {/* KPI Quick Summary Strip */}
+                  <div className="bg-slate-50/90 border-b border-slate-200/80 px-6 py-3.5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center gap-3 shadow-2xs">
+                      <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100/80 shrink-0">
+                        <FileText className="w-4 h-4 stroke-[2.5]" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Facturas / Boletas</span>
+                        <span className="text-sm font-black text-slate-900 font-mono">
+                          {empInvoices.length} {empInvoices.length === 1 ? 'comprobante' : 'comprobantes'}
+                        </span>
+                      </div>
                     </div>
-                  );
-                }
 
-                return (
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-950 text-white uppercase font-black text-[10px]">
-                        <tr>
-                          <th className="py-2.5 px-3.5">N° Comprobante</th>
-                          <th className="py-2.5 px-3.5">Fecha</th>
-                          <th className="py-2.5 px-3.5">Cliente</th>
-                          <th className="py-2.5 px-3.5">Pago</th>
-                          <th className="py-2.5 px-3.5 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {empInvoices.map(inv => (
-                          <tr key={inv.id} className="hover:bg-slate-50 transition">
-                            <td className="py-2.5 px-3.5 font-mono font-bold text-slate-950">{inv.fullNumber}</td>
-                            <td className="py-2.5 px-3.5 text-slate-500">{formatFullDate(inv.createdAt)}</td>
-                            <td className="py-2.5 px-3.5 font-bold text-slate-800">{inv.customer.name}</td>
-                            <td className="py-2.5 px-3.5">
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-                                {inv.paymentMethod}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3.5 text-right font-mono font-black text-orange-600">
-                              {formatCurrency(inv.total, settings.currencySymbol)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center gap-3 shadow-2xs">
+                      <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100/80 shrink-0">
+                        <DollarSign className="w-4 h-4 stroke-[2.5]" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Monto Total Facturado</span>
+                        <span className="text-sm font-black text-slate-900 font-mono">
+                          {formatCurrency(totalAmount, settings.currencySymbol)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-2xl border border-slate-200/80 flex items-center gap-3 shadow-2xs">
+                      <div className="p-2.5 bg-orange-50 text-orange-600 rounded-xl border border-orange-100/80 shrink-0">
+                        <Award className="w-4 h-4 stroke-[2.5]" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Comisión Estimada ({commRate}%)</span>
+                        <span className="text-sm font-black text-orange-600 font-mono">
+                          {formatCurrency(estCommission, settings.currencySymbol)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                );
-              })()}
-            </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
-              <button
-                onClick={() => setViewingEmployeeSales(null)}
-                className="px-5 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl hover:bg-slate-800 cursor-pointer"
-              >
-                Cerrar
-              </button>
-            </div>
+                  {/* Tabla de Facturas */}
+                  <div className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar">
+                    {empInvoices.length === 0 ? (
+                      <div className="text-center py-14 bg-slate-50/80 rounded-2xl border-2 border-dashed border-slate-200 space-y-2.5">
+                        <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                          Sin Comprobantes Registrados
+                        </h4>
+                        <p className="text-xs text-slate-400 max-w-sm mx-auto font-medium leading-relaxed">
+                          No se encontraron facturas ni notas de venta emitidas a nombre de <strong className="text-slate-600">{viewingEmployeeSales.name}</strong> en el período seleccionado.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100/90 text-slate-700 uppercase font-black text-[10px] tracking-wider border-b border-slate-200">
+                            <tr>
+                              <th className="py-3 px-4">N° Comprobante</th>
+                              <th className="py-3 px-4">Fecha & Hora</th>
+                              <th className="py-3 px-4">Cliente</th>
+                              <th className="py-3 px-4">Forma de Pago</th>
+                              <th className="py-3 px-4 text-center">Estado</th>
+                              <th className="py-3 px-4 text-right">Total ($)</th>
+                              {onOpenViewer && <th className="py-3 px-4 text-center">Acción</th>}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {empInvoices.map((inv) => (
+                              <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span className="font-mono font-black text-slate-900 text-xs">
+                                    {inv.fullNumber || inv.number}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span className="font-semibold text-slate-700 text-xs">
+                                    {formatDate(inv.createdAt)}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="font-bold text-slate-900 text-xs line-clamp-1">
+                                    {inv.customer?.name || 'CONSUMIDOR FINAL'}
+                                  </div>
+                                  <div className="font-mono text-[10px] text-slate-400 mt-0.5">
+                                    {inv.customer?.docNumber || inv.customer?.idNumber || '9999999999999'}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                    {getPaymentMethodLabel(inv.paymentMethod)}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-center whitespace-nowrap">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide border ${
+                                      inv.paymentStatus === 'PAGADA'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : inv.paymentStatus === 'PENDIENTE'
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                                    }`}
+                                  >
+                                    {inv.paymentStatus || 'PAGADA'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right whitespace-nowrap">
+                                  <span className="font-mono font-black text-slate-900 text-xs">
+                                    {formatCurrency(inv.total, settings.currencySymbol)}
+                                  </span>
+                                </td>
+                                {onOpenViewer && (
+                                  <td className="py-3 px-4 text-center whitespace-nowrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenViewer(inv)}
+                                      className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-200/70 rounded-xl transition cursor-pointer"
+                                      title="Ver Comprobante Completo"
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer del Modal */}
+                  <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+                    <div className="text-xs text-slate-500 font-medium">
+                      Total listado: <span className="font-mono font-black text-slate-900">{formatCurrency(totalAmount, settings.currencySymbol)}</span> ({empInvoices.length} {empInvoices.length === 1 ? 'comprobante' : 'comprobantes'})
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setViewingEmployeeSales(null)}
+                      className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

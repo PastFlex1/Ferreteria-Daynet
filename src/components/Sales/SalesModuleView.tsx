@@ -47,6 +47,7 @@ import { CommissionsAndGoalsManager } from './CommissionsAndGoalsManager';
 import { defaultSellers } from '../../data/initialData';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
+import { SriDevueltasManager } from './SriDevueltasManager';
 
 
 interface SalesModuleViewProps {
@@ -58,6 +59,7 @@ interface SalesModuleViewProps {
   onNavigateToTab: (tab: SalesSubTab) => void;
   onOpenViewer?: (invoice: Invoice) => void;
   onInvoiceOrder?: (order: Order) => void;
+  onUpdateInvoice?: (invoice: Invoice) => void;
 }
 
 export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
@@ -69,6 +71,7 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   onNavigateToTab,
   onOpenViewer,
   onInvoiceOrder,
+  onUpdateInvoice,
 }) => {
   const { showAlert } = useModal();
   const [searchTerm, setSearchTerm] = useState('');
@@ -983,11 +986,26 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
         invoices={invoices}
         settings={settings}
         onNavigateToTab={onNavigateToTab}
+        onOpenViewer={onOpenViewer}
       />
     );
   }
 
-  // Fallback for DEVOLUCIONES
+  // Módulo de Facturas Devueltas por el SRI
+  if (subTab === 'DEVOLUCIONES') {
+    return (
+      <SriDevueltasManager
+        invoices={invoices}
+        customers={customers}
+        products={products}
+        settings={settings}
+        onUpdateInvoice={onUpdateInvoice}
+        onOpenViewer={onOpenViewer}
+      />
+    );
+  }
+
+  // Fallback general
   return (
     <div className="bg-white border border-slate-200/90 rounded-2xl p-8 shadow-sm text-center space-y-4">
       <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mx-auto border border-orange-200">
@@ -995,12 +1013,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
       </div>
       <div>
         <h2 className="text-lg font-black text-slate-950 uppercase tracking-wide">
-          {subTab === 'DEVOLUCIONES' ? 'Facturas Devueltas (SRI)' : subTab.replace(/_/g, ' ')}
+          {subTab.replace(/_/g, ' ')}
         </h2>
         <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 font-medium">
-          {subTab === 'DEVOLUCIONES' 
-            ? 'Bandeja de comprobantes electrónicos devueltos por el SRI. Recuerda que una devolución no es un error fatal del sistema, simplemente significa que el SRI devuelve la factura para su corrección o revisión antes de autorizarla.'
-            : `Módulo de gestión de ${subTab.toLowerCase().replace(/_/g, ' ')} habilitado y sincronizado con el catálogo general.`}
+          Módulo de gestión de {subTab.toLowerCase().replace(/_/g, ' ')} habilitado y sincronizado con el catálogo general.
         </p>
       </div>
       <button

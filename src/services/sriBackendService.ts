@@ -200,6 +200,34 @@ export class SriBackendService {
   }
 
   /**
+   * 4️⃣ ANULACIÓN SRI
+   * Solicita la anulación de un comprobante al backend.
+   */
+  public static async anularFactura(claveAcceso: string, correo?: string): Promise<{ success: boolean; mensaje?: string; error?: string }> {
+    try {
+      const baseUrl = this.getBaseUrl();
+      const payload: any = { claveAcceso };
+      if (correo) payload.correo = correo;
+
+      const resAnular = await fetch(`${baseUrl}/api/sri/anular`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resAnular.ok) {
+        const errorText = await resAnular.text();
+        throw new Error(errorText || 'Error al intentar anular la factura en el SRI.');
+      }
+      
+      const mensaje = await resAnular.text();
+      return { success: true, mensaje };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Error de conexión al anular la factura.' };
+    }
+  }
+
+  /**
    * 🚀 PIPELINE UNIFICADO DE EMISIÓN DE FACTURA
    * Orquesta:
    * 1. Generación de XML (con Clave de Acceso 49D Módulo 11)
@@ -301,6 +329,65 @@ export class SriBackendService {
         estado: 'ERROR',
         xmlOriginal,
         mensaje: err.message || 'Error inesperado durante el procesamiento SRI.',
+      };
+    }
+  }
+
+  /**
+   * 5️⃣ GENERAR XML ATS (Anexo Transaccional Simplificado)
+   * Envía los datos tributarios al endpoint /api/ats/generate del backend Spring Boot.
+   */
+  public static async generarAts(payload: {
+    mes: string;
+    anio: string;
+    rucInformante: string;
+    razonSocial: string;
+    numEstabRuc?: string;
+    compras?: any[];
+    ventas?: any[];
+    anulados?: any[];
+  }): Promise<{
+    estado: 'OK' | 'ERROR';
+    xmlGenerado: boolean;
+    contenido?: string;
+    metadata?: {
+      rucInformante: string;
+      razonSocial: string;
+      periodo: string;
+      totalVentas: number;
+      totalCompras: number;
+      totalAnulados: number;
+      numEstablecimientos: number;
+      fechaGeneracion: string;
+      versionAts: string;
+    };
+    errores?: Array<{
+      campo: string;
+      mensaje: string;
+      severidad: 'ERROR' | 'ADVERTENCIA';
+    }>;
+  }> {
+    try {
+      const baseUrl = this.getBaseUrl();
+      const res = await fetch(`${baseUrl}/api/ats/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      return data;
+    } catch (error: any) {
+      return {
+        estado: 'ERROR',
+        xmlGenerado: false,
+        errores: [
+          {
+            campo: 'conexion',
+            mensaje: error.message || 'Error de conexión con el servicio ATS.',
+            severidad: 'ERROR',
+          },
+        ],
       };
     }
   }

@@ -85,6 +85,8 @@ export interface Customer {
   address?: string;
   creditLimit: number;
   currentBalance: number; // Deuda actual acumulada
+  idNumber?: string; // Compatibilidad SRI / alias de docNumber
+  idType?: string;   // Compatibilidad SRI / alias de docType
 }
 
 export type DocumentType = 'FACTURA' | 'BOLETA' | 'COTIZACION';
