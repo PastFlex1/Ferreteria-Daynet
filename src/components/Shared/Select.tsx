@@ -95,11 +95,22 @@ export const Select: React.FC<SelectProps> = (props) => {
   const selectedOption = options.find((opt) => String(opt.value) === String(value));
   const displayLabel = selectedOption ? selectedOption.label : '-- Seleccionar --';
 
+  const getTextContent = (node: any): string => {
+    if (node === null || node === undefined) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(getTextContent).join(' ');
+    if (React.isValidElement(node) && (node.props as any).children) {
+      return getTextContent((node.props as any).children);
+    }
+    return '';
+  };
+
   const filteredOptions = options.filter(opt => {
     if (!searchable || !searchQuery) return true;
-    const optLabel = String(opt.label).toLowerCase();
-    const query = searchQuery.toLowerCase();
-    return optLabel.includes(query);
+    const query = searchQuery.toLowerCase().trim();
+    const optLabel = getTextContent(opt.label).toLowerCase();
+    const optValue = String(opt.value).toLowerCase();
+    return optLabel.includes(query) || optValue.includes(query);
   });
 
   const handleSelect = (val: string) => {
@@ -139,14 +150,14 @@ export const Select: React.FC<SelectProps> = (props) => {
           : 'bg-white border border-slate-200/90 text-slate-800 ring-1 ring-slate-900/10'
       } rounded-2xl shadow-2xl overflow-hidden animate-fadeIn`}
     >
-      {searchable !== false && options.length > 5 && (
+      {searchable !== false && (
         <div className={`p-2 border-b ${isDark ? 'border-slate-800 bg-slate-900/60' : 'border-slate-100 bg-slate-50/80'}`}>
           <div className="relative">
             <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
             <input
               ref={searchInputRef}
               type="text"
-              placeholder={`Buscar en ${options.length} opciones...`}
+              placeholder={`Escriba para filtrar ${options.length} opciones...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onClick={(e) => e.stopPropagation()}

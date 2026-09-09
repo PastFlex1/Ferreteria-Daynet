@@ -28,9 +28,34 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
     amount: '',
   });
 
-  // Filtrar estrictamente solo Facturas (excluyendo cotizaciones, proformas y anuladas)
+  // Filtrar estrictamente solo Facturas AUTORIZADAS por el SRI (excluyendo pendientes, devueltas, anuladas y cotizaciones)
   const facturasOnly = useMemo(() => {
-    return invoices.filter(inv => inv.documentType === 'FACTURA' && inv.paymentStatus !== 'ANULADA');
+    return invoices.filter(inv => {
+      // 1. Debe ser documento tipo Factura
+      if (inv.documentType !== 'FACTURA') return false;
+
+      // 2. No debe estar anulada
+      if (inv.paymentStatus === 'ANULADA') return false;
+
+      // 3. Excluir explícitamente las devueltas, rechazadas o con error SRI
+      const isDevueltaOrFailed = 
+        inv.sriStatus === 'DEVUELTA' || 
+        inv.sriStatus === 'NO AUTORIZADO' || 
+        inv.sriStatus === 'PENDIENTE' || 
+        inv.sriStatus === 'ERROR';
+
+      if (isDevueltaOrFailed) return false;
+
+      // 4. Debe contar con estado AUTORIZADO o número de autorización del SRI
+      const isAuthorized = inv.sriStatus === 'AUTORIZADO' || !!inv.sriNumeroAutorizacion;
+      
+      // En facturas legacy donde sriStatus aún no esté asignado ni devuelto, permitir si no estuvo anulada
+      if (!inv.sriStatus && !inv.sriNumeroAutorizacion) {
+        return true;
+      }
+
+      return isAuthorized;
+    });
   }, [invoices]);
 
   const selectedInvoice = facturasOnly.find(inv => inv.id === formData.invoiceRef || inv.fullNumber === formData.invoiceRef);
@@ -119,11 +144,19 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
               <Select
                 required
                 value={formData.invoiceRef}
-                onChange={(e) => setFormData({ ...formData, invoiceRef: e.target.value })}
+                onChange={(e) => {
+                  const invId = e.target.value;
+                  const targetInv = facturasOnly.find((inv) => inv.id === invId || inv.fullNumber === invId);
+                  setFormData({
+                    ...formData,
+                    invoiceRef: invId,
+                    amount: targetInv ? targetInv.total.toFixed(2) : '',
+                  });
+                }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
               >
                 <option value="">
-                  {facturasOnly.length === 0 ? 'No hay facturas emitidas disponibles' : 'Seleccione una factura emitida...'}
+                  {facturasOnly.length === 0 ? 'No hay facturas autorizadas por el SRI disponibles' : 'Seleccione una factura autorizada por el SRI...'}
                 </option>
                 {facturasOnly.map(inv => (
                   <option key={inv.id} value={inv.id}>

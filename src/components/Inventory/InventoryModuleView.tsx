@@ -694,9 +694,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     showToast('Reporte de lotes y vencimientos descargado en Excel.', 'success');
   };
 
-  // 5. Cambio de Precio Masivo State
+  // 5. Cambio Masivo (Precios, Costos y Stock) State
   const [selectedCategoryForPrice, setSelectedCategoryForPrice] = useState('TODAS');
-  const [priceAdjustType, setPriceAdjustType] = useState<'PORCENTAJE_AUMENTO' | 'PORCENTAJE_DESCUENTO' | 'FIJO'>('PORCENTAJE_AUMENTO');
+  const [bulkTargetField, setBulkTargetField] = useState<'PRECIO_VENTA' | 'COSTO' | 'STOCK'>('PRECIO_VENTA');
+  const [bulkAdjustType, setBulkAdjustType] = useState<'PORCENTAJE_AUMENTO' | 'PORCENTAJE_DESCUENTO' | 'INCREMENTO_FIJO' | 'DESCUENTO_FIJO' | 'VALOR_EXACTO'>('PORCENTAJE_AUMENTO');
   const [priceAdjustValue, setPriceAdjustValue] = useState('');
   const [priceChangeSuccessMsg, setPriceChangeSuccessMsg] = useState<string | null>(null);
 
@@ -1286,30 +1287,102 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   >([]);
   const [importProductsSuccess, setImportProductsSuccess] = useState<string | null>(null);
 
-  // Exec price change
-  const handleExecutePriceChange = () => {
+  // Simulación en Vivo para Cambio Masivo
+  const bulkChangePreview = useMemo(() => {
     const val = parseFloat(priceAdjustValue) || 0;
-    if (val === 0) return;
+    const filteredProds = products.filter((p) =>
+      selectedCategoryForPrice === 'TODAS' || p.category === selectedCategoryForPrice
+    );
 
-    products.forEach((p) => {
-      if (selectedCategoryForPrice === 'TODAS' || p.category === selectedCategoryForPrice) {
-        let newPrice = p.price;
-        if (priceAdjustType === 'PORCENTAJE_AUMENTO') {
-          newPrice = p.price * (1 + val / 100);
-        } else if (priceAdjustType === 'PORCENTAJE_DESCUENTO') {
-          newPrice = Math.max(0, p.price * (1 - val / 100));
-        } else {
-          newPrice = val;
+    return filteredProds.map((p) => {
+      let currentVal = p.price;
+      if (bulkTargetField === 'COSTO') currentVal = p.costPrice || 0;
+      if (bulkTargetField === 'STOCK') currentVal = p.stock || 0;
+
+      let newVal = currentVal;
+      if (priceAdjustValue.trim() !== '' && !isNaN(val)) {
+        if (bulkAdjustType === 'PORCENTAJE_AUMENTO') {
+          newVal = currentVal * (1 + val / 100);
+        } else if (bulkAdjustType === 'PORCENTAJE_DESCUENTO') {
+          newVal = Math.max(0, currentVal * (1 - val / 100));
+        } else if (bulkAdjustType === 'INCREMENTO_FIJO') {
+          newVal = currentVal + val;
+        } else if (bulkAdjustType === 'DESCUENTO_FIJO') {
+          newVal = Math.max(0, currentVal - val);
+        } else if (bulkAdjustType === 'VALOR_EXACTO') {
+          newVal = Math.max(0, val);
         }
-
-        onSaveProduct({
-          ...p,
-          price: Math.round(newPrice * 100) / 100
-        });
       }
-    });
 
-    setPriceChangeSuccessMsg(`¡Precios actualizados exitosamente para la categoría [${selectedCategoryForPrice}]!`);
+      if (bulkTargetField === 'STOCK') {
+        newVal = p.allowFractional ? Math.round(newVal * 100) / 100 : Math.round(newVal);
+      } else {
+        newVal = Math.round(newVal * 100) / 100;
+      }
+
+      const diff = newVal - currentVal;
+
+      return {
+        product: p,
+        currentVal,
+        newVal,
+        diff,
+      };
+    });
+  }, [products, selectedCategoryForPrice, bulkTargetField, bulkAdjustType, priceAdjustValue]);
+
+  // Exec bulk price, cost, or stock change
+  const handleExecutePriceChange = () => {
+    if (!priceAdjustValue || isNaN(parseFloat(priceAdjustValue))) {
+      showAlert('Por favor ingrese un valor o porcentaje numérico válido.', 'Valor Requerido', 'warning');
+      return;
+    }
+
+    const val = parseFloat(priceAdjustValue);
+    if (val <= 0 && bulkAdjustType !== 'VALOR_EXACTO') {
+      showAlert('El porcentaje o valor de ajuste debe ser mayor a 0.', 'Valor Inválido', 'warning');
+      return;
+    }
+
+    if (bulkChangePreview.length === 0) {
+      showAlert('No hay productos en la categoría seleccionada para actualizar.', 'Sin Productos', 'warning');
+      return;
+    }
+
+    const targetLabel = bulkTargetField === 'PRECIO_VENTA'
+      ? 'Precios de Venta'
+      : bulkTargetField === 'COSTO'
+      ? 'Precios de Costo'
+      : 'Stock / Existencias';
+
+    showConfirm(
+      `¿Está seguro de aplicar este cambio masivo en los ${targetLabel} de ${bulkChangePreview.length} producto(s)?`,
+      () => {
+        let count = 0;
+        bulkChangePreview.forEach(({ product, newVal, currentVal }) => {
+          if (bulkTargetField === 'PRECIO_VENTA') {
+            onSaveProduct({ ...product, price: newVal });
+            count++;
+          } else if (bulkTargetField === 'COSTO') {
+            onSaveProduct({ ...product, costPrice: newVal });
+            count++;
+          } else if (bulkTargetField === 'STOCK') {
+            const diff = newVal - currentVal;
+            if (diff !== 0) {
+              onStockAdjust(product.id, diff);
+              count++;
+            }
+          }
+        });
+
+        showToast(`¡Se actualizaron masivamente ${count} productos con éxito!`, 'success');
+        setPriceChangeSuccessMsg(`¡${targetLabel} actualizados exitosamente para ${count} productos en [${selectedCategoryForPrice}]!`);
+        setPriceAdjustValue('');
+      },
+      'Confirmar Cambio Masivo',
+      'Sí, Aplicar Ahora',
+      'Cancelar'
+    );
   };
 
   // Submit Formal Adjust
@@ -2612,72 +2685,193 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
          --------------------------------------------------------------------- */}
       {subTab === 'CAMBIO_PRECIO_MASIVO' && (
         <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="border-b border-slate-200 pb-4">
-            <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-              <RefreshCw className="w-5 h-5 text-indigo-500" />
-              <span>Actualización Masiva de Precios de Venta</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Aplica incrementos o descuentos globales por porcentaje a categorías completas de artículos.
-            </p>
+          <div className="border-b border-slate-200 pb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-indigo-600" />
+                <span>Actualización Masiva de Precios, Costos y Stock</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Aplica incrementos, descuentos o valores exactos a categorías completas de artículos o al catálogo general.
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="px-3 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs rounded-full">
+                {bulkChangePreview.length} Productos Seleccionados
+              </span>
+            </div>
           </div>
 
           {priceChangeSuccessMsg && (
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center justify-between">
-              <span>{priceChangeSuccessMsg}</span>
-              <button onClick={() => setPriceChangeSuccessMsg(null)}>✕</button>
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{priceChangeSuccessMsg}</span>
+              </div>
+              <button onClick={() => setPriceChangeSuccessMsg(null)} className="text-emerald-700 hover:text-emerald-900 font-bold">✕</button>
             </div>
           )}
 
-          <div className="p-5 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-4 max-w-xl text-xs">
-            <div>
-              <label className="block font-black text-slate-800 mb-1">Seleccionar Categoría de Productos</label>
-              <CustomSelect
-                value={selectedCategoryForPrice}
-                onChange={(val) => setSelectedCategoryForPrice(val)}
-                options={[
-                  { value: 'TODAS', label: `Todas las Categorías (${products.length} productos)` },
-                  ...Array.from(new Set(products.map((p) => p.category))).map((cat) => ({ value: cat, label: cat }))
-                ]}
-                variant="dark"
-                className="w-full"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+          {/* Form controls grid */}
+          <div className="p-5 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-4 text-xs shadow-inner">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Target Field */}
               <div>
-                <label className="block font-black text-slate-800 mb-1">Tipo de Ajuste</label>
+                <label className="block font-black text-slate-800 mb-1">1. Campo a Ajustar</label>
                 <CustomSelect
-                  value={priceAdjustType}
-                  onChange={(val) => setPriceAdjustType(val as any)}
+                  value={bulkTargetField}
+                  onChange={(val) => setBulkTargetField(val as any)}
                   options={[
-                    { value: 'PORCENTAJE_AUMENTO', label: 'Aumento Porcentual (+%)', color: 'emerald' },
-                    { value: 'PORCENTAJE_DESCUENTO', label: 'Descuento Porcentual (-%)', color: 'rose' },
-                    { value: 'FIJO', label: 'Monto Fijo Exacto ($)', color: 'blue' }
+                    { value: 'PRECIO_VENTA', label: 'Precio de Venta ($)', color: 'emerald' },
+                    { value: 'COSTO', label: 'Precio de Costo ($)', color: 'amber' },
+                    { value: 'STOCK', label: 'Stock / Existencias (unid)', color: 'blue' }
                   ]}
                   variant="dark"
                   className="w-full"
                 />
               </div>
 
+              {/* Category */}
               <div>
-                <label className="block font-black text-slate-800 mb-1">Valor / Porcentaje</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={priceAdjustValue}
-                  onChange={(e) => setPriceAdjustValue(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-mono font-bold text-indigo-600 text-sm"
+                <label className="block font-black text-slate-800 mb-1">2. Categoría de Productos</label>
+                <CustomSelect
+                  value={selectedCategoryForPrice}
+                  onChange={(val) => setSelectedCategoryForPrice(val)}
+                  options={[
+                    { value: 'TODAS', label: `Todas las Categorías (${products.length} productos)` },
+                    ...Array.from(new Set(products.map((p) => p.category))).map((cat) => ({ value: cat, label: cat }))
+                  ]}
+                  variant="dark"
+                  className="w-full"
+                />
+              </div>
+
+              {/* Adjust Operation Type */}
+              <div>
+                <label className="block font-black text-slate-800 mb-1">3. Tipo de Operación</label>
+                <CustomSelect
+                  value={bulkAdjustType}
+                  onChange={(val) => setBulkAdjustType(val as any)}
+                  options={[
+                    { value: 'PORCENTAJE_AUMENTO', label: 'Aumento Porcentual (+%)', color: 'emerald' },
+                    { value: 'PORCENTAJE_DESCUENTO', label: 'Descuento Porcentual (-%)', color: 'rose' },
+                    { value: 'INCREMENTO_FIJO', label: 'Incremento Fijo (+monto/unid)', color: 'blue' },
+                    { value: 'DESCUENTO_FIJO', label: 'Descuento Fijo (-monto/unid)', color: 'amber' },
+                    { value: 'VALOR_EXACTO', label: 'Establecer Valor Fijo Exacto', color: 'purple' }
+                  ]}
+                  variant="dark"
+                  className="w-full"
                 />
               </div>
             </div>
 
-            <button
-              onClick={handleExecutePriceChange}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition cursor-pointer"
-            >
-              Aplicar Cambio de Precios Masivo Ahora
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end pt-1">
+              <div>
+                <label className="block font-black text-slate-800 mb-1">
+                  4. Valor / Porcentaje a Aplicar
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Ej: 10 para 10% o $10"
+                    value={priceAdjustValue}
+                    onChange={(e) => setPriceAdjustValue(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl font-mono font-bold text-slate-900 text-sm shadow-sm"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                    {bulkAdjustType.includes('PORCENTAJE') ? '%' : bulkTargetField === 'STOCK' ? 'unid' : '$'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={handleExecutePriceChange}
+                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Aplicar Cambio Masivo Ahora ({bulkChangePreview.length} Productos)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Preview Table */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black text-slate-900 tracking-wide uppercase flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-indigo-600" />
+                <span>Simulación en Vivo / Vista Previa de Cambios</span>
+              </h3>
+              <span className="text-[11px] text-slate-500 font-medium">
+                Mostrando la simulación del resultado final antes de confirmar
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 max-h-96">
+              <table className="w-full text-left text-xs text-slate-800">
+                <thead className="bg-slate-100 border-b border-slate-200 text-slate-900 font-black sticky top-0">
+                  <tr>
+                    <th className="py-2.5 px-3 w-28">Código SKU</th>
+                    <th className="py-2.5 px-3">Producto</th>
+                    <th className="py-2.5 px-3">Categoría</th>
+                    <th className="py-2.5 px-3 text-right">Valor Actual</th>
+                    <th className="py-2.5 px-3 text-right">Nuevo Valor Proyectado</th>
+                    <th className="py-2.5 px-3 text-right">Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white font-medium">
+                  {bulkChangePreview.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                        No hay productos que coincidan con la categoría seleccionada.
+                      </td>
+                    </tr>
+                  ) : (
+                    bulkChangePreview.map(({ product, currentVal, newVal, diff }) => {
+                      const isMoney = bulkTargetField !== 'STOCK';
+                      const isUp = diff > 0;
+                      const isDown = diff < 0;
+
+                      return (
+                        <tr key={product.id} className="hover:bg-slate-50 transition">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                            {product.sku}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            {product.name}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {product.category}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                            {isMoney ? formatCurrency(currentVal, settings.currencySymbol) : `${currentVal} ${product.unit || 'u.'}`}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-indigo-700 bg-indigo-50/50">
+                            {isMoney ? formatCurrency(newVal, settings.currencySymbol) : `${newVal} ${product.unit || 'u.'}`}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold">
+                            {diff === 0 ? (
+                              <span className="text-slate-400">0.00</span>
+                            ) : isUp ? (
+                              <span className="text-emerald-600">
+                                +{isMoney ? formatCurrency(diff, settings.currencySymbol) : `${diff} ${product.unit || 'u.'}`}
+                              </span>
+                            ) : (
+                              <span className="text-rose-600">
+                                {isMoney ? formatCurrency(diff, settings.currencySymbol) : `${diff} ${product.unit || 'u.'}`}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

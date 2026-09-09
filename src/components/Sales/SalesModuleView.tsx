@@ -73,7 +73,7 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   onInvoiceOrder,
   onUpdateInvoice,
 }) => {
-  const { showAlert } = useModal();
+  const { showAlert, showToast } = useModal();
   const [searchTerm, setSearchTerm] = useState('');
 
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
@@ -171,7 +171,11 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     const nextNum = (parseInt(secCreditNote, 10) + 1).toString().padStart(9, '0');
     setSecCreditNote(nextNum);
     setIsCreditNoteModalOpen(false);
-    showAlert('Nota de Crédito generada y autorizada exitosamente.', 'Éxito', 'success');
+
+    // Abrir automáticamente el RIDE RIDE Oficial de la Nota de Crédito
+    setSelectedCreditNoteForView(data);
+    setIsCreditNoteViewerOpen(true);
+    showToast('Nota de Crédito generada y autorizada exitosamente.', 'success');
   };
 
   const handleSaveRetention = (data: any) => {
