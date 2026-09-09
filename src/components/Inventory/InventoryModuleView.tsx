@@ -709,13 +709,15 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   const [adjustHistory, setAdjustHistory] = useState<{ id: string; date: string; product: string; qty: number; reason: string; user: string; }[]>([]);
 
   // Interactive Multi-Product Stock Adjustment Rows State (matching image design)
+  const [adjustMovementType, setAdjustMovementType] = useState<'INGRESO' | 'EGRESO'>('INGRESO');
   const [adjustRows, setAdjustRows] = useState<{
     productId: string;
     sku: string;
     name: string;
+    unit: string;
     category?: string;
     currentStock: number;
-    newStock: number;
+    adjustQty: number;
   }[]>([]);
   const [adjustSearch, setAdjustSearch] = useState('');
   const [isAdjustSearchOpen, setIsAdjustSearchOpen] = useState(false);
@@ -733,9 +735,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
         productId: p.id,
         sku: p.sku,
         name: p.name,
+        unit: p.unit || 'UND',
         category: p.category,
         currentStock: p.stock,
-        newStock: p.stock,
+        adjustQty: 1,
       },
     ]);
     setAdjustSearch('');
@@ -746,9 +749,9 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     setAdjustRows((prev) => prev.filter((r) => r.productId !== productId));
   };
 
-  const handleUpdateAdjustRowStock = (productId: string, val: number) => {
+  const handleUpdateAdjustRowQty = (productId: string, val: number) => {
     setAdjustRows((prev) =>
-      prev.map((r) => (r.productId === productId ? { ...r, newStock: val } : r))
+      prev.map((r) => (r.productId === productId ? { ...r, adjustQty: Math.max(0, val) } : r))
     );
   };
 
@@ -762,8 +765,9 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     const newHistoryEntries: any[] = [];
 
     adjustRows.forEach((r) => {
-      const diff = r.newStock - r.currentStock;
-      if (diff !== 0) {
+      if (r.adjustQty > 0) {
+        const diff = adjustMovementType === 'INGRESO' ? r.adjustQty : -r.adjustQty;
+        const finalStock = r.currentStock + diff;
         onStockAdjust(r.productId, diff);
         modifiedCount++;
         newHistoryEntries.push({
@@ -771,7 +775,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           date: new Date().toISOString().replace('T', ' ').substring(0, 16),
           product: r.name,
           qty: diff,
-          reason: `Ajuste manual de stock (${r.currentStock} ➔ ${r.newStock})`,
+          reason: `Ajuste (${adjustMovementType}): ${r.currentStock} ➔ ${finalStock}`,
           user: 'Administrador POS',
         });
       }
@@ -783,7 +787,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
     showToast(
       modifiedCount > 0
-        ? `¡Ajuste de stock guardado exitosamente! (${modifiedCount} productos actualizados)`
+        ? `¡Ajuste de stock (${adjustMovementType}) guardado exitosamente! (${modifiedCount} productos actualizados)`
         : 'Registro guardado sin cambios en existencias.',
       'success'
     );
@@ -2880,7 +2884,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           SUBTAB 7: AJUSTE DE STOCK DE PRODUCTOS
          --------------------------------------------------------------------- */}
       {subTab === 'AJUSTE_STOCK' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-5 shadow-sm">
           {/* Breadcrumb / Top Indicator */}
           <div className="flex items-center gap-2 text-xs font-bold text-slate-500 border-b border-slate-100 pb-3">
             <span className="flex items-center gap-1"><Package className="w-3.5 h-3.5 text-slate-400" /> Panel</span>
@@ -2891,29 +2895,44 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           {/* Title Header */}
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-black text-slate-950 flex items-center gap-2 tracking-tight">
-              <Search className="w-6 h-6 text-slate-800" />
+              <Sliders className="w-6 h-6 text-slate-800" />
               <span>Ajuste de Stock de Productos</span>
             </h2>
           </div>
 
-          {/* Búsqueda de Productos Section */}
-          <div className="space-y-1.5 relative">
-            <label className="block text-xs font-black text-slate-900">
-              Búsqueda de productos:
+          {/* 1. Tipo de Movimiento Section */}
+          <div className="max-w-xs space-y-1">
+            <label className="block text-xs font-bold text-slate-800">
+              Tipo de Movimento:
+            </label>
+            <Select
+              value={adjustMovementType}
+              onChange={(e) => setAdjustMovementType(e.target.value as 'INGRESO' | 'EGRESO')}
+              className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
+            >
+              <option value="INGRESO">Ingreso</option>
+              <option value="EGRESO">Egreso</option>
+            </Select>
+          </div>
+
+          {/* 2. Buscador de productos Section */}
+          <div className="space-y-1 relative">
+            <label className="block text-xs font-bold text-slate-800">
+              Buscador de productos:
             </label>
 
             <div className="flex items-center">
               <div className="relative w-full">
                 <input
                   type="text"
-                  placeholder="Ingrese el nombre de un producto"
+                  placeholder="Ingrese un nombre o código de producto"
                   value={adjustSearch}
                   onChange={(e) => {
                     setAdjustSearch(e.target.value);
                     setIsAdjustSearchOpen(true);
                   }}
                   onFocus={() => setIsAdjustSearchOpen(true)}
-                  className="w-full pl-3 pr-10 py-2 bg-white border border-blue-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-xs font-medium rounded-l-xl focus:outline-none"
+                  className="w-full pl-3.5 pr-10 py-2 bg-white border border-slate-300 focus:border-blue-500 text-slate-900 text-xs font-medium rounded-l-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-2xs"
                 />
                 {adjustSearch && (
                   <button
@@ -2932,9 +2951,9 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAdjustSearchOpen(!isAdjustSearchOpen)}
-                className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-r-xl border border-blue-600 flex items-center justify-center transition cursor-pointer shrink-0"
+                className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-r-xl border border-slate-700 flex items-center justify-center transition cursor-pointer shrink-0"
               >
-                <Filter className="w-4 h-4" />
+                <Sliders className="w-4 h-4" />
               </button>
             </div>
 
@@ -2959,11 +2978,11 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                       <div>
                         <span className="font-bold text-slate-900 block">{p.name}</span>
                         <span className="text-[10px] text-slate-500 font-mono">
-                          Código: {p.sku} • Cat: {p.category}
+                          Código: {p.sku} • {p.unit || 'UND'}
                         </span>
                       </div>
                       <div className="text-right">
-                        <span className="font-mono font-bold text-slate-700 block">Stock: {p.stock} u.</span>
+                        <span className="font-mono font-bold text-slate-700 block">Stock: {p.stock}</span>
                         <span className="text-[10px] text-blue-600 font-bold">+ Agregar</span>
                       </div>
                     </button>
@@ -2981,109 +3000,136 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
             )}
           </div>
 
-          {/* Table: Ajuste de Stock de Productos */}
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          {/* 3. Table: Ajuste de Stock */}
+          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
             <table className="w-full text-left text-xs text-slate-800">
-              <thead className="bg-slate-100 border-b border-slate-200 text-slate-900 font-black text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-900 font-bold text-xs">
                 <tr>
-                  <th className="py-3 px-4 text-center w-16">Eliminar</th>
-                  <th className="py-3 px-4 w-36">Código</th>
-                  <th className="py-3 px-4">Producto</th>
-                  <th className="py-3 px-4 text-center w-28">Stock actual</th>
-                  <th className="py-3 px-4 text-center w-44">Stock nuevo</th>
+                  <th className="py-2.5 px-3 text-center w-20">Eliminar</th>
+                  <th className="py-2.5 px-3 w-40">Código</th>
+                  <th className="py-2.5 px-3">Producto</th>
+                  <th className="py-2.5 px-3 text-center w-36">Unidad de Medida</th>
+                  <th className="py-2.5 px-3 text-center w-36">Stock actual</th>
+                  <th className="py-2.5 px-3 text-center w-48">Cantidad de ajuste</th>
+                  <th className="py-2.5 px-3 text-center w-36">Nuevo stock</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white font-medium">
                 {adjustRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center text-slate-400">
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
                       <Search className="w-8 h-8 mx-auto mb-2 opacity-40 text-blue-500" />
                       <p className="font-bold text-slate-700 text-sm">No hay productos seleccionados para ajuste</p>
                       <p className="text-xs text-slate-400 mt-1">
-                        Utilice el campo de búsqueda arriba para ingresar productos y modificar sus existencias.
+                        Utilice el buscador superior para agregar productos a la lista de ajuste.
                       </p>
                     </td>
                   </tr>
                 ) : (
-                  adjustRows.map((row) => (
-                    <tr key={row.productId} className="hover:bg-slate-50 transition">
-                      {/* Eliminar Button */}
-                      <td className="py-3 px-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAdjustRow(row.productId)}
-                          className="w-7 h-7 bg-rose-600 hover:bg-rose-700 text-white rounded-md transition flex items-center justify-center mx-auto cursor-pointer shadow-sm"
-                          title="Eliminar de la lista"
-                        >
-                          <X className="w-4 h-4 font-black" />
-                        </button>
-                      </td>
+                  adjustRows.map((row) => {
+                    const nuevoStock = adjustMovementType === 'INGRESO'
+                      ? row.currentStock + row.adjustQty
+                      : Math.max(0, row.currentStock - row.adjustQty);
 
-                      {/* Código */}
-                      <td className="py-3 px-4 font-mono font-bold text-slate-900">
-                        {row.sku}
-                      </td>
-
-                      {/* Producto */}
-                      <td className="py-3 px-4">
-                        <span className="font-bold text-slate-900 block">{row.name}</span>
-                        {row.category && (
-                          <span className="text-[10px] text-slate-500 font-medium">({row.category})</span>
-                        )}
-                      </td>
-
-                      {/* Stock actual */}
-                      <td className={`py-3 px-4 text-center font-mono font-bold text-sm ${
-                        row.currentStock < 0 ? 'text-rose-600' : 'text-slate-900'
-                      }`}>
-                        {row.currentStock}
-                      </td>
-
-                      {/* Stock nuevo with - / + controls */}
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center">
+                    return (
+                      <tr key={row.productId} className="hover:bg-slate-50/80 transition">
+                        {/* Eliminar Button */}
+                        <td className="py-2.5 px-3 text-center">
                           <button
                             type="button"
-                            onClick={() => handleUpdateAdjustRowStock(row.productId, Math.max(0, row.newStock - 1))}
-                            className="px-2.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-l-md transition cursor-pointer text-xs"
+                            onClick={() => handleRemoveAdjustRow(row.productId)}
+                            className="w-7 h-7 bg-rose-600 hover:bg-rose-700 text-white rounded-md transition flex items-center justify-center mx-auto cursor-pointer shadow-2xs"
+                            title="Eliminar registro"
                           >
-                            -
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                          <input
-                            type="number"
-                            step="any"
-                            value={row.newStock}
-                            onChange={(e) => handleUpdateAdjustRowStock(row.productId, parseFloat(e.target.value) || 0)}
-                            className="w-20 py-1 px-2 border-y border-slate-300 text-center font-mono font-black text-slate-900 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateAdjustRowStock(row.productId, row.newStock + 1)}
-                            className="px-2.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-r-md transition cursor-pointer text-xs"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+
+                        {/* Código */}
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                          {row.sku}
+                        </td>
+
+                        {/* Producto */}
+                        <td className="py-2.5 px-3 font-bold text-slate-900 uppercase">
+                          {row.name}
+                        </td>
+
+                        {/* Unidad de Medida */}
+                        <td className="py-2.5 px-3 text-center font-bold text-slate-700 uppercase">
+                          {row.unit || 'UND'}
+                        </td>
+
+                        {/* Stock actual Badge */}
+                        <td className="py-2.5 px-3 text-center">
+                          <span className="px-2.5 py-0.5 bg-emerald-600 text-white font-mono font-bold text-xs rounded-full inline-block">
+                            {row.currentStock.toFixed(2)}
+                          </span>
+                        </td>
+
+                        {/* Cantidad de ajuste with - and + buttons */}
+                        <td className="py-2.5 px-3 text-center">
+                          <div className="flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateAdjustRowQty(row.productId, Math.max(0, row.adjustQty - 1))}
+                              className="px-2.5 py-1 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-l-md transition cursor-pointer text-xs"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={row.adjustQty === 0 ? '' : row.adjustQty}
+                              onChange={(e) => handleUpdateAdjustRowQty(row.productId, parseFloat(e.target.value) || 0)}
+                              className="w-20 py-1 px-2 border-y border-slate-300 text-center font-mono font-bold text-slate-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateAdjustRowQty(row.productId, row.adjustQty + 1)}
+                              className="px-2.5 py-1 bg-slate-600 hover:bg-slate-700 text-white font-black rounded-r-md transition cursor-pointer text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Nuevo stock */}
+                        <td className="py-2.5 px-3 text-center font-mono font-black text-slate-900 text-xs">
+                          {nuevoStock.toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* Footer Summary text */}
-          <div className="text-xs text-slate-600 font-medium">
-            Mostrando registros del {adjustRows.length > 0 ? 1 : 0} al {adjustRows.length} de un total de {adjustRows.length} registros
+          {/* 4. Footer info & Pagination */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="text-xs text-slate-600 font-medium">
+              Mostrando {adjustRows.length > 0 ? 1 : 0} a {adjustRows.length} de {adjustRows.length} registros
+            </div>
+            {adjustRows.length > 0 && (
+              <div className="flex items-center space-x-1 text-xs">
+                <button type="button" disabled className="px-2 py-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed">&laquo;</button>
+                <button type="button" disabled className="px-2 py-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed">&lt;</button>
+                <span className="px-3 py-1 bg-blue-600 text-white rounded font-bold">1</span>
+                <button type="button" disabled className="px-2 py-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed">&gt;</button>
+                <button type="button" disabled className="px-2 py-1 bg-slate-100 text-slate-400 rounded cursor-not-allowed">&raquo;</button>
+              </div>
+            )}
           </div>
 
-          {/* Action Buttons: Guardar registro & Cancelar */}
+          {/* 5. Action Buttons: Guardar registro & Cancelar */}
           <div className="flex items-center space-x-3 pt-2">
             <button
               type="button"
               onClick={handleSaveBatchAdjust}
               disabled={adjustRows.length === 0}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-md"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-xs"
             >
               <Save className="w-4 h-4" />
               <span>Guardar registro</span>
@@ -3093,7 +3139,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               type="button"
               onClick={() => setAdjustRows([])}
               disabled={adjustRows.length === 0}
-              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-md"
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition flex items-center gap-2 cursor-pointer shadow-xs"
             >
               <X className="w-4 h-4" />
               <span>Cancelar</span>

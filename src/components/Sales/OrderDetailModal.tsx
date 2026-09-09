@@ -156,19 +156,34 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div className="space-y-2">
             <h4 className="font-black text-slate-900 uppercase text-[11px]">Productos Solicitados ({order.items.length})</h4>
             <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
-              {order.items.map((item, idx) => (
-                <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                  <div>
-                    <div className="font-bold text-slate-900">{item.productName}</div>
-                    <div className="text-[11px] text-slate-500">
-                      Cant: <strong className="text-slate-900">{item.qty}</strong> x {formatCurrency(item.unitPrice, settings.currencySymbol)}
+              {order.items.map((item, idx) => {
+                const itemTaxRate = typeof item.taxRate === 'number' ? item.taxRate : (settings.defaultTaxRate || 15);
+                const unitPriceWithTax = item.unitPrice * (1 + itemTaxRate / 100);
+                const totalWithTax = item.subtotal * (1 + itemTaxRate / 100);
+
+                return (
+                  <div key={idx} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                    <div>
+                      <div className="font-bold text-slate-900">{item.productName}</div>
+                      <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                        <span>Cant: <strong className="text-slate-900">{item.qty}</strong></span>
+                        <span>•</span>
+                        <span>P.U. s/IVA: {formatCurrency(item.unitPrice, settings.currencySymbol)}</span>
+                        <span>•</span>
+                        <span className="font-bold text-slate-700">P.U. c/IVA: {formatCurrency(unitPriceWithTax, settings.currencySymbol)}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono font-black text-orange-600 text-sm">
+                        {formatCurrency(totalWithTax, settings.currencySymbol)} <span className="text-[10px] font-extrabold text-slate-500">c/IVA</span>
+                      </div>
+                      <div className="font-mono text-[10px] text-slate-400">
+                        {formatCurrency(item.subtotal, settings.currencySymbol)} s/IVA
+                      </div>
                     </div>
                   </div>
-                  <div className="font-mono font-extrabold text-slate-950">
-                    {formatCurrency(item.subtotal, settings.currencySymbol)}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

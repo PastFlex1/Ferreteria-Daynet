@@ -77,12 +77,13 @@ export const downloadOrderPdf = (order: Order, settings: StoreSettings) => {
   doc.rect(15, y, pageWidth - 30, 8, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.text('#', 18, y + 5.5);
-  doc.text('DESCRIPCIÓN DEL PRODUCTO', 28, y + 5.5);
-  doc.text('CANT.', pageWidth - 65, y + 5.5, { align: 'right' });
-  doc.text('P. UNIT', pageWidth - 40, y + 5.5, { align: 'right' });
-  doc.text('SUBTOTAL', pageWidth - 18, y + 5.5, { align: 'right' });
+  doc.text('DESCRIPCIÓN DEL PRODUCTO', 26, y + 5.5);
+  doc.text('CANT.', pageWidth - 80, y + 5.5, { align: 'right' });
+  doc.text('P. U. s/IVA', pageWidth - 56, y + 5.5, { align: 'right' });
+  doc.text('P. U. c/IVA', pageWidth - 36, y + 5.5, { align: 'right' });
+  doc.text('TOTAL c/IVA', pageWidth - 18, y + 5.5, { align: 'right' });
 
   y += 8;
 
@@ -92,6 +93,10 @@ export const downloadOrderPdf = (order: Order, settings: StoreSettings) => {
   doc.setFontSize(8);
 
   order.items.forEach((item, index) => {
+    const itemTaxRate = typeof item.taxRate === 'number' ? item.taxRate : (settings.defaultTaxRate || 15);
+    const unitPriceWithTax = item.unitPrice * (1 + itemTaxRate / 100);
+    const totalWithTax = item.subtotal * (1 + itemTaxRate / 100);
+
     // Alternating row background
     if (index % 2 === 1) {
       doc.setFillColor(248, 250, 252);
@@ -101,12 +106,13 @@ export const downloadOrderPdf = (order: Order, settings: StoreSettings) => {
     doc.line(15, y + 7, pageWidth - 15, y + 7);
 
     doc.text(String(index + 1), 18, y + 5);
-    const prodName = item.productName.length > 55 ? item.productName.substring(0, 52) + '...' : item.productName;
-    doc.text(prodName, 28, y + 5);
-    doc.text(String(item.qty), pageWidth - 65, y + 5, { align: 'right' });
-    doc.text(formatCurrency(item.unitPrice, settings.currencySymbol), pageWidth - 40, y + 5, { align: 'right' });
+    const prodName = item.productName.length > 40 ? item.productName.substring(0, 37) + '...' : item.productName;
+    doc.text(prodName, 26, y + 5);
+    doc.text(String(item.qty), pageWidth - 80, y + 5, { align: 'right' });
+    doc.text(formatCurrency(item.unitPrice, settings.currencySymbol), pageWidth - 56, y + 5, { align: 'right' });
+    doc.text(formatCurrency(unitPriceWithTax, settings.currencySymbol), pageWidth - 36, y + 5, { align: 'right' });
     doc.setFont('helvetica', 'bold');
-    doc.text(formatCurrency(item.subtotal, settings.currencySymbol), pageWidth - 18, y + 5, { align: 'right' });
+    doc.text(formatCurrency(totalWithTax, settings.currencySymbol), pageWidth - 18, y + 5, { align: 'right' });
     doc.setFont('helvetica', 'normal');
 
     y += 7;

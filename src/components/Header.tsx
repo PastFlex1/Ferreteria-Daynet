@@ -95,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
   onCollapsedChange,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // ─── Sub-tab definitions ─────────────────────────────────────────────────────
   const salesSubTabs: { id: SalesSubTab; label: string; icon: React.ReactNode }[] = [

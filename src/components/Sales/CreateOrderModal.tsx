@@ -495,31 +495,41 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                     No se encontraron productos coincidentes.
                   </div>
                 ) : (
-                  filteredProducts.slice(0, 5).map((p) => (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        handleAddProduct(p);
-                        setProductSearch('');
-                      }}
-                      className="p-2.5 hover:bg-orange-50 flex items-center justify-between cursor-pointer transition"
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-slate-900">{p.name}</div>
-                        <div className="text-[10px] text-slate-500">
-                          Cód: {p.sku} | Stock: {p.stock} {p.unit}
+                  filteredProducts.slice(0, 5).map((p) => {
+                    const taxRate = typeof p.taxRate === 'number' ? p.taxRate : (settings.defaultTaxRate || 15);
+                    const priceWithTax = p.price * (1 + taxRate / 100);
+
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          handleAddProduct(p);
+                          setProductSearch('');
+                        }}
+                        className="p-2.5 hover:bg-orange-50 flex items-center justify-between cursor-pointer transition"
+                      >
+                        <div>
+                          <div className="text-xs font-bold text-slate-900">{p.name}</div>
+                          <div className="text-[10px] text-slate-500">
+                            Cód: {p.sku} | Stock: {p.stock} {p.unit}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="font-mono font-black text-orange-600 text-xs">
+                              {formatCurrency(priceWithTax, settings.currencySymbol)} <span className="text-[9px] font-bold text-slate-500">c/IVA</span>
+                            </div>
+                            <div className="font-mono text-[10px] text-slate-400">
+                              {formatCurrency(p.price, settings.currencySymbol)} s/IVA
+                            </div>
+                          </div>
+                          <span className="p-1 bg-orange-500 text-white rounded-lg text-[10px] font-bold">
+                            + Agregar
+                          </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-black text-orange-600 text-xs">
-                          {formatCurrency(p.price, settings.currencySymbol)}
-                        </span>
-                        <span className="p-1 bg-orange-500 text-white rounded-lg text-[10px] font-bold">
-                          + Agregar
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -549,47 +559,64 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                     <tr>
                       <th className="py-2.5 px-3">Producto</th>
                       <th className="py-2.5 px-3 text-center">Cant.</th>
-                      <th className="py-2.5 px-3 text-right">P. Unitario</th>
-                      <th className="py-2.5 px-3 text-right">Subtotal</th>
+                      <th className="py-2.5 px-3 text-right">P. Unit. (s/IVA)</th>
+                      <th className="py-2.5 px-3 text-right bg-slate-900 text-orange-400">P. Unit. (c/IVA)</th>
+                      <th className="py-2.5 px-3 text-right">Subtotal (s/IVA)</th>
+                      <th className="py-2.5 px-3 text-right bg-slate-900 text-orange-400">Total (c/IVA)</th>
                       <th className="py-2.5 px-3 text-center">Acción</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {orderItems.map((item) => (
-                      <tr key={item.productId} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-slate-900">
-                          {item.productName}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <input
-                            type="number"
-                            step="any"
-                            min="0.0001"
-                            placeholder="1"
-                            value={item.qty === 0 ? '' : item.qty}
-                            onChange={(e) =>
-                              handleUpdateQty(item.productId, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)
-                            }
-                            className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-center font-bold text-xs"
-                          />
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-700">
-                          {formatCurrency(item.unitPrice, settings.currencySymbol)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-950">
-                          {formatCurrency(item.subtotal, settings.currencySymbol)}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(item.productId)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {orderItems.map((item) => {
+                      const itemTaxRate = typeof item.taxRate === 'number' ? item.taxRate : (settings.defaultTaxRate || 15);
+                      const unitPriceWithTax = item.unitPrice * (1 + itemTaxRate / 100);
+                      const totalWithTax = item.subtotal * (1 + itemTaxRate / 100);
+
+                      return (
+                        <tr key={item.productId} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            <div>{item.productName}</div>
+                            <span className="text-[9px] font-mono text-slate-400 font-semibold">
+                              IVA: {itemTaxRate}%
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <input
+                              type="number"
+                              step="any"
+                              min="0.0001"
+                              placeholder="1"
+                              value={item.qty === 0 ? '' : item.qty}
+                              onChange={(e) =>
+                                handleUpdateQty(item.productId, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)
+                              }
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-center font-bold text-xs"
+                            />
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-600 text-xs">
+                            {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 text-xs bg-orange-50/30">
+                            {formatCurrency(unitPriceWithTax, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-600 text-xs">
+                            {formatCurrency(item.subtotal, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-orange-600 text-xs bg-orange-50/30">
+                            {formatCurrency(totalWithTax, settings.currencySymbol)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(item.productId)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

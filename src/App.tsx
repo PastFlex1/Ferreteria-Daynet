@@ -72,7 +72,7 @@ export default function App() {
   const [blockerInitialCash, setBlockerInitialCash] = useState('500');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isTabLoading, setIsTabLoading] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [posInitialCart, setPosInitialCart] = useState<CartItem[]>([]);
   const [posInitialCustomer, setPosInitialCustomer] = useState<Customer | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
