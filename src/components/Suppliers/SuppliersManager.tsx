@@ -39,6 +39,7 @@ import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { useCedulaSearch } from '../../hooks/useCedulaSearch';
 import { Select } from '../Shared/Select';
 import { LocationSelectSection } from '../Shared/LocationSelectSection';
+import { CustomDatePicker } from '../Shared/CustomDatePicker';
 
 interface SuppliersManagerProps {
   subTab: SuppliersSubTab;
@@ -1161,10 +1162,9 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
 
                     <div>
                       <label className="block font-bold text-slate-700 mb-1 text-[11px]">Fecha Cobro Estimada</label>
-                      <input
-                        type="date"
+                      <CustomDatePicker
                         value={paymentForm.checkPaymentDate}
-                        onChange={(e) => setPaymentForm({ ...paymentForm, checkPaymentDate: e.target.value })}
+                        onChange={(val) => setPaymentForm({ ...paymentForm, checkPaymentDate: val })}
                         className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs font-bold"
                       />
                     </div>

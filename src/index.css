@@ -363,3 +363,18 @@ input[type="password"]:-webkit-autofill {
   caret-color: #f8fafc !important;
   transition: background-color 5000s ease-in-out 0s;
 }
+
+/* Global Date Picker & Accent Styling */
+input[type="date"] {
+  accent-color: #f97316;
+  color-scheme: light;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s, transform 0.2s;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}

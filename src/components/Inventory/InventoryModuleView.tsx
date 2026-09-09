@@ -1900,19 +1900,17 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block font-black text-slate-800 mb-1">Fecha Inicio</label>
-                      <input
-                        type="date"
+                      <CustomDatePicker
                         value={newPromo.startDate || new Date().toISOString().split('T')[0]}
-                        onChange={(e) => setNewPromo({ ...newPromo, startDate: e.target.value })}
+                        onChange={(val) => setNewPromo({ ...newPromo, startDate: val })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
                       />
                     </div>
                     <div>
                       <label className="block font-black text-slate-800 mb-1">Fecha Fin</label>
-                      <input
-                        type="date"
+                      <CustomDatePicker
                         value={newPromo.endDate || '2026-12-31'}
-                        onChange={(e) => setNewPromo({ ...newPromo, endDate: e.target.value })}
+                        onChange={(val) => setNewPromo({ ...newPromo, endDate: val })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
                       />
                     </div>
@@ -4180,12 +4178,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                     <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Fecha Inicio Traslado *
                     </label>
-                    <input
-                      type="date"
-                      required
+                    <CustomDatePicker
                       value={guiaStartDate}
-                      onChange={(e) => setGuiaStartDate(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      onChange={setGuiaStartDate}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus-within:ring-2 focus-within:ring-amber-500"
                     />
                   </div>
 
@@ -4193,12 +4189,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                     <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Fecha Fin Estimada *
                     </label>
-                    <input
-                      type="date"
-                      required
+                    <CustomDatePicker
                       value={guiaEndDate}
-                      onChange={(e) => setGuiaEndDate(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      onChange={setGuiaEndDate}
+                      className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-900 focus-within:ring-2 focus-within:ring-amber-500"
                     />
                   </div>
 
