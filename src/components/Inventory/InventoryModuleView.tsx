@@ -3213,7 +3213,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+            <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
               <button
                 type="button"
                 onClick={() => {
@@ -3221,7 +3221,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   setWarehouseFormData({ name: '', code: '', address: '', city: 'Quito', phone: '', isMain: false });
                   setIsWarehouseModalOpen(true);
                 }}
-                className="flex-1 sm:flex-none px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 border border-slate-300 cursor-pointer"
+                className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 border border-slate-300 cursor-pointer shrink-0"
                 title="Administrar bodegas reales, almacenes y sucursales"
               >
                 <Building className="w-4 h-4 text-blue-600 stroke-[2.5]" />
@@ -3231,7 +3231,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               <button
                 type="button"
                 onClick={handleExportTransfersExcel}
-                className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer"
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer shrink-0"
                 title="Exportar historial de traslados a Excel"
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-400 stroke-[2.5]" />
@@ -3249,10 +3249,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   setGuiaRoute(`${transferOrigin} ➔ ${transferDestination}`);
                   setIsTransferModalOpen(true);
                 }}
-                className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
               >
                 <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span>+ Nueva Transferencia & Despacho</span>
+                <span>Nueva Transferencia & Despacho</span>
               </button>
             </div>
           </div>

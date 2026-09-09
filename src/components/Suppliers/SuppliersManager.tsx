@@ -103,6 +103,78 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
   // Cuentas por Pagar (Payable Invoices)
   const [payables, setPayables] = useFirestoreSync<PayableInvoice[]>('ferreteria_payables', []);
 
+  // Historial de Compras para Auto-Sincronización
+  const [purchasesHistory] = useFirestoreSync<any[]>('ferreteria_purchases', []);
+
+  // Auto-Sync: Cargar facturas de compras a crédito de ferreteria_purchases hacia ferreteria_payables
+  useEffect(() => {
+    if (!purchasesHistory || purchasesHistory.length === 0) return;
+
+    let hasPayablesChange = false;
+    const updatedPayables = [...payables];
+
+    purchasesHistory.forEach((purch: any) => {
+      if (purch.paymentStatus === 'CREDITO_PENDIENTE' || purch.paymentCondition === 'CREDITO') {
+        const invNum = purch.invoiceNumber || `FAC-${purch.id}`;
+        const supId = purch.supplier?.id || 'sup-gen';
+        const supTaxId = purch.supplier?.taxId || purch.supplierTaxId || '9999999999001';
+
+        const exists = updatedPayables.some(
+          (p) => p.invoiceNumber === invNum && (p.supplierId === supId || p.supplierTaxId === supTaxId)
+        );
+
+        if (!exists) {
+          hasPayablesChange = true;
+          const paid = purch.amountPaid || 0;
+          const total = purch.total || 0;
+          const unpaid = total - paid;
+          updatedPayables.unshift({
+            id: `pay-sync-${purch.id}`,
+            invoiceNumber: invNum,
+            supplierId: supId,
+            supplierName: purch.supplier?.name || 'Proveedor',
+            supplierTaxId: supTaxId,
+            issueDate: purch.purchaseDate || purch.date || new Date().toISOString().split('T')[0],
+            dueDate: purch.dueDate || new Date().toISOString().split('T')[0],
+            totalAmount: total,
+            paidAmount: paid,
+            status: unpaid <= 0 ? 'PAGADA' : 'PENDIENTE',
+            notes: purch.notes || 'Registrada en Facturas de Compra a Crédito'
+          });
+        }
+      }
+    });
+
+    if (hasPayablesChange) {
+      setPayables(updatedPayables);
+    }
+  }, [purchasesHistory, payables]);
+
+  // Sincronizar saldos acumulados de deuda con cada proveedor
+  useEffect(() => {
+    if (!suppliers || suppliers.length === 0 || !payables) return;
+
+    let hasSupplierChanges = false;
+    const updatedSuppliers = suppliers.map((sup) => {
+      const pendingDebt = payables
+        .filter((p) => (p.supplierId === sup.id || p.supplierTaxId === sup.taxId) && p.status !== 'PAGADA')
+        .reduce((acc, p) => acc + (p.totalAmount - p.paidAmount), 0);
+
+      if (sup.currentBalance !== pendingDebt) {
+        hasSupplierChanges = true;
+        return {
+          ...sup,
+          currentBalance: pendingDebt
+        };
+      }
+      return sup;
+    });
+
+    if (hasSupplierChanges) {
+      setSuppliers(updatedSuppliers);
+    }
+  }, [payables, suppliers]);
+
   // Payment History Log
   const [paymentHistory, setPaymentHistory] = useFirestoreSync<PaymentRecord[]>('ferreteria_supplier_payments', []);
 

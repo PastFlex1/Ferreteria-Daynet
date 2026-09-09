@@ -8,6 +8,13 @@ interface ExcelExportOptions {
   data: any[];
 }
 
+function ensureValidExcelFilename(filename: string): string {
+  let cleanName = (filename || 'Reporte_Excel').replace(/\.(xlsx|xls|csv)$/i, '');
+  cleanName = cleanName.replace(/[/\\?%*:|"<>]/g, '_').replace(/\s+/g, '_').trim();
+  if (!cleanName) cleanName = 'Reporte_Excel';
+  return `${cleanName}.xlsx`;
+}
+
 export function exportToModernExcel({ filename, sheetName, title, columns, data }: ExcelExportOptions) {
   const wb = XLSX.utils.book_new();
 
@@ -95,7 +102,8 @@ export function exportToModernExcel({ filename, sheetName, title, columns, data 
   ws['!cols'] = columns.map(col => ({ wch: col.width || 15 }));
 
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, filename);
+  const safeFilename = ensureValidExcelFilename(filename);
+  XLSX.writeFile(wb, safeFilename, { bookType: 'xlsx' });
 }
 
 export interface KardexExcelExportParams {
@@ -540,5 +548,6 @@ export function exportKardexToModernExcel({
       ];
 
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, filename);
+  const safeFilename = ensureValidExcelFilename(filename);
+  XLSX.writeFile(wb, safeFilename, { bookType: 'xlsx' });
 }

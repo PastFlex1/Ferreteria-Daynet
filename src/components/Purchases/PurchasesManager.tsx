@@ -122,6 +122,51 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   // Registered Purchase Invoices History
   const [purchasesHistory, setPurchasesHistory] = useFirestoreSync<PurchaseInvoice[]>('ferreteria_purchases', []);
 
+  // Cuentas por Pagar (Payables Sync)
+  const [payables, setPayables] = useFirestoreSync<any[]>('ferreteria_payables', []);
+
+  // Auto-sync credit purchases with ferreteria_payables
+  useEffect(() => {
+    if (!purchasesHistory || purchasesHistory.length === 0) return;
+
+    let hasPayableChanges = false;
+    const currentPayables = [...(payables || [])];
+
+    purchasesHistory.forEach((purch) => {
+      if (purch.paymentStatus === 'CREDITO_PENDIENTE' || (purch as any).paymentCondition === 'CREDITO') {
+        const invNum = purch.invoiceNumber || `FAC-${purch.id}`;
+        const supTaxId = purch.supplier?.taxId || '9999999999001';
+        const exists = currentPayables.some(
+          (p) => p.invoiceNumber === invNum && (p.supplierId === purch.supplier?.id || p.supplierTaxId === supTaxId)
+        );
+
+        if (!exists) {
+          hasPayableChanges = true;
+          const total = purch.total || 0;
+          const paid = purch.amountPaid || 0;
+          const unpaid = total - paid;
+          currentPayables.unshift({
+            id: `pay-sync-${purch.id}`,
+            invoiceNumber: invNum,
+            supplierId: purch.supplier?.id || 'sup-gen',
+            supplierName: purch.supplier?.name || 'Proveedor',
+            supplierTaxId: supTaxId,
+            issueDate: purch.purchaseDate || new Date().toISOString().split('T')[0],
+            dueDate: purch.dueDate || new Date().toISOString().split('T')[0],
+            totalAmount: total,
+            paidAmount: paid,
+            status: unpaid <= 0 ? 'PAGADA' : 'PENDIENTE',
+            notes: purch.notes || 'Sincronizado desde Compras a Crédito'
+          });
+        }
+      }
+    });
+
+    if (hasPayableChanges) {
+      setPayables(currentPayables);
+    }
+  }, [purchasesHistory, payables]);
+
   // Sync with the same batches used in Inventory
   const [batches, setBatches] = useFirestoreSync<any[]>('ferreteria_product_batches', []);
 
@@ -557,6 +602,42 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     });
     setBatches(newBatchesList);
 
+    // If purchase is on credit, insert record into ferreteria_payables & update supplier currentBalance
+    if (paymentCondition === 'CREDITO') {
+      const invNum = invoiceNumberInput || `FAC-${Date.now().toString().slice(-6)}`;
+      const supId = supplier.id || `sup-${Date.now()}`;
+      const supTaxId = supplier.taxId || '9999999999001';
+
+      const newPayable: any = {
+        id: `pay-${Date.now()}`,
+        invoiceNumber: invNum,
+        supplierId: supId,
+        supplierName: supplier.name || 'Proveedor',
+        supplierTaxId: supTaxId,
+        issueDate: finalPurchaseDate,
+        dueDate: dueDateObj.toISOString().split('T')[0],
+        totalAmount: total,
+        paidAmount: 0,
+        status: 'PENDIENTE',
+        notes: `Registrado automáticamente desde Compra a Crédito #${invNum}`
+      };
+
+      setPayables([newPayable, ...(payables || [])]);
+
+      // Actualizar saldo de deuda del proveedor en ferreteria_suppliers_details
+      setSuppliers(
+        (suppliers || []).map((s) => {
+          if (s.id === supId || s.taxId === supTaxId) {
+            return {
+              ...s,
+              currentBalance: (s.currentBalance || 0) + total
+            };
+          }
+          return s;
+        })
+      );
+    }
+
     setPurchasesHistory([newInvoice, ...purchasesHistory]);
     setPurchaseItems([]);
     setInvoiceNumberInput('');
@@ -567,7 +648,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setCurrentBatch('');
     setCurrentExpiry('');
     setCreditDaysInput('');
-    setPurchaseSuccessMsg(`¡Factura de Compra #${newInvoice.invoiceNumber} registrada exitosamente! Se actualizó el inventario.`);
+    setPurchaseSuccessMsg(`¡Factura de Compra #${newInvoice.invoiceNumber} registrada exitosamente! Se actualizó el inventario ${paymentCondition === 'CREDITO' ? 'y se registró en Cuentas por Pagar.' : '.'}`);
   };
 
   // Process Abono to Supplier Invoice
@@ -584,6 +665,38 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       amountPaid: Math.min(newAmountPaid, selectedInvoiceView.total),
       paymentStatus: isPaidInFull ? 'PAGADA' : 'CREDITO_PENDIENTE'
     };
+
+    // Sincronizar abonados con ferreteria_payables
+    if (payables && payables.length > 0) {
+      setPayables(
+        payables.map((p: any) => {
+          if (p.invoiceNumber === selectedInvoiceView.invoiceNumber && (p.supplierId === selectedInvoiceView.supplier.id || p.supplierTaxId === selectedInvoiceView.supplier.taxId)) {
+            const paid = p.paidAmount + abono;
+            return {
+              ...p,
+              paidAmount: Math.min(paid, p.totalAmount),
+              status: paid >= p.totalAmount ? 'PAGADA' : p.status
+            };
+          }
+          return p;
+        })
+      );
+    }
+
+    // Actualizar saldo pendiente en ferreteria_suppliers_details
+    if (suppliers && suppliers.length > 0) {
+      setSuppliers(
+        suppliers.map((s: any) => {
+          if (s.id === selectedInvoiceView.supplier.id || s.taxId === selectedInvoiceView.supplier.taxId) {
+            return {
+              ...s,
+              currentBalance: Math.max(0, (s.currentBalance || 0) - abono)
+            };
+          }
+          return s;
+        })
+      );
+    }
 
     setPurchasesHistory(purchasesHistory.map((inv) => (inv.id === updated.id ? updated : inv)));
     setSelectedInvoiceView(updated);
