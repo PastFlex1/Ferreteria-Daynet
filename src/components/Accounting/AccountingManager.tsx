@@ -57,6 +57,14 @@ import { AccountingSubTab, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { Select } from '../Shared/Select';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
+import { 
+  OFFICIAL_NIIF_ACCOUNT_PLAN, 
+  DEFAULT_ACCOUNTING_MAPPING, 
+  AccountingMapping,
+  buildAutomaticInvoiceEntry,
+  buildAutomaticPurchaseEntry,
+  getNextChildAccountCode
+} from '../../utils/niifAccountingData';
 
 interface AccountingManagerProps {
   subTab: AccountingSubTab;
@@ -182,34 +190,17 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   // 4. Asientos Contables / Libro Diario
   const [journalEntries, setJournalEntries] = useFirestoreSync<JournalEntry[]>('ferreteria_journal_entries', []);
 
-  // 5. Plan de Cuentas NIIF
-  const [accountPlan, setAccountPlan] = useFirestoreSync<AccountPlanItem[]>('ferreteria_account_plan', [
-    { code: '1.0.00.00.00', name: 'ACTIVO', level: 1, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: false, balance: 0 },
-    { code: '1.1.00.00.00', name: 'ACTIVO CORRIENTE', level: 2, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: false, balance: 0 },
-    { code: '1.1.01.00.00', name: 'EFECTIVO Y EQUIVALENTES DE EFECTIVO', level: 3, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: false, balance: 0 },
-    { code: '1.1.01.01.01', name: 'Caja General Mostrador', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.01.02.01', name: 'Banco Pichincha Cta Cte #2100876543', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.01.02.02', name: 'Banco Guayaquil Cta Cte #0012876451', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.01.03.01', name: 'Vouchers por Liquidar / Tarjetas en Tránsito', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.02.05.01', name: 'Anticipo Retención IR por Tarjetas de Crédito', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.02.05.02', name: 'Crédito Tributario Retención IVA Tarjetas', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.03.01.01', name: 'Inventario de Mercaderías Ferretería', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '1.1.04.01.01', name: 'Crédito Tributario IVA Compras y Servicios', level: 4, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '2.0.00.00.00', name: 'PASIVO', level: 1, type: 'PASIVO', nature: 'ACREEDORA', acceptsMovement: false, balance: 0 },
-    { code: '2.1.01.01.01', name: 'Cuentas por Pagar Proveedores Locales', level: 4, type: 'PASIVO', nature: 'ACREEDORA', acceptsMovement: true, balance: 0 },
-    { code: '2.1.04.01.01', name: 'IVA Cobrado por Pagar SRI', level: 4, type: 'PASIVO', nature: 'ACREEDORA', acceptsMovement: true, balance: 0 },
-    { code: '3.0.00.00.00', name: 'PATRIMONIO', level: 1, type: 'PATRIMONIO', nature: 'ACREEDORA', acceptsMovement: false, balance: 0 },
-    { code: '3.1.01.01.01', name: 'Capital Social Suscrito', level: 4, type: 'PATRIMONIO', nature: 'ACREEDORA', acceptsMovement: true, balance: 0 },
-    { code: '3.3.01.01.01', name: 'Utilidades Acumuladas Ejercicios Anteriores', level: 4, type: 'PATRIMONIO', nature: 'ACREEDORA', acceptsMovement: true, balance: 0 },
-    { code: '4.0.00.00.00', name: 'INGRESOS', level: 1, type: 'INGRESO', nature: 'ACREEDORA', acceptsMovement: false, balance: 0 },
-    { code: '4.1.01.01.01', name: 'Ventas de Mercadería Mostrador', level: 4, type: 'INGRESO', nature: 'ACREEDORA', acceptsMovement: true, balance: 0 },
-    { code: '5.0.00.00.00', name: 'GASTOS', level: 1, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: false, balance: 0 },
-    { code: '5.1.01.01.01', name: 'Costo de Ventas Ferretería', level: 4, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '5.2.01.01.01', name: 'Gastos de Personal / Sueldos', level: 4, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '5.2.01.02.01', name: 'Gastos de Arriendo de Local', level: 4, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '5.2.01.03.01', name: 'Servicios Básicos y Comunicaciones', level: 4, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 },
-    { code: '5.2.03.01.01', name: 'Comisiones Bancarias y Red POS Tarjetas', level: 4, type: 'GASTO', nature: 'DEUDORA', acceptsMovement: true, balance: 0 }
-  ]);
+  // 5. Plan de Cuentas NIIF (Oficial 5 Niveles)
+  const [accountPlan, setAccountPlan] = useFirestoreSync<AccountPlanItem[]>('ferreteria_account_plan', OFFICIAL_NIIF_ACCOUNT_PLAN);
+
+  // 5.1 Motor de Mapeo Paramétrico Contable NIIF
+  const [accountingMapping, setAccountingMapping] = useFirestoreSync<AccountingMapping>('ferreteria_accounting_mapping', DEFAULT_ACCOUNTING_MAPPING);
+
+  // UI States para Catálogo y Parametrización
+  const [accountPlanFilterElement, setAccountPlanFilterElement] = useState<'TODOS' | 'ACTIVO' | 'PASIVO' | 'PATRIMONIO' | 'INGRESO' | 'GASTO'>('TODOS');
+  const [accountSearchQuery, setAccountSearchQuery] = useState('');
+  const [editingAccount, setEditingAccount] = useState<AccountPlanItem | null>(null);
+  const [isSyncingEntries, setIsSyncingEntries] = useState(false);
 
   // 6. Periodos Fiscales
   const [fiscalPeriods, setFiscalPeriods] = useFirestoreSync<FiscalPeriod[]>('ferreteria_fiscal_periods', []);
@@ -220,20 +211,68 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
   const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
 
-  // Dynamic Metrics
-  const totalActivos = React.useMemo(() => accountPlan.filter(a => a.type === 'ACTIVO' && a.acceptsMovement).reduce((acc, c) => acc + (c.balance || 0), 0), [accountPlan]);
-  const totalPasivos = React.useMemo(() => accountPlan.filter(a => a.type === 'PASIVO' && a.acceptsMovement).reduce((acc, c) => acc + (c.balance || 0), 0), [accountPlan]);
-  const totalPatrimonio = React.useMemo(() => accountPlan.filter(a => a.type === 'PATRIMONIO' && a.acceptsMovement).reduce((acc, c) => acc + (c.balance || 0), 0), [accountPlan]);
+  // Cálculo de Saldos Mayorizados en Tiempo Real por Cuenta a partir del Libro Diario
+  const accountBalances = useMemo(() => {
+    const balances: Record<string, number> = {};
+    accountPlan.forEach(a => {
+      balances[a.code] = Number(a.balance || 0);
+    });
+
+    journalEntries.forEach(je => {
+      if (je.status === 'ASENTADO') {
+        je.items.forEach(it => {
+          const acc = accountPlan.find(a => a.code === it.accountCode);
+          const nature = acc ? acc.nature : (it.accountCode.startsWith('1') || it.accountCode.startsWith('5') ? 'DEUDORA' : 'ACREEDORA');
+          const current = balances[it.accountCode] || 0;
+          if (nature === 'DEUDORA') {
+            balances[it.accountCode] = current + (it.debit || 0) - (it.credit || 0);
+          } else {
+            balances[it.accountCode] = current + (it.credit || 0) - (it.debit || 0);
+          }
+        });
+      }
+    });
+
+    return balances;
+  }, [accountPlan, journalEntries]);
+
+  // Dynamic Metrics NIIF
+  const totalActivos = React.useMemo(() => {
+    return accountPlan
+      .filter(a => a.type === 'ACTIVO' && a.acceptsMovement)
+      .reduce((acc, c) => acc + (accountBalances[c.code] || 0), 0);
+  }, [accountPlan, accountBalances]);
+
+  const totalPasivos = React.useMemo(() => {
+    return accountPlan
+      .filter(a => a.type === 'PASIVO' && a.acceptsMovement)
+      .reduce((acc, c) => acc + (accountBalances[c.code] || 0), 0);
+  }, [accountPlan, accountBalances]);
+
+  const totalPatrimonio = React.useMemo(() => {
+    return accountPlan
+      .filter(a => a.type === 'PATRIMONIO' && a.acceptsMovement)
+      .reduce((acc, c) => acc + (accountBalances[c.code] || 0), 0);
+  }, [accountPlan, accountBalances]);
+
   const totalIngresos = React.useMemo(() => {
-    const fromAccounts = accountPlan.filter(a => a.type === 'INGRESO' && a.acceptsMovement).reduce((acc, c) => acc + (c.balance || 0), 0);
-    const fromInvoices = invoices.filter(i => i.paymentStatus !== 'ANULADA' && i.documentType !== 'COTIZACION').reduce((acc, i) => acc + (i.total || 0), 0);
+    const fromAccounts = accountPlan
+      .filter(a => a.type === 'INGRESO' && a.acceptsMovement)
+      .reduce((acc, c) => acc + (accountBalances[c.code] || 0), 0);
+    const fromInvoices = invoices
+      .filter(i => i.paymentStatus !== 'ANULADA' && i.documentType !== 'COTIZACION')
+      .reduce((acc, i) => acc + (i.total || 0), 0);
     return Math.max(fromAccounts, fromInvoices);
-  }, [accountPlan, invoices]);
+  }, [accountPlan, accountBalances, invoices]);
+
   const totalGastos = React.useMemo(() => {
-    const fromAccounts = accountPlan.filter(a => a.type === 'GASTO' && a.acceptsMovement).reduce((acc, c) => acc + (c.balance || 0), 0);
+    const fromAccounts = accountPlan
+      .filter(a => a.type === 'GASTO' && a.acceptsMovement)
+      .reduce((acc, c) => acc + (accountBalances[c.code] || 0), 0);
     const fromPurchases = purchases.reduce((acc, p) => acc + (p.total || 0), 0);
     return Math.max(fromAccounts, fromPurchases);
-  }, [accountPlan, purchases]);
+  }, [accountPlan, accountBalances, purchases]);
+
   const utilidadNeta = React.useMemo(() => totalIngresos - totalGastos, [totalIngresos, totalGastos]);
 
   // Search filter
@@ -883,30 +922,204 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     });
   };
 
+  const handleOpenNewAccountModal = (parent?: AccountPlanItem) => {
+    setEditingAccount(null);
+    if (parent) {
+      const nextCode = getNextChildAccountCode(parent.code, accountPlan);
+      const nextLevel = Math.min(5, (parent.level || 1) + 1);
+      setNewAccount({
+        code: nextCode,
+        name: '',
+        level: nextLevel,
+        type: parent.type,
+        nature: parent.nature,
+        acceptsMovement: nextLevel >= 4
+      });
+    } else {
+      setNewAccount({
+        code: '',
+        name: '',
+        level: 5,
+        type: 'ACTIVO',
+        nature: 'DEUDORA',
+        acceptsMovement: true
+      });
+    }
+    setIsAccountModalOpen(true);
+  };
+
+  const handleOpenEditAccountModal = (account: AccountPlanItem) => {
+    setEditingAccount(account);
+    setNewAccount({
+      code: account.code,
+      name: account.name,
+      level: account.level,
+      type: account.type,
+      nature: account.nature,
+      acceptsMovement: account.acceptsMovement
+    });
+    setIsAccountModalOpen(true);
+  };
+
   const handleSaveAccount = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAccount.code || !newAccount.name) return;
 
+    const trimmedCode = newAccount.code.trim();
+    const trimmedName = newAccount.name.trim();
+
+    // Auto-detect type & nature based on first digit if not set
+    const firstDigit = trimmedCode.charAt(0);
+    let autoType = newAccount.type || 'ACTIVO';
+    let autoNature = newAccount.nature || 'DEUDORA';
+    if (firstDigit === '1') { autoType = 'ACTIVO'; autoNature = 'DEUDORA'; }
+    else if (firstDigit === '2') { autoType = 'PASIVO'; autoNature = 'ACREEDORA'; }
+    else if (firstDigit === '3') { autoType = 'PATRIMONIO'; autoNature = 'ACREEDORA'; }
+    else if (firstDigit === '4') { autoType = 'INGRESO'; autoNature = 'ACREEDORA'; }
+    else if (firstDigit === '5') { autoType = 'GASTO'; autoNature = 'DEUDORA'; }
+
     const acc: AccountPlanItem = {
-      code: newAccount.code,
-      name: newAccount.name,
-      level: newAccount.level || 4,
-      type: newAccount.type || 'ACTIVO',
-      nature: newAccount.nature || 'DEUDORA',
-      acceptsMovement: true,
-      balance: 0
+      code: trimmedCode,
+      name: trimmedName,
+      level: Number(newAccount.level || 5),
+      type: autoType,
+      nature: autoNature,
+      acceptsMovement: newAccount.acceptsMovement ?? (Number(newAccount.level || 5) >= 4),
+      balance: editingAccount ? editingAccount.balance : 0
     };
 
-    setAccountPlan([...accountPlan, acc]);
+    if (editingAccount) {
+      setAccountPlan(accountPlan.map(a => a.code === editingAccount.code ? acc : a));
+      showToast(`Cuenta ${acc.code} - ${acc.name} actualizada con éxito.`, 'success');
+    } else {
+      // Check duplicate code
+      if (accountPlan.some(a => a.code === acc.code)) {
+        showAlert('Código Duplicado', `Ya existe una cuenta con el código ${acc.code}. Por favor use un código único.`);
+        return;
+      }
+      setAccountPlan([...accountPlan, acc].sort((a, b) => a.code.localeCompare(b.code)));
+      showToast(`Cuenta ${acc.code} agregada al catálogo NIIF.`, 'success');
+    }
+
     setIsAccountModalOpen(false);
-    setNewAccount({
-      code: '',
-      name: '',
-      level: 4,
-      type: 'ACTIVO',
-      nature: 'DEUDORA',
-      acceptsMovement: true
-    });
+    setEditingAccount(null);
+  };
+
+  const handleDeleteAccount = (code: string) => {
+    const acc = accountPlan.find(a => a.code === code);
+    if (!acc) return;
+
+    // Check if account has movements in journal entries
+    const hasMovements = journalEntries.some(je => je.items.some(it => it.accountCode === code));
+    if (hasMovements) {
+      showAlert('Cuenta con Movimientos', `La cuenta ${code} (${acc.name}) ya tiene asientos contables registrados en el Libro Diario y no puede ser eliminada para preservar la trazabilidad NIIF.`);
+      return;
+    }
+
+    // Check if account has child accounts
+    const prefix = code.replace(/\.00.*$/, '');
+    const hasChildren = accountPlan.some(a => a.code !== code && a.code.startsWith(prefix));
+    if (hasChildren && acc.level < 5) {
+      showAlert('Cuenta Padre', `La cuenta ${code} tiene subcuentas hijas dependientes. Elimine primero las subcuentas.`);
+      return;
+    }
+
+    showConfirm(
+      `¿Está seguro de eliminar la cuenta contable ${code} - ${acc.name}?`,
+      () => {
+        setAccountPlan(accountPlan.filter(a => a.code !== code));
+        showToast(`Cuenta ${code} eliminada del catálogo.`, 'info');
+      },
+      'Eliminar Cuenta NIIF',
+      'Sí, Eliminar',
+      'Cancelar'
+    );
+  };
+
+  const handleResetAccountPlan = () => {
+    showConfirm(
+      '¿Desea restaurar el Catálogo Oficial NIIF para Ferreterías? Esta acción cargará más de 65 cuentas estandarizadas (Activo, Pasivo, Patrimonio, Ingresos y Gastos) preparadas para la normativa ecuatoriana.',
+      () => {
+        setAccountPlan(OFFICIAL_NIIF_ACCOUNT_PLAN);
+        showToast('Catálogo Oficial NIIF para Ferreterías restaurado correctamente.', 'success');
+      },
+      'Restaurar Catálogo Oficial NIIF',
+      'Sí, Restaurar Cuentas',
+      'Cancelar'
+    );
+  };
+
+  const handleExportAccountPlanCSV = () => {
+    const headers = ['CODIGO', 'NOMBRE DE CUENTA', 'NIVEL', 'TIPO NIIF', 'NATURALEZA', 'MOVIMIENTO', 'SALDO MAYORIZADO'];
+    const rows = accountPlan.map(a => [
+      `"${a.code}"`,
+      `"${a.name.replace(/"/g, '""')}"`,
+      a.level,
+      a.type,
+      a.nature,
+      a.acceptsMovement ? 'ACEPTA ASIENTOS' : 'AGRUPADORA',
+      (accountBalances[a.code] || 0).toFixed(2)
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Catalogo_Cuentas_NIIF_${settings.storeName || 'Ferreteria'}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Catálogo de Cuentas NIIF exportado en CSV.', 'success');
+  };
+
+  const handleSyncAutomaticEntries = () => {
+    setIsSyncingEntries(true);
+    try {
+      const existingConcepts = new Set(journalEntries.map(je => je.concept));
+      const newGeneratedEntries: JournalEntry[] = [];
+      let entrySeq = journalEntries.length + 1;
+
+      // 1. Asientos de Ventas
+      const validInvoices = invoices.filter(inv => inv.paymentStatus !== 'ANULADA' && inv.documentType !== 'COTIZACION');
+      validInvoices.forEach(inv => {
+        const docNum = inv.invoiceNumber || inv.id || '';
+        const isAlreadyAsented = journalEntries.some(je => je.concept.includes(`Factura #${docNum}`));
+        if (!isAlreadyAsented && docNum) {
+          const entryNum = `ASI-2026-${String(entrySeq++).padStart(4, '0')}`;
+          const entry = buildAutomaticInvoiceEntry(inv, accountingMapping, accountPlan, entryNum);
+          if (entry && !existingConcepts.has(entry.concept)) {
+            newGeneratedEntries.push(entry);
+            existingConcepts.add(entry.concept);
+          }
+        }
+      });
+
+      // 2. Asientos de Compras
+      purchases.forEach(pur => {
+        const docNum = pur.invoiceNumber || pur.documentNumber || pur.id || '';
+        const isAlreadyAsented = journalEntries.some(je => je.concept.includes(`Compra / Adquisición #${docNum}`));
+        if (!isAlreadyAsented && docNum) {
+          const entryNum = `ASI-2026-${String(entrySeq++).padStart(4, '0')}`;
+          const entry = buildAutomaticPurchaseEntry(pur, accountingMapping, accountPlan, entryNum);
+          if (entry && !existingConcepts.has(entry.concept)) {
+            newGeneratedEntries.push(entry);
+            existingConcepts.add(entry.concept);
+          }
+        }
+      });
+
+      if (newGeneratedEntries.length === 0) {
+        showToast('Todos los comprobantes de ventas y compras ya se encuentran debidamente contabilizados y mayorizados.', 'info');
+      } else {
+        setJournalEntries([...newGeneratedEntries, ...journalEntries]);
+        showToast(`Se generaron y mayorizaron ${newGeneratedEntries.length} asientos automáticos con partida doble cuadrada.`, 'success');
+      }
+    } catch (e: any) {
+      showAlert('Error en Sincronización', e?.message || 'No se pudieron generar los asientos automáticos.');
+    } finally {
+      setIsSyncingEntries(false);
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -2481,103 +2694,336 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 10: ESTADO_SITUACION_FINANCIERA (Balance General)
+          SUBTAB 10: ESTADO_SITUACION_FINANCIERA (Balance General NIIF)
          --------------------------------------------------------------------- */}
-      {subTab === 'ESTADO_SITUACION_FINANCIERA' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-sky-500" />
-                <span>Estado de Situación Financiera (Balance General NIIF)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Estructura de Activo, Pasivo y Patrimonio con verificación de la Ecuación Contable.
-              </p>
-            </div>
-          </div>
+      {subTab === 'ESTADO_SITUACION_FINANCIERA' && (() => {
+        const activoCorriente = accountPlan
+          .filter(a => a.code.startsWith('1.1') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+        
+        const activoNoCorriente = accountPlan
+          .filter(a => a.code.startsWith('1.2') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 font-mono text-xs">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3">
-              <h3 className="font-black text-emerald-700 uppercase text-xs border-b border-slate-200 pb-2">
-                1. ACTIVOS (TOTAL: {formatCurrency(totalActivos, settings.currencySymbol)})
-              </h3>
-              <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200">
-                <div className="flex justify-between py-1">
-                  <span>Efectivo y Bancos (1.1.01)</span>
-                  <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.01') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
+        const pasivoCorriente = accountPlan
+          .filter(a => a.code.startsWith('2.1') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const pasivoNoCorriente = accountPlan
+          .filter(a => a.code.startsWith('2.2') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const patrimonioCapital = accountPlan
+          .filter(a => a.code.startsWith('3.') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const patrimonioConsolidado = patrimonioCapital + utilidadNeta;
+        const totalPasivoYPatrimonio = totalPasivos + patrimonioConsolidado;
+        const diferenciaEcuacion = Math.abs(totalActivos - totalPasivoYPatrimonio);
+        const estaCuadrado = diferenciaEcuacion < 0.05;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-6 h-6 text-sky-600" />
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">
+                    Estado de Situación Financiera (Balance General NIIF)
+                  </h2>
                 </div>
-                <div className="flex justify-between py-1">
-                  <span>Inventario de Mercaderías (1.1.03)</span>
-                  <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.03') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
+                <p className="text-xs text-slate-500 mt-1">
+                  Estructuración patrimonial estandarizada: Activo, Pasivo y Patrimonio con comprobación de la Ecuación Contable Fundamental.
+                </p>
+              </div>
+
+              <button
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5 text-slate-600" />
+                <span>Imprimir Balance</span>
+              </button>
+            </div>
+
+            {/* Banner de Validación de la Ecuación Contable NIIF */}
+            <div className={`p-4 rounded-2xl border flex items-center justify-between text-xs font-mono ${
+              estaCuadrado
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                : 'bg-amber-50 border-amber-300 text-amber-950'
+            }`}>
+              <div className="flex items-center gap-3">
+                {estaCuadrado ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                )}
+                <div>
+                  <span className="font-black uppercase tracking-wide block">
+                    {estaCuadrado ? 'Ecuación Contable NIIF Cuadrada' : 'Ecuación Contable en Proceso de Cuadre'}
+                  </span>
+                  <span className="text-[11px] opacity-90">
+                    ACTIVO ({formatCurrency(totalActivos, settings.currencySymbol)}) = PASIVO ({formatCurrency(totalPasivos, settings.currencySymbol)}) + PATRIMONIO CONSOLIDADO ({formatCurrency(patrimonioConsolidado, settings.currencySymbol)})
+                  </span>
                 </div>
-                <div className="flex justify-between py-1">
-                  <span>Activos Fijos y Equipos (1.2)</span>
-                  <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.2') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
-                </div>
+              </div>
+
+              <div className="text-right font-black text-sm">
+                <span>Dif: {formatCurrency(diferenciaEcuacion, settings.currencySymbol)}</span>
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3">
-              <h3 className="font-black text-rose-700 uppercase text-xs border-b border-slate-200 pb-2">
-                2. PASIVOS & 3. PATRIMONIO
-              </h3>
-              <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200">
-                <div className="flex justify-between py-1 border-b">
-                  <span>Pasivo Corriente / Proveedores (2.1):</span>
-                  <span className="font-bold text-rose-600">{formatCurrency(totalPasivos, settings.currencySymbol)}</span>
+            {/* Columnas de Activos vs Pasivos & Patrimonio */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 font-mono text-xs">
+              {/* 1. ACTIVOS */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                  <h3 className="font-black text-emerald-800 uppercase text-xs">
+                    1. ACTIVOS TOTALES
+                  </h3>
+                  <span className="font-black text-emerald-800 text-sm">
+                    {formatCurrency(totalActivos, settings.currencySymbol)}
+                  </span>
                 </div>
-                <div className="flex justify-between py-1 pt-2">
-                  <span>Capital y Reservas (3.0):</span>
-                  <span className="font-bold text-blue-600">{formatCurrency(totalPatrimonio, settings.currencySymbol)}</span>
+
+                {/* Activo Corriente */}
+                <div className="space-y-2">
+                  <div className="flex justify-between font-bold text-slate-800 text-[11px] bg-slate-100 p-2 rounded-lg">
+                    <span>1.1 ACTIVO CORRIENTE</span>
+                    <span>{formatCurrency(activoCorriente, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="space-y-1 pl-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Efectivo y Equivalentes (Cajas & Bancos 1.1.01)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.01') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Cuentas por Cobrar & Anticipos Impuestos (1.1.02)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.02') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Inventarios de Mercaderías Ferretería (1.1.03)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.03') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-slate-600">Crédito Tributario IVA Adquisiciones (1.1.04)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.1.04') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Activo No Corriente */}
+                <div className="space-y-2">
+                  <div className="flex justify-between font-bold text-slate-800 text-[11px] bg-slate-100 p-2 rounded-lg">
+                    <span>1.2 ACTIVO NO CORRIENTE (PROPIEDADES, PLANTA Y EQUIPO)</span>
+                    <span>{formatCurrency(activoNoCorriente, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="space-y-1 pl-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Propiedades, Planta y Equipos Brutos (1.2.01)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.2.01') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 text-rose-700">
+                      <span>(-) Depreciación Acumulada NIIF (1.2.02)</span>
+                      <span className="font-bold">-{formatCurrency(accountPlan.filter(a => a.code.startsWith('1.2.02') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. PASIVOS & 3. PATRIMONIO */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                  <h3 className="font-black text-rose-800 uppercase text-xs">
+                    2. PASIVOS & 3. PATRIMONIO
+                  </h3>
+                  <span className="font-black text-slate-950 text-sm">
+                    {formatCurrency(totalPasivoYPatrimonio, settings.currencySymbol)}
+                  </span>
+                </div>
+
+                {/* Pasivo Corriente */}
+                <div className="space-y-2">
+                  <div className="flex justify-between font-bold text-rose-800 text-[11px] bg-rose-50 p-2 rounded-lg">
+                    <span>2.1 PASIVO CORRIENTE</span>
+                    <span>{formatCurrency(pasivoCorriente, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="space-y-1 pl-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Cuentas por Pagar Proveedores Comerciales (2.1.01)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('2.1.01') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Obligaciones Tributarias SRI (IVA & Retenciones 2.1.04)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('2.1.04') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-slate-600">Obligaciones Laborales y Financieras CP (2.1.02/03)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => (a.code.startsWith('2.1.02') || a.code.startsWith('2.1.03')) && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pasivo No Corriente */}
+                {pasivoNoCorriente > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between font-bold text-rose-800 text-[11px] bg-rose-50 p-2 rounded-lg">
+                      <span>2.2 PASIVO NO CORRIENTE</span>
+                      <span>{formatCurrency(pasivoNoCorriente, settings.currencySymbol)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. PATRIMONIO NETO */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex justify-between font-bold text-blue-800 text-[11px] bg-blue-50 p-2 rounded-lg">
+                    <span>3. PATRIMONIO NETO CONSOLIDADO</span>
+                    <span>{formatCurrency(patrimonioConsolidado, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="space-y-1 pl-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Capital Social Suscrito y Reservas (3.1/3.2)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => (a.code.startsWith('3.1') || a.code.startsWith('3.2')) && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-100">
+                      <span className="text-slate-600">Resultados Acumulados Años Anteriores (3.3.01)</span>
+                      <span className="font-bold">{formatCurrency(accountPlan.filter(a => a.code.startsWith('3.3.01') && a.acceptsMovement).reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0), settings.currencySymbol)}</span>
+                    </div>
+                    <div className={`flex justify-between py-1 font-bold ${utilidadNeta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      <span>(=) Resultado / Utilidad Neta del Ejercicio Actual</span>
+                      <span>{formatCurrency(utilidadNeta, settings.currencySymbol)}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 11: ESTADO_RESULTADO
+          SUBTAB 11: ESTADO_RESULTADO (P&L Integral NIIF)
          --------------------------------------------------------------------- */}
-      {subTab === 'ESTADO_RESULTADO' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-emerald-500" />
-                <span>Estado de Resultados (Pérdidas & Ganancias - P&L)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Cálculo de Utilidad Bruta, Gastos Operacionales y Utilidad Neta del Ejercicio.
-              </p>
-            </div>
-          </div>
+      {subTab === 'ESTADO_RESULTADO' && (() => {
+        const ventasNetas = totalIngresos;
+        const costoVentas = accountPlan
+          .filter(a => a.code.startsWith('5.1') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+        const gananciaBruta = ventasNetas - costoVentas;
 
-          <div className="bg-slate-950 text-white rounded-2xl p-6 space-y-3 font-mono text-xs max-w-2xl mx-auto border border-slate-800">
-            <div className="flex justify-between py-2 border-b border-slate-800">
-              <span className="font-bold uppercase text-emerald-400">(+) VENTA DE MERCADERÍAS</span>
-              <span className="font-black text-emerald-400 text-sm">{formatCurrency(totalIngresos, settings.currencySymbol)}</span>
+        const gastosPersonal = accountPlan
+          .filter(a => a.code.startsWith('5.2.01') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const gastosOperativos = accountPlan
+          .filter(a => a.code.startsWith('5.2.02') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const gastosFinancieros = accountPlan
+          .filter(a => (a.code.startsWith('5.2.03') || a.code.startsWith('5.3')) && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const depreciacionDeterioro = accountPlan
+          .filter(a => a.code.startsWith('5.4') && a.acceptsMovement)
+          .reduce((sum, a) => sum + (accountBalances[a.code] || 0), 0);
+
+        const totalGastosOperativos = gastosPersonal + gastosOperativos + gastosFinancieros + depreciacionDeterioro;
+        const utilidadOperativa = gananciaBruta - totalGastosOperativos;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-6 h-6 text-emerald-600" />
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">
+                    Estado de Resultados Integral (Pérdidas & Ganancias NIIF)
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Determinación de Ganancia Bruta, Costo de Ventas y Rendimiento Operativo Neto según NIIF para PYMES.
+                </p>
+              </div>
+
+              <button
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5 text-slate-600" />
+                <span>Imprimir P&L</span>
+              </button>
             </div>
-            <div className="flex justify-between py-2 border-b border-slate-800 text-rose-400">
-              <span>(-) COSTO DE VENTAS (MERCADERÍA)</span>
-              <span className="font-bold">-{formatCurrency(accountPlan.filter(a => a.code.startsWith('5.1') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
-            </div>
-            <div className="flex justify-between py-2 border-b border-slate-800 font-black text-blue-400">
-              <span>(=) UTILIDAD BRUTA EN VENTAS</span>
-              <span>{formatCurrency(totalIngresos - accountPlan.filter(a => a.code.startsWith('5.1') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
-            </div>
-            <div className="flex justify-between py-2 border-b border-slate-800 text-amber-400">
-              <span>(-) GASTOS OPERACIONALES (NOMINA, ARRIENDO)</span>
-              <span className="font-bold">-{formatCurrency(accountPlan.filter(a => a.code.startsWith('5.2') && a.acceptsMovement).reduce((sum, a) => sum + (a.balance || 0), 0), settings.currencySymbol)}</span>
-            </div>
-            <div className="flex justify-between py-3 font-black text-emerald-400 text-base bg-slate-900 p-3 rounded-xl border border-slate-800">
-              <span>(=) UTILIDAD NETA DEL EJERCICIO</span>
-              <span>{formatCurrency(utilidadNeta, settings.currencySymbol)}</span>
+
+            <div className="bg-slate-950 text-white rounded-3xl p-6 md:p-8 space-y-4 font-mono text-xs max-w-3xl mx-auto border border-slate-800 shadow-2xl">
+              <div className="border-b border-slate-800 pb-3 text-center">
+                <h3 className="font-black text-sm text-slate-200 tracking-wider uppercase">
+                  {settings.storeName || 'FERRETERÍA'} - ESTADO DE RESULTADOS NIIF
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Ejercicio Económico Fiscal 2026 (En Dólares de los Estados Unidos - USD)
+                </p>
+              </div>
+
+              {/* 1. Ingresos Ordinarios */}
+              <div className="flex justify-between py-2 border-b border-slate-800">
+                <span className="font-black uppercase text-emerald-400 text-sm">
+                  (+) INGRESOS DE ACTIVIDADES ORDINARIAS (VENTAS)
+                </span>
+                <span className="font-black text-emerald-400 text-sm">
+                  {formatCurrency(ventasNetas, settings.currencySymbol)}
+                </span>
+              </div>
+
+              {/* 2. Costo de Ventas */}
+              <div className="flex justify-between py-2 border-b border-slate-800 text-rose-400">
+                <span>(-) COSTO DE VENTAS DE MERCADERÍAS FERRETERAS</span>
+                <span className="font-bold">
+                  -{formatCurrency(costoVentas, settings.currencySymbol)}
+                </span>
+              </div>
+
+              {/* 3. Utilidad Bruta */}
+              <div className="flex justify-between py-3 border-b border-slate-700 font-black text-blue-400 text-sm bg-slate-900/80 px-3 rounded-xl">
+                <span>(=) GANANCIA BRUTA EN VENTAS</span>
+                <span>{formatCurrency(gananciaBruta, settings.currencySymbol)}</span>
+              </div>
+
+              {/* 4. Gastos de Operación */}
+              <div className="space-y-2 pt-2 text-slate-300">
+                <span className="font-black text-[11px] text-slate-400 uppercase block">
+                  (-) GASTOS OPERACIONALES Y DE ADMINISTRACIÓN
+                </span>
+                <div className="flex justify-between pl-4 text-amber-300">
+                  <span>Gastos de Personal, Sueldos y Beneficios Sociales</span>
+                  <span>-{formatCurrency(gastosPersonal, settings.currencySymbol)}</span>
+                </div>
+                <div className="flex justify-between pl-4 text-amber-300">
+                  <span>Gastos de Arriendos, Servicios Básicos y Mantenimiento</span>
+                  <span>-{formatCurrency(gastosOperativos, settings.currencySymbol)}</span>
+                </div>
+                <div className="flex justify-between pl-4 text-purple-300">
+                  <span>Gastos Financieros & Comisiones Red POS Tarjetas</span>
+                  <span>-{formatCurrency(gastosFinancieros, settings.currencySymbol)}</span>
+                </div>
+                <div className="flex justify-between pl-4 text-slate-400">
+                  <span>Depreciaciones y Pérdidas por Deterioro / Mermas NIIF</span>
+                  <span>-{formatCurrency(depreciacionDeterioro, settings.currencySymbol)}</span>
+                </div>
+              </div>
+
+              {/* 5. Utilidad Neta Final */}
+              <div className={`flex justify-between py-4 font-black text-base p-4 rounded-2xl border ${
+                utilidadOperativa >= 0
+                  ? 'bg-gradient-to-r from-emerald-950/80 to-slate-900 border-emerald-500/40 text-emerald-400'
+                  : 'bg-gradient-to-r from-rose-950/80 to-slate-900 border-rose-500/40 text-rose-400'
+              }`}>
+                <span>(=) UTILIDAD NETA DEL EJERCICIO</span>
+                <span>{formatCurrency(utilidadOperativa, settings.currencySymbol)}</span>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 12: ATS (Anexo Transaccional Simplificado SRI)
@@ -3000,100 +3446,701 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 13: PLAN_CUENTAS
+          SUBTAB 13: PLAN_CUENTAS (Catálogo Jerárquico Multinivel NIIF)
          --------------------------------------------------------------------- */}
-      {subTab === 'PLAN_CUENTAS' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <FolderTree className="w-5 h-5 text-indigo-500" />
-                <span>Plan y Catálogo de Cuentas Contables NIIF</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Estructura codificada en árbol de 5 niveles para la clasificación contable corporativa.
-              </p>
+      {subTab === 'PLAN_CUENTAS' && (() => {
+        const filteredAccounts = accountPlan.filter(acc => {
+          if (accountPlanFilterElement !== 'TODOS' && acc.type !== accountPlanFilterElement) return false;
+          if (accountSearchQuery.trim()) {
+            const q = accountSearchQuery.toLowerCase();
+            return acc.code.toLowerCase().includes(q) || acc.name.toLowerCase().includes(q);
+          }
+          return true;
+        });
+
+        const countMovimiento = accountPlan.filter(a => a.acceptsMovement).length;
+        const countAgrupadoras = accountPlan.filter(a => !a.acceptsMovement).length;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            {/* Header Title & Global Actions */}
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FolderTree className="w-6 h-6 text-indigo-600" />
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">
+                    Plan & Catálogo de Cuentas NIIF
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Normas Internacionales
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Estructura jerárquica multinivel codificada en 5 niveles: Activos, Pasivos, Patrimonio, Ingresos y Gastos con control de causación y saldos mayorizados.
+                </p>
+              </div>
+
+              {/* Botones de acción principales */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleResetAccountPlan}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Restablecer el catálogo oficial con más de 65 cuentas ferreteras estándar"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Restaurar Oficial NIIF</span>
+                </button>
+
+                <button
+                  onClick={handleExportAccountPlanCSV}
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Descargar catálogo completo en formato Excel / CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Exportar CSV</span>
+                </button>
+
+                <button
+                  onClick={() => window.print()}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Imprimir el plan de cuentas"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Imprimir</span>
+                </button>
+
+                <button
+                  onClick={() => handleOpenNewAccountModal()}
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nueva Cuenta Contable</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={() => setIsAccountModalOpen(true)}
-              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nueva Cuenta Contable</span>
-            </button>
-          </div>
+            {/* Tarjetas resumen por Elemento NIIF */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+              <div className="p-3.5 rounded-xl border border-emerald-200/80 bg-emerald-50/40 space-y-1">
+                <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block">1. ACTIVOS</span>
+                <p className="text-base font-black text-emerald-950 font-mono">
+                  {formatCurrency(totalActivos, settings.currencySymbol)}
+                </p>
+                <span className="text-[10px] text-emerald-700 font-semibold block">Naturaleza Deudora</span>
+              </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700 font-mono">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Código</th>
-                  <th className="py-3 px-4">Nombre de Cuenta</th>
-                  <th className="py-3 px-4">Nivel</th>
-                  <th className="py-3 px-4">Tipo</th>
-                  <th className="py-3 px-4">Movimiento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                {accountPlan.map((acc) => (
-                  <tr key={acc.code} className={acc.level === 1 ? 'bg-slate-100 font-black' : 'hover:bg-slate-50'}>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{acc.code}</td>
-                    <td className="py-2.5 px-4 font-sans font-bold text-slate-800" style={{ paddingLeft: `${acc.level * 12}px` }}>
-                      {acc.name}
-                    </td>
-                    <td className="py-2.5 px-4 font-bold text-slate-500">{acc.level}</td>
-                    <td className="py-2.5 px-4">
-                      <span className="px-2 py-0.5 bg-slate-200 text-slate-800 font-bold rounded text-[10px]">
-                        {acc.type}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4">
-                      {acc.acceptsMovement ? (
-                        <span className="text-emerald-600 font-bold">Acepta Asientos</span>
-                      ) : (
-                        <span className="text-slate-400">Agrupadora</span>
-                      )}
-                    </td>
-                  </tr>
+              <div className="p-3.5 rounded-xl border border-rose-200/80 bg-rose-50/40 space-y-1">
+                <span className="text-[10px] font-black text-rose-800 uppercase tracking-wider block">2. PASIVOS</span>
+                <p className="text-base font-black text-rose-950 font-mono">
+                  {formatCurrency(totalPasivos, settings.currencySymbol)}
+                </p>
+                <span className="text-[10px] text-rose-700 font-semibold block">Naturaleza Acreedora</span>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-blue-200/80 bg-blue-50/40 space-y-1">
+                <span className="text-[10px] font-black text-blue-800 uppercase tracking-wider block">3. PATRIMONIO</span>
+                <p className="text-base font-black text-blue-950 font-mono">
+                  {formatCurrency(totalPatrimonio, settings.currencySymbol)}
+                </p>
+                <span className="text-[10px] text-blue-700 font-semibold block">Naturaleza Acreedora</span>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-purple-200/80 bg-purple-50/40 space-y-1">
+                <span className="text-[10px] font-black text-purple-800 uppercase tracking-wider block">4. INGRESOS</span>
+                <p className="text-base font-black text-purple-950 font-mono">
+                  {formatCurrency(totalIngresos, settings.currencySymbol)}
+                </p>
+                <span className="text-[10px] text-purple-700 font-semibold block">Naturaleza Acreedora</span>
+              </div>
+
+              <div className="p-3.5 rounded-xl border border-amber-200/80 bg-amber-50/40 space-y-1 col-span-2 sm:col-span-1">
+                <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider block">5. GASTOS Y COSTOS</span>
+                <p className="text-base font-black text-amber-950 font-mono">
+                  {formatCurrency(totalGastos, settings.currencySymbol)}
+                </p>
+                <span className="text-[10px] text-amber-700 font-semibold block">Naturaleza Deudora</span>
+              </div>
+            </div>
+
+            {/* Barra de Filtros y Búsqueda */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs">
+                {(['TODOS', 'ACTIVO', 'PASIVO', 'PATRIMONIO', 'INGRESO', 'GASTO'] as const).map(el => (
+                  <button
+                    key={el}
+                    type="button"
+                    onClick={() => setAccountPlanFilterElement(el)}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition cursor-pointer ${
+                      accountPlanFilterElement === el
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {el === 'TODOS' ? `Todos (${accountPlan.length})` : el}
+                  </button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+
+              <div className="relative min-w-[260px] max-w-sm">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por código o nombre..."
+                  value={accountSearchQuery}
+                  onChange={(e) => setAccountSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition"
+                />
+              </div>
+            </div>
+
+            {/* Tabla Jerárquica del Catálogo NIIF */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Código NIIF</th>
+                    <th className="py-3 px-4">Nombre de la Cuenta</th>
+                    <th className="py-3 px-3 text-center">Nivel</th>
+                    <th className="py-3 px-3">Tipo NIIF</th>
+                    <th className="py-3 px-3">Naturaleza</th>
+                    <th className="py-3 px-3">Tipo Operativo</th>
+                    <th className="py-3 px-4 text-right">Saldo Mayorizado</th>
+                    <th className="py-3 px-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {filteredAccounts.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400 font-sans">
+                        No se encontraron cuentas contables que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAccounts.map((acc) => {
+                      const levelPadding = Math.max(0, (acc.level - 1) * 16);
+                      const isHeaderLevel = acc.level <= 2;
+                      const balance = accountBalances[acc.code] || 0;
+
+                      return (
+                        <tr
+                          key={acc.code}
+                          className={`transition-colors ${
+                            acc.level === 1
+                              ? 'bg-slate-100/90 font-black text-slate-950 border-t-2 border-slate-300'
+                              : acc.level === 2
+                              ? 'bg-slate-50/70 font-bold text-slate-900'
+                              : 'hover:bg-slate-50/80 text-slate-700'
+                          }`}
+                        >
+                          {/* Código */}
+                          <td className="py-2.5 px-4 font-bold text-slate-900 whitespace-nowrap">
+                            {acc.code}
+                          </td>
+
+                          {/* Nombre con sangría jerárquica */}
+                          <td className="py-2.5 px-4 font-sans whitespace-nowrap" style={{ paddingLeft: `${16 + levelPadding}px` }}>
+                            <div className="flex items-center gap-2">
+                              {acc.level <= 2 ? (
+                                <FolderTree className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                              ) : acc.acceptsMovement ? (
+                                <Tag className="w-3 h-3 text-emerald-500 shrink-0" />
+                              ) : (
+                                <Layers className="w-3 h-3 text-slate-400 shrink-0" />
+                              )}
+                              <span className={isHeaderLevel ? 'font-black uppercase tracking-wide' : 'font-medium'}>
+                                {acc.name}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Nivel */}
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-slate-100 text-slate-700 border border-slate-200">
+                              N{acc.level}
+                            </span>
+                          </td>
+
+                          {/* Tipo NIIF */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                              acc.type === 'ACTIVO' ? 'bg-emerald-100 text-emerald-800' :
+                              acc.type === 'PASIVO' ? 'bg-rose-100 text-rose-800' :
+                              acc.type === 'PATRIMONIO' ? 'bg-blue-100 text-blue-800' :
+                              acc.type === 'INGRESO' ? 'bg-purple-100 text-purple-800' :
+                              'bg-amber-100 text-amber-800'
+                            }`}>
+                              {acc.type}
+                            </span>
+                          </td>
+
+                          {/* Naturaleza */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className={`text-[10px] font-bold ${
+                              acc.nature === 'DEUDORA' ? 'text-sky-700' : 'text-purple-700'
+                            }`}>
+                              {acc.nature}
+                            </span>
+                          </td>
+
+                          {/* Movimiento */}
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            {acc.acceptsMovement ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-bold text-[10px] bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Acepta Asientos</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-slate-400 text-[10px] bg-slate-100 px-2 py-0.5 rounded-full">
+                                Agrupadora
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Saldo Mayorizado */}
+                          <td className="py-2.5 px-4 text-right font-bold text-slate-900 whitespace-nowrap">
+                            {formatCurrency(balance, settings.currencySymbol)}
+                          </td>
+
+                          {/* Acciones */}
+                          <td className="py-2.5 px-4 text-center whitespace-nowrap font-sans">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {acc.level < 5 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenNewAccountModal(acc)}
+                                  className="p-1 hover:bg-indigo-50 text-indigo-600 rounded-lg transition"
+                                  title={`Crear subcuenta hija bajo ${acc.code}`}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditAccountModal(acc)}
+                                className="p-1 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition"
+                                title="Editar cuenta contable"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAccount(acc.code)}
+                                className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition"
+                                title="Eliminar cuenta contable"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer con resumen estadístico */}
+            <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 border-t border-slate-200 pt-3">
+              <span>
+                Total Cuentas en Catálogo: <strong>{accountPlan.length}</strong> ({countMovimiento} imputables / {countAgrupadoras} agrupadoras)
+              </span>
+              <span className="font-mono text-[11px] text-slate-400">
+                Estructura NIIF Corporativa ecuatoriana vigente (SRI)
+              </span>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 14: PARAMETRIZACION
+          SUBTAB 14: PARAMETRIZACION (Motor de Mapeo Paramétrico Contable NIIF)
          --------------------------------------------------------------------- */}
-      {subTab === 'PARAMETRIZACION' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-slate-500" />
-                <span>Parametrización & Asientos Automáticos</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Mapeo de cuentas por defecto para facturación de ventas, compras e IVA.
-              </p>
+      {subTab === 'PARAMETRIZACION' && (() => {
+        const movementAccounts = accountPlan.filter(a => a.acceptsMovement);
+
+        // Comprobantes pendientes de contabilizar
+        const validInvoices = invoices.filter(inv => inv.paymentStatus !== 'ANULADA' && inv.documentType !== 'COTIZACION');
+        const unmappedInvoices = validInvoices.filter(inv => {
+          const docNum = inv.invoiceNumber || inv.id || '';
+          return !journalEntries.some(je => je.concept.includes(`Factura #${docNum}`));
+        });
+        const unmappedPurchases = purchases.filter(pur => {
+          const docNum = pur.invoiceNumber || pur.documentNumber || pur.id || '';
+          return !journalEntries.some(je => je.concept.includes(`Compra / Adquisición #${docNum}`));
+        });
+        const pendingCount = unmappedInvoices.length + unmappedPurchases.length;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            {/* Header Title */}
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-6 h-6 text-indigo-600" />
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight">
+                    Motor de Mapeo Paramétrico Contable NIIF
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Partida Doble Automática
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Enlaza los eventos operativos de ventas, compras, kárdex y tesorería con las cuentas del catálogo NIIF para disparar asientos en tiempo real sin requerir doble digitación.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  showToast('Parámetros de mapeo contable NIIF guardados exitosamente.', 'success');
+                }}
+                className="px-5 py-2.5 bg-slate-950 hover:bg-slate-900 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+              >
+                <Check className="w-4 h-4 text-emerald-400" />
+                <span>Guardar Parámetros de Mapeo</span>
+              </button>
+            </div>
+
+            {/* Banner de Sincronización Automática en Lote */}
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-5 rounded-2xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
+              <div className="space-y-1 max-w-2xl">
+                <div className="flex items-center gap-2">
+                  <Calculator className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-sm font-black uppercase tracking-wide">
+                    Sincronizador Automático de Asientos del Ejercicio
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Evalúa facturas de venta y comprobantes de compra no asentados y genera de forma automática los asientos de partida doble correspondientes con numeración correlativa (<span className="font-mono text-amber-300">ASI-2026-XXXX</span>).
+                </p>
+                <div className="flex items-center gap-3 text-xs pt-1">
+                  <span className="font-bold text-slate-400">Pendientes por asentar:</span>
+                  <span className={`px-2 py-0.5 rounded-full font-black text-[11px] ${
+                    pendingCount > 0 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-emerald-500/20 text-emerald-300'
+                  }`}>
+                    {pendingCount} comprobantes ({unmappedInvoices.length} ventas / {unmappedPurchases.length} compras)
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isSyncingEntries || pendingCount === 0}
+                onClick={handleSyncAutomaticEntries}
+                className={`px-5 py-2.5 font-black text-xs rounded-xl transition flex items-center gap-2 shrink-0 ${
+                  pendingCount > 0 && !isSyncingEntries
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 shadow-lg cursor-pointer'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                }`}
+              >
+                {isSyncingEntries ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                    <span>Mayorizando Asientos...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Sincronizar y Mayorizar Asientos</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Matriz de Mapeo Paramétrico en 4 Bloques */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
+              {/* 1. Ventas & Facturación Mostrador */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                  <Receipt className="w-4 h-4 text-emerald-600" />
+                  <h3 className="font-black text-slate-900 uppercase text-xs">
+                    1. Ventas & Facturación Mostrador (POS)
+                  </h3>
+                </div>
+
+                <div className="space-y-3 font-sans">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Venta en Efectivo (Caja Mostrador)
+                    </label>
+                    <Select
+                      value={accountingMapping.salesCashAccountDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, salesCashAccountDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Venta con Tarjeta de Crédito / Débito (Vouchers en Tránsito)
+                    </label>
+                    <Select
+                      value={accountingMapping.salesCardAccountDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, salesCardAccountDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Venta a Crédito Clientes (Cuentas por Cobrar)
+                    </label>
+                    <Select
+                      value={accountingMapping.salesCreditAccountDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, salesCreditAccountDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Ingresos por Ventas Tarifa 15%
+                    </label>
+                    <Select
+                      value={accountingMapping.salesAccountCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, salesAccountCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: IVA Cobrado en Ventas por Pagar SRI (15%)
+                    </label>
+                    <Select
+                      value={accountingMapping.salesVatAccountCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, salesVatAccountCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Compras & Proveedores */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                  <Building2 className="w-4 h-4 text-blue-600" />
+                  <h3 className="font-black text-slate-900 uppercase text-xs">
+                    2. Compras, Mercaderías & Proveedores
+                  </h3>
+                </div>
+
+                <div className="space-y-3 font-sans">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Entrada de Inventario de Mercaderías
+                    </label>
+                    <Select
+                      value={accountingMapping.purchasesInventoryDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, purchasesInventoryDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Crédito Tributario IVA Compras (15%)
+                    </label>
+                    <Select
+                      value={accountingMapping.purchasesVatDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, purchasesVatDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Cuentas por Pagar Proveedores Comerciales
+                    </label>
+                    <Select
+                      value={accountingMapping.purchasesAccountsPayableCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, purchasesAccountsPayableCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Retenciones en la Fuente IR por Pagar SRI
+                    </label>
+                    <Select
+                      value={accountingMapping.purchasesRetentionIncomeCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, purchasesRetentionIncomeCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Retenciones de IVA por Pagar SRI
+                    </label>
+                    <Select
+                      value={accountingMapping.purchasesRetentionVatCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, purchasesRetentionVatCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Kárdex & Costo de Ventas */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                  <Scale className="w-4 h-4 text-amber-600" />
+                  <h3 className="font-black text-slate-900 uppercase text-xs">
+                    3. Kárdex, Costo de Ventas & Deterioro NIIF
+                  </h3>
+                </div>
+
+                <div className="space-y-3 font-sans">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Costo de Mercaderías Vendidas (Costo de Ventas)
+                    </label>
+                    <Select
+                      value={accountingMapping.costOfSalesDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, costOfSalesDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Salida de Inventario por Venta de Mercadería
+                    </label>
+                    <Select
+                      value={accountingMapping.costOfSalesCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, costOfSalesCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Pérdida por Deterioro o Merma de Mercaderías
+                    </label>
+                    <Select
+                      value={accountingMapping.inventoryDeteriorationDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, inventoryDeteriorationDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Tesorería & Conciliación de Vouchers */}
+              <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                  <CreditCard className="w-4 h-4 text-purple-600" />
+                  <h3 className="font-black text-slate-900 uppercase text-xs">
+                    4. Tesorería & Liquidación de Vouchers / Tarjetas
+                  </h3>
+                </div>
+
+                <div className="space-y-3 font-sans">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Depósito Neto Bancario (Cuenta Corriente)
+                    </label>
+                    <Select
+                      value={accountingMapping.cardBankDepositDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, cardBankDepositDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Débito: Comisiones Bancarias y Red POS (Datafast / Medianet)
+                    </label>
+                    <Select
+                      value={accountingMapping.cardFeeAccountDebit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, cardFeeAccountDebit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Crédito: Cierre de Vouchers en Tránsito Liquidado
+                    </label>
+                    <Select
+                      value={accountingMapping.cardTransitAccountCredit}
+                      onChange={(e) => setAccountingMapping({ ...accountingMapping, cardTransitAccountCredit: e.target.value })}
+                      className="w-full text-xs font-mono font-medium"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-              <span className="font-black text-slate-900 block uppercase">Ventas en Efectivo:</span>
-              <p className="text-slate-600">Débito: 1.1.01.01.01 (Caja General)</p>
-              <p className="text-slate-600">Crédito: 4.1.01.01.01 (Ventas Mostrador)</p>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-              <span className="font-black text-slate-900 block uppercase">Cuenta IVA Cobrado (15%):</span>
-              <p className="text-slate-600">Crédito: 2.1.04.01.01 (IVA Cobrado por Pagar SRI)</p>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 15: PERIODOS_FISCALES
@@ -4179,35 +5226,70 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
         </div>
       )}
 
-      {/* Modal: Nueva Cuenta Contable */}
+      {/* Modal: Nueva / Editar Cuenta Contable NIIF */}
       {isAccountModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
-                <FolderTree className="w-5 h-5 text-indigo-500" />
-                <span>Agregar Cuenta al Plan</span>
+                <FolderTree className="w-5 h-5 text-indigo-600" />
+                <span>{editingAccount ? 'Editar Cuenta Contable NIIF' : 'Nueva Cuenta Contable NIIF'}</span>
               </h3>
-              <button onClick={() => setIsAccountModalOpen(false)} className="p-1 hover:bg-slate-100 rounded-lg">
+              <button onClick={() => { setIsAccountModalOpen(false); setEditingAccount(null); }} className="p-1 hover:bg-slate-100 rounded-lg cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveAccount} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-black text-slate-800 mb-1">Código Contable *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ej: 1.1.01.03.01"
-                  value={newAccount.code}
-                  onChange={(e) => setNewAccount({ ...newAccount, code: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                />
+            <form onSubmit={handleSaveAccount} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Código Contable NIIF *</label>
+                  <input
+                    type="text"
+                    required
+                    disabled={!!editingAccount}
+                    placeholder="ej: 1.1.01.03.01"
+                    value={newAccount.code}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const first = val.charAt(0);
+                      let derivedType = newAccount.type;
+                      let derivedNature = newAccount.nature;
+                      if (first === '1') { derivedType = 'ACTIVO'; derivedNature = 'DEUDORA'; }
+                      else if (first === '2') { derivedType = 'PASIVO'; derivedNature = 'ACREEDORA'; }
+                      else if (first === '3') { derivedType = 'PATRIMONIO'; derivedNature = 'ACREEDORA'; }
+                      else if (first === '4') { derivedType = 'INGRESO'; derivedNature = 'ACREEDORA'; }
+                      else if (first === '5') { derivedType = 'GASTO'; derivedNature = 'DEUDORA'; }
+                      setNewAccount({
+                        ...newAccount,
+                        code: val,
+                        type: derivedType,
+                        nature: derivedNature
+                      });
+                    }}
+                    className={`w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold ${editingAccount ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Formato: X.X.XX.XX.XX</span>
+                </div>
+
+                <div>
+                  <label className="block font-black text-slate-800 mb-1">Nivel Jerárquico</label>
+                  <Select
+                    value={String(newAccount.level || 5)}
+                    onChange={(e) => setNewAccount({ ...newAccount, level: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  >
+                    <option value="1">Nivel 1 - Clase (X.0.00.00.00)</option>
+                    <option value="2">Nivel 2 - Grupo (X.X.00.00.00)</option>
+                    <option value="3">Nivel 3 - Mayor (X.X.XX.00.00)</option>
+                    <option value="4">Nivel 4 - Subcuenta (X.X.XX.XX.00)</option>
+                    <option value="5">Nivel 5 - Auxiliar Imputable (X.X.XX.XX.XX)</option>
+                  </Select>
+                </div>
               </div>
 
               <div>
-                <label className="block font-black text-slate-800 mb-1">Nombre de la Cuenta *</label>
+                <label className="block font-black text-slate-800 mb-1">Nombre / Denominación de la Cuenta *</label>
                 <input
                   type="text"
                   required
@@ -4218,41 +5300,67 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-black text-slate-800 mb-1">Tipo de Cuenta</label>
+                  <label className="block font-black text-slate-800 mb-1">Clasificación NIIF</label>
                   <Select
                     value={newAccount.type}
-                    onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value as any })}
+                    onChange={(e) => {
+                      const t = e.target.value as any;
+                      const nat = (t === 'ACTIVO' || t === 'GASTO') ? 'DEUDORA' : 'ACREEDORA';
+                      setNewAccount({ ...newAccount, type: t, nature: nat });
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                   >
-                    <option value="ACTIVO">ACTIVO</option>
-                    <option value="PASIVO">PASIVO</option>
-                    <option value="PATRIMONIO">PATRIMONIO</option>
-                    <option value="INGRESO">INGRESO</option>
-                    <option value="GASTO">GASTO</option>
+                    <option value="ACTIVO">1. ACTIVO</option>
+                    <option value="PASIVO">2. PASIVO</option>
+                    <option value="PATRIMONIO">3. PATRIMONIO</option>
+                    <option value="INGRESO">4. INGRESO</option>
+                    <option value="GASTO">5. GASTOS Y COSTOS</option>
                   </Select>
                 </div>
 
                 <div>
-                  <label className="block font-black text-slate-800 mb-1">Naturaleza</label>
+                  <label className="block font-black text-slate-800 mb-1">Naturaleza Contable</label>
                   <Select
                     value={newAccount.nature}
                     onChange={(e) => setNewAccount({ ...newAccount, nature: e.target.value as any })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
                   >
-                    <option value="DEUDORA">DEUDORA</option>
-                    <option value="ACREEDORA">ACREEDORA</option>
+                    <option value="DEUDORA">DEUDORA (Débito incrementa)</option>
+                    <option value="ACREEDORA">ACREEDORA (Crédito incrementa)</option>
                   </Select>
                 </div>
               </div>
 
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="font-black text-slate-900 block text-xs">Acepta Asientos / Movimientos</span>
+                  <span className="text-[10px] text-slate-500">
+                    Si se desactiva, actuará como cuenta agrupadora sumando las subcuentas hijas.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={newAccount.acceptsMovement ?? true}
+                  onChange={(e) => setNewAccount({ ...newAccount, acceptsMovement: e.target.checked })}
+                  className="w-4 h-4 text-indigo-600 rounded cursor-pointer accent-indigo-600"
+                />
+              </div>
+
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
-                <button type="button" onClick={() => setIsAccountModalOpen(false)} className="px-4 py-2 bg-slate-100 font-bold rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => { setIsAccountModalOpen(false); setEditingAccount(null); }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
                   Cancelar
                 </button>
-                <button type="submit" className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl cursor-pointer">
-                  Guardar Cuenta
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-black rounded-xl shadow-md transition cursor-pointer"
+                >
+                  {editingAccount ? 'Actualizar Cuenta' : 'Guardar Cuenta NIIF'}
                 </button>
               </div>
             </form>

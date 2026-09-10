@@ -78,7 +78,8 @@ interface HeaderProps {
   cartItemCount: number;
   currentUser?: any;
   onLogout?: () => void;
-  onCollapsedChange?: (collapsed: boolean) => void;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
 }
 
 type ModuleId = 'VENTAS' | 'CLIENTES' | 'INVENTARIO' | 'COMPRAS' | 'PROVEEDORES' | 'FINANZAS' | 'CONTABILIDAD' | 'ACTIVOS' | 'RRHH' | 'REPORTES' | 'CONFIGURACION';
@@ -92,10 +93,10 @@ export const Header: React.FC<HeaderProps> = ({
   cartItemCount,
   currentUser,
   onLogout,
-  onCollapsedChange,
+  sidebarCollapsed,
+  setSidebarCollapsed,
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // ─── Sub-tab definitions ─────────────────────────────────────────────────────
   const salesSubTabs: { id: SalesSubTab; label: string; icon: React.ReactNode }[] = [
@@ -360,16 +361,14 @@ export const Header: React.FC<HeaderProps> = ({
       {/* ── Left Sidebar (accordion) ─────────────────────────────────────────── */}
       <aside
         className={`fixed top-14 left-0 bottom-0 z-30 bg-slate-950 border-r border-slate-800/80 flex flex-col shadow-2xl transition-all duration-200 no-print ${
-          sidebarCollapsed ? 'w-14' : 'w-52'
+          sidebarCollapsed ? 'w-14' : 'w-56'
         }`}
       >
         {/* Collapse toggle */}
         <div className="flex items-center justify-end px-2 py-2 border-b border-slate-800/60 shrink-0">
           <button
             onClick={() => {
-              const next = !sidebarCollapsed;
-              setSidebarCollapsed(next);
-              onCollapsedChange?.(next);
+              setSidebarCollapsed(prev => !prev);
             }}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
             title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}

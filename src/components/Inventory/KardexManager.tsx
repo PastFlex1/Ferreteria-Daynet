@@ -22,7 +22,8 @@ import {
   X,
   Percent,
   Building,
-  ArrowRightLeft
+  ArrowRightLeft,
+  ArrowUpDown
 } from 'lucide-react';
 import { Product, StoreSettings, Invoice, ProductCategory } from '../../types';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
@@ -46,9 +47,19 @@ export interface StockAdjustmentRecord {
 
 export interface KardexMovement {
   id: string;
+  seqId: number;
   date: string;
+  dateOnly: string;
+  timeOnly: string;
   type: 'SALDO_INICIAL' | 'COMPRA' | 'VENTA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SALIDA' | 'DEVOLUCION_VENTA' | 'MERMA_DANO' | 'TRANSFERENCIA_ENTRADA' | 'TRANSFERENCIA_SALIDA';
   typeLabel: string;
+  tipoBadge: 'Ingreso' | 'Egreso';
+  motivo: string;
+  stockAnt: number;
+  cantidad: number;
+  stockNuevo: number;
+  precio: number;
+  referencia: string;
   docNumber: string;
   warehouse?: string; // Bodega / Sucursal / Ubicación
   entityName: string; // Cliente, Proveedor o Motivo
@@ -68,6 +79,53 @@ export interface KardexMovement {
   balanceTotal: number;
   notes?: string;
 }
+
+const getMotivo = (type: KardexMovement['type']): string => {
+  switch (type) {
+    case 'VENTA':
+      return 'Venta';
+    case 'COMPRA':
+      return 'Compra';
+    case 'AJUSTE_ENTRADA':
+    case 'AJUSTE_SALIDA':
+    case 'MERMA_DANO':
+      return 'Ajuste de stock';
+    case 'DEVOLUCION_VENTA':
+      return 'Devolución';
+    case 'TRANSFERENCIA_ENTRADA':
+    case 'TRANSFERENCIA_SALIDA':
+      return 'Transferencia';
+    case 'SALDO_INICIAL':
+      return 'Saldo Inicial';
+    default:
+      return 'Ajuste de stock';
+  }
+};
+
+const getReferencia = (type: KardexMovement['type'], isInput: boolean, docNumber: string): string => {
+  const cleanDoc = (docNumber || '').replace(/^#/, '').trim();
+  if (type === 'VENTA') {
+    return cleanDoc.toUpperCase().startsWith('FACTURA') ? cleanDoc : `FACTURA ${cleanDoc}`;
+  }
+  if (type === 'COMPRA') {
+    return cleanDoc.toUpperCase().startsWith('FACTURA') || cleanDoc.toUpperCase().startsWith('COMPRA')
+      ? cleanDoc
+      : `FACTURA COMPRA ${cleanDoc}`;
+  }
+  if (type === 'AJUSTE_ENTRADA' || type === 'AJUSTE_SALIDA' || type === 'MERMA_DANO') {
+    return `Ajuste de stock (${isInput ? 'INGRESO' : 'EGRESO'})`;
+  }
+  if (type === 'DEVOLUCION_VENTA') {
+    return `NC ${cleanDoc}`;
+  }
+  if (type === 'TRANSFERENCIA_ENTRADA' || type === 'TRANSFERENCIA_SALIDA') {
+    return `TRANSF ${cleanDoc}`;
+  }
+  if (type === 'SALDO_INICIAL') {
+    return 'SALDO INICIAL';
+  }
+  return cleanDoc || '-';
+};
 
 interface KardexManagerProps {
   products: Product[];
@@ -105,6 +163,19 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   const [movementTypeFilter, setMovementTypeFilter] = useState<string>('TODOS');
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('TODAS');
   const [filterText, setFilterText] = useState('');
+
+  // ── Table Sorting State ────────────────────────────────────────────────────
+  const [sortColumn, setSortColumn] = useState<string>('seqId');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(column);
+      setSortOrder(column === 'seqId' ? 'desc' : 'asc');
+    }
+  };
 
   // ── Quick Adjust Modal State ───────────────────────────────────────────────
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
@@ -148,6 +219,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       unit: string;
       qty: number;
       cost: number;
+      price: number;
       notes?: string;
     }[] = [];
 
@@ -175,6 +247,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         if (isTargetProduct(itemProdId, itemSku)) {
           const matchedProd = productMap.get(itemProdId) || productMap.get(itemSku.toLowerCase());
           const cost = selectedProduct ? (selectedProduct.costPrice || 0) : (matchedProd?.costPrice || (item as any).costPrice || 0);
+          const price = item.unitPrice || (item as any).price || (matchedProd?.price || cost);
 
           rawMovements.push({
             id: `sale-${inv.id}-${item.productId || Math.random()}`,
@@ -192,6 +265,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             unit: matchedProd?.unit || 'Unid',
             qty: item.quantity,
             cost,
+            price,
             notes: `Venta POS (${inv.paymentMethod || 'Contado'})`,
           });
         }
@@ -212,6 +286,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           if (isTargetProduct(itemProdId, itemSku)) {
             const matchedProd = productMap.get(itemProdId) || productMap.get(itemSku.toLowerCase());
             const cost = item.costPrice || item.unitCost || matchedProd?.costPrice || 0;
+            const price = item.costPrice || item.unitCost || cost;
 
             rawMovements.push({
               id: `purch-${purch.id}-${item.productId || Math.random()}`,
@@ -229,6 +304,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               unit: matchedProd?.unit || 'Unid',
               qty: item.quantity,
               cost,
+              price,
               notes: `Ingreso factura proveedor (${purch.paymentCondition || 'Contado'})`,
             });
           }
@@ -244,6 +320,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         const timestamp = new Date(adjDate).getTime() || Date.now();
         const isEntry = adj.qty > 0;
         const isMerma = adj.reason?.toLowerCase().includes('merma') || adj.reason?.toLowerCase().includes('daño') || adj.reason?.toLowerCase().includes('robo');
+        const cost = adj.costPrice || matchedProd?.costPrice || 0;
 
         rawMovements.push({
           id: `adj-${adj.id}`,
@@ -260,7 +337,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           sku: matchedProd?.sku || adj.sku || 'N/A',
           unit: matchedProd?.unit || 'Unid',
           qty: Math.abs(adj.qty),
-          cost: adj.costPrice || matchedProd?.costPrice || 0,
+          cost,
+          price: cost,
           notes: adj.reason || '',
         });
       }
@@ -275,6 +353,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         cn.items.forEach((item: any) => {
           if (isTargetProduct(item.productId, item.sku)) {
             const matchedProd = productMap.get(item.productId) || productMap.get((item.sku || '').toLowerCase());
+            const cost = matchedProd?.costPrice || 0;
+            const price = item.unitPrice || (item as any).price || (matchedProd?.price || cost);
+
             rawMovements.push({
               id: `cn-${cn.id}-${Math.random()}`,
               timestamp,
@@ -290,7 +371,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               sku: matchedProd?.sku || item.sku || 'N/A',
               unit: matchedProd?.unit || 'Unid',
               qty: item.quantity,
-              cost: matchedProd?.costPrice || 0,
+              cost,
+              price,
               notes: cn.reason || 'Reingreso a inventario por devolución',
             });
           }
@@ -314,6 +396,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           if (isTargetProduct(item.productId, item.sku)) {
             const matchedProd = productMap.get(item.productId) || productMap.get((item.sku || '').toLowerCase());
             const qty = Number(item.quantity) || 1;
+            const cost = item.costPrice || matchedProd?.costPrice || 0;
 
             rawMovements.push({
               id: `trf-out-${trf.id}-${item.productId || Math.random()}`,
@@ -330,7 +413,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               sku: matchedProd?.sku || item.sku || 'N/A',
               unit: matchedProd?.unit || 'Unid',
               qty,
-              cost: item.costPrice || matchedProd?.costPrice || 0,
+              cost,
+              price: cost,
               notes: trf.status === 'EN_TRANSITO'
                 ? `Mercadería en tránsito amparada con Guía de Remisión. Transportista: ${trf.guiaRemision?.driverName || 'N/A'} (Placa: ${trf.guiaRemision?.licensePlate || 'N/A'})`
                 : `Salida física confirmada hacia ${destination}`,
@@ -356,7 +440,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 sku: matchedProd?.sku || item.sku || 'N/A',
                 unit: matchedProd?.unit || 'Unid',
                 qty: recQty,
-                cost: item.costPrice || matchedProd?.costPrice || 0,
+                cost,
+                price: cost,
                 notes: `Mercadería recibida físicamente en ${destination}. ${trf.receptionNotes ? 'Obs: ' + trf.receptionNotes : ''}`,
               });
             }
@@ -365,160 +450,117 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       }
     });
 
-    if (selectedProduct) {
-      // SINGLE PRODUCT MODE: Chronological ascending + Initial Balance + Weighted Average Cost (CPP)
-      rawMovements.sort((a, b) => a.timestamp - b.timestamp);
+    // Group raw movements by product to compute exact running stock balance per product
+    const movementsByProduct = new Map<string, typeof rawMovements>();
 
-      let runningQty = 0;
-      let runningCost = selectedProduct.costPrice || 0;
+    rawMovements.forEach((m) => {
+      const pKey = m.productId || (m.sku || 'VARIOS').toLowerCase();
+      if (!movementsByProduct.has(pKey)) {
+        movementsByProduct.set(pKey, []);
+      }
+      movementsByProduct.get(pKey)!.push(m);
+    });
 
-      const netMovementsQty = rawMovements.reduce((acc, m) => {
-        if (['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type)) {
-          return acc + m.qty;
-        } else {
-          return acc - m.qty;
-        }
+    const calculatedMovements: KardexMovement[] = [];
+
+    movementsByProduct.forEach((mList) => {
+      // Sort chronologically ascending for stock trace
+      mList.sort((a, b) => a.timestamp - b.timestamp);
+
+      const firstItem = mList[0];
+      const matchedProd = productMap.get(firstItem.productId) || productMap.get((firstItem.sku || '').toLowerCase()) || (selectedProduct?.id === firstItem.productId ? selectedProduct : null);
+      const currentStock = matchedProd ? matchedProd.stock : 0;
+      const initialCost = matchedProd ? (matchedProd.costPrice || 0) : firstItem.cost;
+
+      // Net change across this product's movements
+      const netDelta = mList.reduce((acc, m) => {
+        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
+        return acc + (isInput ? m.qty : -m.qty);
       }, 0);
 
-      const initialEstimatedQty = Math.max(0, selectedProduct.stock - netMovementsQty);
-      const kardexRows: KardexMovement[] = [];
+      const initialEstimatedQty = Math.max(0, currentStock - netDelta);
+      let runningQty = initialEstimatedQty;
+      let runningCost = initialCost || 0;
 
-      runningQty = initialEstimatedQty;
-      kardexRows.push({
-        id: `ini-${selectedProduct.id}`,
-        date: '2026-01-01 08:00',
-        type: 'SALDO_INICIAL',
-        typeLabel: 'Inventario Inicial',
-        docNumber: 'INV-INI-2026',
-        warehouse: 'Bodega Central Norte',
-        entityName: 'Apertura de Sistema / Saldo Inicial',
-        user: 'Sistema',
-        productId: selectedProduct.id,
-        productName: selectedProduct.name,
-        sku: selectedProduct.sku,
-        unit: selectedProduct.unit,
-        inQty: initialEstimatedQty,
-        inCost: runningCost,
-        inTotal: initialEstimatedQty * runningCost,
-        outQty: 0,
-        outCost: 0,
-        outTotal: 0,
-        balanceQty: runningQty,
-        balanceCost: runningCost,
-        balanceTotal: runningQty * runningCost,
-        notes: 'Saldo de existencias inicial registrado',
-      });
+      mList.forEach((m) => {
+        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA', 'SALDO_INICIAL'].includes(m.type);
+        const stockAnt = runningQty;
+        const cantidad = m.qty;
+        let stockNuevo = 0;
 
-      rawMovements.forEach((m) => {
-        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
-
+        const effectiveCost = m.cost > 0 ? m.cost : runningCost;
         if (isInput) {
-          const inQty = m.qty;
-          const inCost = m.cost > 0 ? m.cost : runningCost;
-          const inTotal = inQty * inCost;
+          stockNuevo = stockAnt + cantidad;
           const prevTotalValue = runningQty * runningCost;
-          runningQty += inQty;
-          runningCost = runningQty > 0 ? (prevTotalValue + inTotal) / runningQty : inCost;
-
-          kardexRows.push({
-            id: m.id,
-            date: m.dateStr,
-            type: m.type,
-            typeLabel: m.typeLabel,
-            docNumber: m.docNumber,
-            warehouse: m.warehouse || 'Bodega Central Norte',
-            entityName: m.entityName,
-            user: m.user,
-            productId: m.productId,
-            productName: m.productName,
-            sku: m.sku,
-            unit: m.unit,
-            inQty,
-            inCost,
-            inTotal,
-            outQty: 0,
-            outCost: 0,
-            outTotal: 0,
-            balanceQty: runningQty,
-            balanceCost: runningCost,
-            balanceTotal: runningQty * runningCost,
-            notes: m.notes,
-          });
+          runningQty = stockNuevo;
+          runningCost = runningQty > 0 ? (prevTotalValue + (cantidad * effectiveCost)) / runningQty : effectiveCost;
         } else {
-          const outQty = m.qty;
-          const outCost = runningCost;
-          const outTotal = outQty * outCost;
-          runningQty = Math.max(0, runningQty - outQty);
-
-          kardexRows.push({
-            id: m.id,
-            date: m.dateStr,
-            type: m.type,
-            typeLabel: m.typeLabel,
-            docNumber: m.docNumber,
-            warehouse: m.warehouse || 'Tienda POS / Salón de Ventas',
-            entityName: m.entityName,
-            user: m.user,
-            productId: m.productId,
-            productName: m.productName,
-            sku: m.sku,
-            unit: m.unit,
-            inQty: 0,
-            inCost: 0,
-            inTotal: 0,
-            outQty,
-            outCost,
-            outTotal,
-            balanceQty: runningQty,
-            balanceCost: runningCost,
-            balanceTotal: runningQty * runningCost,
-            notes: m.notes,
-          });
+          stockNuevo = Math.max(0, stockAnt - cantidad);
+          runningQty = stockNuevo;
         }
-      });
 
-      return kardexRows;
-    } else {
-      // CONSOLIDATED MODE (ALL PRODUCTS): Descending order (newest first for activity log)
-      rawMovements.sort((a, b) => b.timestamp - a.timestamp);
+        const dateParts = (m.dateStr || '').split(' ');
+        const dateOnly = dateParts[0] || m.dateStr;
+        const timeOnly = dateParts[1] || '';
 
-      return rawMovements.map((m) => {
-        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
-        const prod = productMap.get(m.productId) || productMap.get((m.sku || '').toLowerCase());
-        const prodStock = prod ? prod.stock : 0;
-        const prodCost = prod ? prod.costPrice : m.cost;
+        const motivo = getMotivo(m.type);
+        const referencia = getReferencia(m.type, isInput, m.docNumber);
+        const tipoBadge: 'Ingreso' | 'Egreso' = isInput ? 'Ingreso' : 'Egreso';
 
-        return {
+        calculatedMovements.push({
           id: m.id,
+          seqId: 0, // Assigned sequentially after global chronological ordering
           date: m.dateStr,
+          dateOnly,
+          timeOnly,
           type: m.type,
           typeLabel: m.typeLabel,
+          tipoBadge,
+          motivo,
+          stockAnt,
+          cantidad,
+          stockNuevo,
+          precio: m.price > 0 ? m.price : effectiveCost,
+          referencia,
           docNumber: m.docNumber,
-          warehouse: m.warehouse || 'Bodega Principal',
+          warehouse: m.warehouse || 'Bodega Central',
           entityName: m.entityName,
           user: m.user,
           productId: m.productId,
           productName: m.productName,
           sku: m.sku,
           unit: m.unit,
-          inQty: isInput ? m.qty : 0,
-          inCost: isInput ? m.cost : 0,
-          inTotal: isInput ? m.qty * m.cost : 0,
-          outQty: !isInput ? m.qty : 0,
-          outCost: !isInput ? m.cost : 0,
-          outTotal: !isInput ? m.qty * m.cost : 0,
-          balanceQty: prodStock,
-          balanceCost: prodCost,
-          balanceTotal: prodStock * prodCost,
+          inQty: isInput ? cantidad : 0,
+          inCost: isInput ? effectiveCost : 0,
+          inTotal: isInput ? cantidad * effectiveCost : 0,
+          outQty: !isInput ? cantidad : 0,
+          outCost: !isInput ? runningCost : 0,
+          outTotal: !isInput ? cantidad * runningCost : 0,
+          balanceQty: runningQty,
+          balanceCost: runningCost,
+          balanceTotal: runningQty * runningCost,
           notes: m.notes,
-        };
+        });
       });
-    }
+    });
+
+    // Sort all calculated movements chronologically ascending to assign global sequence IDs
+    calculatedMovements.sort((a, b) => {
+      const timeA = new Date(a.date).getTime() || 0;
+      const timeB = new Date(b.date).getTime() || 0;
+      return timeA - timeB;
+    });
+
+    calculatedMovements.forEach((m, idx) => {
+      m.seqId = idx + 1;
+    });
+
+    return calculatedMovements;
   }, [selectedProduct, invoices, purchases, stockAdjustments, creditNotes, transfers, productMap]);
 
-  // ── Filtered Movements ─────────────────────────────────────────────────────
+  // ── Filtered & Sorted Movements ────────────────────────────────────────────
   const filteredMovements = useMemo(() => {
-    return allMovements.filter((m) => {
+    const list = allMovements.filter((m) => {
       // Date Range Filter
       if (dateFrom && m.date.substring(0, 10) < dateFrom) return false;
       if (dateTo && m.date.substring(0, 10) > dateTo) return false;
@@ -544,15 +586,29 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         const matchesEntity = m.entityName.toLowerCase().includes(term);
         const matchesUser = m.user.toLowerCase().includes(term);
         const matchesType = m.typeLabel.toLowerCase().includes(term);
+        const matchesMotivo = m.motivo.toLowerCase().includes(term);
+        const matchesRef = m.referencia.toLowerCase().includes(term);
         const matchesWarehouse = (m.warehouse || '').toLowerCase().includes(term);
         const matchesProd = (m.productName || '').toLowerCase().includes(term);
         const matchesSku = (m.sku || '').toLowerCase().includes(term);
-        if (!matchesDoc && !matchesEntity && !matchesUser && !matchesType && !matchesWarehouse && !matchesProd && !matchesSku) return false;
+        if (!matchesDoc && !matchesEntity && !matchesUser && !matchesType && !matchesMotivo && !matchesRef && !matchesWarehouse && !matchesProd && !matchesSku) return false;
       }
 
       return true;
     });
-  }, [allMovements, dateFrom, dateTo, selectedWarehouseFilter, movementTypeFilter, filterText]);
+
+    return [...list].sort((a, b) => {
+      let valA: any = (a as any)[sortColumn];
+      let valB: any = (b as any)[sortColumn];
+
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [allMovements, dateFrom, dateTo, selectedWarehouseFilter, movementTypeFilter, filterText, sortColumn, sortOrder]);
 
   // ── General Statistics for Consolidated View ──────────────────────────────
   const generalStats = useMemo(() => {
@@ -1212,117 +1268,203 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           </div>
         </div>
 
-        {/* Main Kardex Multi-Column Table */}
+        {/* Main Kardex 11-Column Table (Matching exact user specification) */}
         <div className="bg-white border border-slate-200/90 rounded-3xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto max-h-[580px] overflow-y-auto custom-scrollbar">
+          <div className="overflow-x-auto max-h-[620px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px] sticky top-0 z-10">
-                <tr className="border-b border-slate-800 text-slate-300">
-                  <th className="py-2.5 px-3">Fecha & Hora</th>
-                  <th className="py-2.5 px-3">Operación</th>
-                  <th className="py-2.5 px-3">Comprobante</th>
-                  {!selectedProduct && <th className="py-2.5 px-3 text-orange-400">Producto / SKU</th>}
-                  <th className="py-2.5 px-3">Bodega / Sucursal</th>
-                  <th className="py-2.5 px-3">Detalle / Cliente / Prov.</th>
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-bold text-xs sticky top-0 z-10">
+                <tr className="divide-x divide-slate-200/60">
+                  <th
+                    onClick={() => handleSort('seqId')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'seqId' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Id</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('date')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'date' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Fecha</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('productName')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'productName' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Producto</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('tipoBadge')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'tipoBadge' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Tipo</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('motivo')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'motivo' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Motivo</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('stockAnt')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors text-right"
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'stockAnt' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Stock ant.</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('cantidad')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors text-right"
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'cantidad' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Cantidad</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('stockNuevo')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors text-right"
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'stockNuevo' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Stock nuevo</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('precio')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors text-right"
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'precio' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Precio</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('referencia')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'referencia' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Referencia</span>
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSort('user')}
+                    className="py-3 px-3 cursor-pointer select-none hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap transition-colors"
+                  >
+                    <div className="flex items-center gap-1">
+                      <ArrowUpDown className={`w-3.5 h-3.5 ${sortColumn === 'user' ? 'text-orange-500 font-black' : 'text-slate-400'}`} />
+                      <span>Usuario</span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white font-medium text-slate-800">
                 {filteredMovements.length === 0 ? (
                   <tr>
-                    <td colSpan={selectedProduct ? 5 : 6} className="py-12 text-center text-slate-400">
+                    <td colSpan={11} className="py-12 text-center text-slate-400">
                       <AlertCircle className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                       No se encontraron movimientos registrados para los filtros seleccionados.
                     </td>
                   </tr>
                 ) : (
                   filteredMovements.map((m) => {
-                    const isSale = m.type === 'VENTA';
-                    const isPurchase = m.type === 'COMPRA';
-                    const isInitial = m.type === 'SALDO_INICIAL';
-                    const isTransfer = m.type === 'TRANSFERENCIA_SALIDA' || m.type === 'TRANSFERENCIA_ENTRADA';
-                    const isEntry = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
+                    const isEgreso = m.tipoBadge === 'Egreso';
 
                     return (
                       <tr
                         key={m.id}
-                        className={`hover:bg-slate-50 transition-colors ${
-                          isInitial ? 'bg-slate-50/70 font-semibold' : ''
-                        }`}
+                        className="hover:bg-slate-50/90 transition-colors border-b border-slate-100"
                       >
-                        {/* Fecha */}
-                        <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-500">
-                          {m.date}
+                        {/* 1. Id */}
+                        <td className="py-3 px-3 whitespace-nowrap font-medium text-slate-800 text-xs">
+                          {m.seqId}
                         </td>
 
-                        {/* Operación badge */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
+                        {/* 2. Fecha */}
+                        <td className="py-3 px-3 whitespace-nowrap font-mono text-[11px] leading-tight">
+                          <div className="text-slate-800 font-semibold">{m.dateOnly}</div>
+                          <div className="text-slate-400 text-[10px] mt-0.5">{m.timeOnly}</div>
+                        </td>
+
+                        {/* 3. Producto */}
+                        <td className="py-3 px-3 max-w-[280px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (m.productId) {
+                                setSelectedProductId(m.productId);
+                                setProductSearch(m.productName || '');
+                              }
+                            }}
+                            className="text-left font-bold text-slate-900 hover:text-orange-600 transition truncate block w-full cursor-pointer"
+                            title="Filtrar kardex por este producto"
+                          >
+                            <span className="font-mono font-normal text-slate-500 mr-1.5">{m.sku}</span>
+                            <span className="uppercase text-slate-900 font-semibold">{m.productName}</span>
+                          </button>
+                        </td>
+
+                        {/* 4. Tipo */}
+                        <td className="py-3 px-3 whitespace-nowrap">
                           <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${
-                              isInitial
-                                ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                                : isPurchase
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : isSale
-                                ? 'bg-sky-50 text-sky-700 border border-sky-200'
-                                : m.type === 'DEVOLUCION_VENTA'
-                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                : isTransfer
-                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                : isEntry
-                                ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                                : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold text-white shadow-xs ${
+                              isEgreso ? 'bg-[#dc2626]' : 'bg-[#15803d]'
                             }`}
                           >
-                            {isTransfer ? (
-                              <ArrowRightLeft className="w-3 h-3 text-indigo-600" />
-                            ) : isEntry ? (
-                              <ArrowDownLeft className="w-3 h-3 text-emerald-600" />
-                            ) : (
-                              <ArrowUpRight className="w-3 h-3 text-rose-600" />
-                            )}
-                            <span>{m.typeLabel}</span>
+                            {m.tipoBadge}
                           </span>
                         </td>
 
-                        {/* Comprobante */}
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                          {m.docNumber}
+                        {/* 5. Motivo */}
+                        <td className="py-3 px-3 whitespace-nowrap text-slate-800 text-xs">
+                          {m.motivo}
                         </td>
 
-                        {/* Producto (Solo en vista consolidada sin selectedProduct) */}
-                        {!selectedProduct && (
-                          <td className="py-2.5 px-3 max-w-[210px]">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (m.productId) {
-                                  setSelectedProductId(m.productId);
-                                  setProductSearch(m.productName || '');
-                                }
-                              }}
-                              className="text-left font-bold text-slate-900 hover:text-orange-600 transition truncate block w-full cursor-pointer"
-                              title="Haga clic para ver el Kardex individual de este producto"
-                            >
-                              {m.productName || 'Producto General'}
-                            </button>
-                            <span className="text-[10px] font-mono text-slate-400 block">
-                              SKU: {m.sku || 'N/A'}
-                            </span>
-                          </td>
-                        )}
-
-                        {/* Bodega / Sucursal */}
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 rounded-md font-semibold text-[10px] inline-flex items-center gap-1">
-                            <Building className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span className="truncate max-w-[140px]">{m.warehouse || 'Bodega Central'}</span>
-                          </span>
+                        {/* 6. Stock ant. */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-800 text-xs whitespace-nowrap">
+                          {m.stockAnt.toFixed(2)}
                         </td>
 
-                        {/* Detalle */}
-                        <td className="py-2.5 px-3 max-w-[200px] truncate text-slate-600" title={`${m.entityName} (${m.user})`}>
-                          <div className="font-semibold text-slate-800 truncate">{m.entityName}</div>
-                          <div className="text-[10px] text-slate-400 truncate">Resp: {m.user}</div>
+                        {/* 7. Cantidad */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-800 text-xs whitespace-nowrap">
+                          {m.cantidad.toFixed(2)}
+                        </td>
+
+                        {/* 8. Stock nuevo */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-800 text-xs whitespace-nowrap">
+                          {m.stockNuevo.toFixed(2)}
+                        </td>
+
+                        {/* 9. Precio */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-800 text-xs whitespace-nowrap">
+                          ${m.precio.toFixed(4)}
+                        </td>
+
+                        {/* 10. Referencia */}
+                        <td className="py-3 px-3 text-slate-800 font-mono text-xs whitespace-nowrap">
+                          {m.referencia}
+                        </td>
+
+                        {/* 11. Usuario */}
+                        <td className="py-3 px-3 text-slate-800 text-xs whitespace-nowrap">
+                          {m.user}
                         </td>
                       </tr>
                     );
@@ -1570,32 +1712,57 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 </div>
               )}
 
-              {/* Tabla Formal de Movimientos */}
-              <table className="w-full text-left text-[11px] border border-slate-300">
-                <thead className="bg-slate-100 text-slate-900 uppercase font-black text-[9px] border-b border-slate-300">
-                  <tr>
-                    <th className="p-2 border-r border-slate-300">Fecha</th>
-                    <th className="p-2 border-r border-slate-300">Movimiento</th>
-                    <th className="p-2 border-r border-slate-300">Doc / Ref</th>
-                    {!selectedProduct && <th className="p-2 border-slate-300">Producto / SKU</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {filteredMovements.map((m, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="p-1.5 border-r border-slate-200 font-mono text-[10px]">{m.date}</td>
-                      <td className="p-1.5 border-r border-slate-200 font-bold">{m.typeLabel}</td>
-                      <td className="p-1.5 border-r border-slate-200 font-mono text-[10px]">{m.docNumber || '-'}</td>
-                      {!selectedProduct && (
-                        <td className="p-1.5 border-slate-200">
-                          <span className="font-bold block">{m.productName || 'Producto General'}</span>
-                          <span className="text-[9px] font-mono text-slate-500">SKU: {m.sku || 'N/A'}</span>
-                        </td>
-                      )}
+              {/* Tabla Formal de Movimientos (11 Columnas Exactas) */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[10px] border border-slate-300 border-collapse">
+                  <thead className="bg-slate-100 text-slate-900 uppercase font-black text-[9px] border-b border-slate-300">
+                    <tr className="divide-x divide-slate-300">
+                      <th className="p-1.5 text-center">Id</th>
+                      <th className="p-1.5">Fecha</th>
+                      <th className="p-1.5">Producto</th>
+                      <th className="p-1.5 text-center">Tipo</th>
+                      <th className="p-1.5">Motivo</th>
+                      <th className="p-1.5 text-right">Stock ant.</th>
+                      <th className="p-1.5 text-right">Cantidad</th>
+                      <th className="p-1.5 text-right">Stock nuevo</th>
+                      <th className="p-1.5 text-right">Precio</th>
+                      <th className="p-1.5">Referencia</th>
+                      <th className="p-1.5">Usuario</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {filteredMovements.map((m) => (
+                      <tr key={m.id} className="hover:bg-slate-50 divide-x divide-slate-200">
+                        <td className="p-1.5 font-mono text-center text-slate-800">{m.seqId}</td>
+                        <td className="p-1.5 font-mono text-[9px] text-slate-800">
+                          <div>{m.dateOnly}</div>
+                          <div className="text-slate-500 text-[8px]">{m.timeOnly}</div>
+                        </td>
+                        <td className="p-1.5 text-slate-900">
+                          <span className="font-mono text-slate-500 mr-1">{m.sku}</span>
+                          <span className="font-bold uppercase">{m.productName}</span>
+                        </td>
+                        <td className="p-1.5 text-center whitespace-nowrap">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[8px] font-bold text-white ${
+                              m.tipoBadge === 'Egreso' ? 'bg-[#dc2626]' : 'bg-[#15803d]'
+                            }`}
+                          >
+                            {m.tipoBadge}
+                          </span>
+                        </td>
+                        <td className="p-1.5 text-slate-800">{m.motivo}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-800">{m.stockAnt.toFixed(2)}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-800">{m.cantidad.toFixed(2)}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-800">{m.stockNuevo.toFixed(2)}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-800">${m.precio.toFixed(4)}</td>
+                        <td className="p-1.5 font-mono text-[9px] text-slate-800">{m.referencia}</td>
+                        <td className="p-1.5 text-slate-800 text-[9px]">{m.user}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {/* Firmas de Responsabilidad */}
               <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">

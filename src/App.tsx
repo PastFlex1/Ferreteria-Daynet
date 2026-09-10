@@ -72,7 +72,24 @@ export default function App() {
   const [blockerInitialCash, setBlockerInitialCash] = useState('500');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isTabLoading, setIsTabLoading] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ferreteria_sidebar_collapsed');
+      return saved !== null ? saved === 'true' : false;
+    } catch {
+      return false;
+    }
+  });
+
+  const setSidebarCollapsed = (value: boolean | ((prev: boolean) => boolean)) => {
+    setSidebarCollapsedState((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      try {
+        localStorage.setItem('ferreteria_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
   const [posInitialCart, setPosInitialCart] = useState<CartItem[]>([]);
   const [posInitialCustomer, setPosInitialCustomer] = useState<Customer | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -616,11 +633,12 @@ export default function App() {
         cartItemCount={0}
         currentUser={currentUser}
         onLogout={() => setIsLogoutConfirmOpen(true)}
-        onCollapsedChange={setSidebarCollapsed}
+        sidebarCollapsed={sidebarCollapsed}
+        setSidebarCollapsed={setSidebarCollapsed}
       />
 
       {/* Main Container Content — offset by topbar (56px) and sidebar (dynamic) */}
-      <main className={`pt-14 min-h-screen transition-all duration-200 ${sidebarCollapsed ? 'pl-14' : 'pl-52'}`}>
+      <main className={`pt-14 min-h-screen transition-all duration-200 ${sidebarCollapsed ? 'pl-14' : 'pl-56'}`}>
         <div className="p-4 sm:p-6 lg:p-8 max-w-[1920px] mx-auto">
         {isTabLoading ? (
           <ModuleSkeleton />
