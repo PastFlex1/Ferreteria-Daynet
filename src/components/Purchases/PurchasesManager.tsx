@@ -107,6 +107,71 @@ export interface PurchaseOrder {
   notes?: string;
 }
 
+interface DecimalInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  className?: string;
+  placeholder?: string;
+  min?: number;
+}
+
+const DecimalInput: React.FC<DecimalInputProps> = ({
+  value,
+  onChange,
+  className = '',
+  placeholder = '0.00',
+  min = 0,
+}) => {
+  const [textValue, setTextValue] = useState<string>(() =>
+    value !== undefined && value !== null ? String(value) : ''
+  );
+
+  useEffect(() => {
+    const normalized = textValue.replace(',', '.');
+    const parsed = parseFloat(normalized);
+    // Don't overwrite if user is actively typing dot/comma or trailing zero
+    if (!textValue.endsWith('.') && !textValue.endsWith(',') && (!textValue.includes('.') || !textValue.endsWith('0'))) {
+      if (parsed !== value) {
+        setTextValue(value !== undefined && value !== null ? String(value) : '');
+      }
+    }
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={textValue}
+      onChange={(e) => {
+        const val = e.target.value;
+        if (/^[0-9]*[.,]?[0-9]*$/.test(val)) {
+          setTextValue(val);
+          const normalized = val.replace(',', '.');
+          const parsed = parseFloat(normalized);
+          if (!isNaN(parsed)) {
+            onChange(Math.max(min, parsed));
+          } else if (val === '' || val === '.' || val === ',') {
+            onChange(min);
+          }
+        }
+      }}
+      onBlur={() => {
+        const normalized = textValue.replace(',', '.');
+        const parsed = parseFloat(normalized);
+        if (isNaN(parsed) || parsed < min) {
+          setTextValue(String(min));
+          onChange(min);
+        } else {
+          setTextValue(String(parsed));
+          onChange(parsed);
+        }
+      }}
+      className={className}
+    />
+  );
+};
+
 export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   subTab,
   products,
@@ -207,6 +272,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [newOrderItems, setNewOrderItems] = useState<PurchaseItem[]>([]);
   const [newOrderProductId, setNewOrderProductId] = useState('');
   const [newOrderQty, setNewOrderQty] = useState('');
+  const [newOrderCost, setNewOrderCost] = useState('');
 
   // Purchase Order View & Edit State
   const [selectedOrderView, setSelectedOrderView] = useState<PurchaseOrder | null>(null);
@@ -225,26 +291,29 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
       return;
     }
-    const qty = parseFloat(newOrderQty) || 0;
+    const qty = parseFloat(newOrderQty.replace(',', '.')) || 0;
     if (qty <= 0) {
       showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Requerida', 'warning');
       return;
     }
-    const sub = p.costPrice * qty;
-    const tax = sub * ((typeof p.taxRate === 'number' ? p.taxRate : 15) / 100);
+    const cost = newOrderCost ? (parseFloat(newOrderCost.replace(',', '.')) || 0) : (p.costPrice || 0);
+    const sub = cost * qty;
+    const itemTax = typeof p.taxRate === 'number' ? p.taxRate : 15;
+    const tax = sub * (itemTax / 100);
     const newItem: PurchaseItem = {
       productId: p.id,
       sku: p.sku,
       productName: p.name,
       quantity: qty,
-      costPrice: p.costPrice,
-      taxPercent: typeof p.taxRate === 'number' ? p.taxRate : 15,
+      costPrice: cost,
+      taxPercent: itemTax,
       subtotal: sub,
       total: sub + tax
     };
     setNewOrderItems([...newOrderItems, newItem]);
     setNewOrderProductId('');
     setNewOrderQty('');
+    setNewOrderCost('');
   };
 
   const handleCreatePurchaseOrder = (e: React.FormEvent) => {
@@ -303,7 +372,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
       showAlert('Seleccione un producto del catálogo.', 'Producto Requerido', 'warning');
       return;
     }
-    const qty = parseFloat(editOrderQty) || 0;
+    const qty = parseFloat(editOrderQty.replace(',', '.')) || 0;
     if (qty <= 0) {
       showAlert('Ingrese una cantidad válida mayor a 0.', 'Cantidad Requerida', 'warning');
       return;
@@ -782,7 +851,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     const prod = products.find(p => p.id === preOrderAddProductId);
     if (!prod) return;
 
-    const qty = parseFloat(preOrderAddQty) || 1;
+    const qty = parseFloat(preOrderAddQty.replace(',', '.')) || 1;
     const existingIdx = preOrderItems.findIndex(i => i.productId === prod.id);
 
     if (existingIdx >= 0) {
@@ -1993,11 +2062,18 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
               <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 mt-4 space-y-4">
                 <h4 className="text-xs font-black text-slate-900">Agregar Productos</h4>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                   <div className="md:col-span-2">
                     <Select
                       value={newOrderProductId}
-                      onChange={(e: any) => setNewOrderProductId(e.target.value)}
+                      onChange={(e: any) => {
+                        const pid = e.target.value;
+                        setNewOrderProductId(pid);
+                        const prod = products.find(p => p.id === pid);
+                        if (prod) {
+                          setNewOrderCost(prod.costPrice ? prod.costPrice.toString() : '');
+                        }
+                      }}
                       className="bg-white border-slate-200 text-xs font-bold"
                     >
                       <option value="">Seleccionar Producto...</option>
@@ -2010,19 +2086,35 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </div>
                   <div>
                     <input
-                      type="number"
-                      min="1"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Cantidad"
                       value={newOrderQty}
-                      onChange={(e) => setNewOrderQty(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setNewOrderQty(val);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Costo Est."
+                      value={newOrderCost}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setNewOrderCost(val);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-right text-emerald-700"
                     />
                   </div>
                   <div>
                     <button
                       type="button"
                       onClick={handleAddOrderProduct}
-                      className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition"
+                      className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                     >
                       Agregar
                     </button>
@@ -2036,8 +2128,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     <thead className="bg-slate-100 font-bold text-slate-700">
                       <tr>
                         <th className="py-2 px-3">Producto</th>
-                        <th className="py-2 px-3 text-right">Cant.</th>
-                        <th className="py-2 px-3 text-right">Costo</th>
+                        <th className="py-2 px-3 text-right w-24">Cant.</th>
+                        <th className="py-2 px-3 text-right w-28">Costo Est.</th>
+                        <th className="py-2 px-3 text-right">Subtotal</th>
                         <th className="py-2 px-3 text-center">Acción</th>
                       </tr>
                     </thead>
@@ -2045,8 +2138,41 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                       {newOrderItems.map((item, idx) => (
                         <tr key={idx}>
                           <td className="py-2 px-3 text-slate-800 font-medium">{item.productName}</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">{item.quantity}</td>
-                          <td className="py-2 px-3 text-right font-mono text-emerald-600">${item.costPrice.toFixed(4)}</td>
+                          <td className="py-2 px-3 text-right">
+                            <DecimalInput
+                              value={item.quantity}
+                              min={0.01}
+                              onChange={(newQty) => {
+                                setNewOrderItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  quantity: newQty,
+                                  subtotal: it.costPrice * newQty,
+                                  total: (it.costPrice * newQty) * (1 + it.taxPercent / 100)
+                                } : it));
+                              }}
+                              className="w-16 px-2 py-0.5 bg-slate-50 border border-slate-200 rounded text-center font-mono font-bold text-xs focus:bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                              placeholder="1"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <DecimalInput
+                              value={item.costPrice}
+                              min={0}
+                              onChange={(newCost) => {
+                                setNewOrderItems(items => items.map((it, i) => i === idx ? {
+                                  ...it,
+                                  costPrice: newCost,
+                                  subtotal: newCost * it.quantity,
+                                  total: (newCost * it.quantity) * (1 + it.taxPercent / 100)
+                                } : it));
+                              }}
+                              className="w-20 px-2 py-0.5 bg-slate-50 border border-slate-200 rounded text-right font-mono text-emerald-600 font-bold text-xs focus:bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                              placeholder="0.0000"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                            {formatCurrency(item.subtotal, settings.currencySymbol)}
+                          </td>
                           <td className="py-2 px-3 text-center">
                             <button
                               type="button"
@@ -2368,13 +2494,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
                 <div className="sm:col-span-2">
                   <input
-                    type="number"
-                    step="any"
-                    min="0.0001"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="Cant."
                     value={preOrderAddQty}
-                    onChange={(e) => setPreOrderAddQty(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-center font-mono font-bold rounded-xl px-3 py-2 text-xs"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setPreOrderAddQty(val);
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 text-white text-center font-mono font-bold rounded-xl px-3 py-2 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
                   />
                 </div>
 
@@ -2435,22 +2563,21 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                             <div className="flex items-center justify-center space-x-1">
                               <button
                                 type="button"
-                                onClick={() => handleUpdatePreOrderItemQty(idx, item.quantity - 1)}
+                                onClick={() => handleUpdatePreOrderItemQty(idx, Math.max(0.01, +(item.quantity - 1).toFixed(2)))}
                                 className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-black text-slate-700 text-xs transition cursor-pointer"
                               >
                                 -
                               </button>
-                              <input
-                                type="number"
-                                step="any"
-                                min="0.0001"
+                              <DecimalInput
                                 value={item.quantity}
-                                onChange={(e) => handleUpdatePreOrderItemQty(idx, parseFloat(e.target.value) || 0)}
-                                className="w-14 text-center font-mono font-black text-slate-900 text-xs border border-slate-200 rounded py-0.5 bg-slate-50"
+                                min={0.01}
+                                onChange={(val) => handleUpdatePreOrderItemQty(idx, val)}
+                                className="w-16 text-center font-mono font-black text-slate-900 text-xs border border-slate-200 rounded py-0.5 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                placeholder="1"
                               />
                               <button
                                 type="button"
-                                onClick={() => handleUpdatePreOrderItemQty(idx, item.quantity + 1)}
+                                onClick={() => handleUpdatePreOrderItemQty(idx, +(item.quantity + 1).toFixed(2))}
                                 className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 font-black text-slate-700 text-xs transition cursor-pointer"
                               >
                                 +
@@ -2459,14 +2586,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                           </td>
                           <td className="py-2 px-3 text-right">
                             <div className="flex items-center justify-end space-x-1">
-                              <span className="text-slate-400 font-mono">$</span>
-                              <input
-                                type="number"
-                                step="0.0001"
-                                min="0"
+                              <span className="text-slate-400 font-mono text-xs">$</span>
+                              <DecimalInput
                                 value={item.costPrice}
-                                onChange={(e) => handleUpdatePreOrderItemCost(idx, parseFloat(e.target.value) || 0)}
-                                className="w-16 text-right font-mono font-bold text-emerald-700 text-xs border border-slate-200 rounded py-0.5 bg-slate-50 px-1"
+                                min={0}
+                                onChange={(val) => handleUpdatePreOrderItemCost(idx, val)}
+                                className="w-20 text-right font-mono font-bold text-emerald-700 text-xs border border-slate-200 rounded py-0.5 bg-slate-50 px-1.5 focus:bg-white focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                                placeholder="0.0000"
                               />
                             </div>
                           </td>
@@ -3095,12 +3221,14 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   </div>
                   <div>
                     <input
-                      type="number"
-                      step="any"
-                      min="0.0001"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Cant."
                       value={editOrderQty}
-                      onChange={(e) => setEditOrderQty(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^[0-9]*[.,]?[0-9]*$/.test(val)) setEditOrderQty(val);
+                      }}
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center"
                     />
                   </div>
@@ -3137,13 +3265,10 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                             <span className="font-bold text-slate-800">{item.productName}</span>
                           </td>
                           <td className="py-2 px-3 text-center">
-                            <input
-                              type="number"
-                              step="any"
-                              min="0.0001"
+                            <DecimalInput
                               value={item.quantity}
-                              onChange={(e) => {
-                                const newQty = parseFloat(e.target.value) || 0;
+                              min={0.01}
+                              onChange={(newQty) => {
                                 const sub = item.costPrice * newQty;
                                 const tax = sub * (item.taxPercent / 100);
                                 setEditOrderItems(items => items.map((it, i) => i === idx ? {
@@ -3153,17 +3278,15 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                   total: sub + tax
                                 } : it));
                               }}
-                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-mono font-bold"
+                              className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-center font-mono font-bold text-xs focus:bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                              placeholder="1"
                             />
                           </td>
                           <td className="py-2 px-3 text-right">
-                            <input
-                              type="number"
-                              step="0.0001"
-                              min="0"
+                            <DecimalInput
                               value={item.costPrice}
-                              onChange={(e) => {
-                                const newCost = parseFloat(e.target.value) || 0;
+                              min={0}
+                              onChange={(newCost) => {
                                 const sub = newCost * item.quantity;
                                 const tax = sub * (item.taxPercent / 100);
                                 setEditOrderItems(items => items.map((it, i) => i === idx ? {
@@ -3173,7 +3296,8 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                                   total: sub + tax
                                 } : it));
                               }}
-                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono text-emerald-600 font-bold"
+                              className="w-20 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono text-emerald-600 font-bold text-xs focus:bg-white focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                              placeholder="0.0000"
                             />
                           </td>
                           <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">

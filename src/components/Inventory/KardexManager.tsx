@@ -1217,50 +1217,19 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           <div className="overflow-x-auto max-h-[580px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-950 text-white font-black uppercase text-[10px] sticky top-0 z-10">
-                {/* Top grouping row */}
-                <tr className="border-b border-slate-800">
-                  <th colSpan={selectedProduct ? 5 : 6} className="py-2.5 px-3 bg-slate-950 text-slate-400 border-r border-slate-800">
-                    Datos de la Transacción
-                  </th>
-                  <th colSpan={3} className="py-2.5 px-3 bg-emerald-950/70 text-emerald-300 text-center border-r border-slate-800">
-                    Entradas (+)
-                  </th>
-                  <th colSpan={3} className="py-2.5 px-3 bg-rose-950/70 text-rose-300 text-center border-r border-slate-800">
-                    Salidas (-)
-                  </th>
-                  <th colSpan={3} className="py-2.5 px-3 bg-amber-950/70 text-amber-300 text-center">
-                    {selectedProduct ? 'Existencias & Saldos' : 'Saldos Actuales'}
-                  </th>
-                </tr>
-                {/* Detailed columns */}
                 <tr className="border-b border-slate-800 text-slate-300">
                   <th className="py-2.5 px-3">Fecha & Hora</th>
                   <th className="py-2.5 px-3">Operación</th>
                   <th className="py-2.5 px-3">Comprobante</th>
                   {!selectedProduct && <th className="py-2.5 px-3 text-orange-400">Producto / SKU</th>}
                   <th className="py-2.5 px-3">Bodega / Sucursal</th>
-                  <th className="py-2.5 px-3 border-r border-slate-800">Detalle / Cliente / Prov.</th>
-                  
-                  {/* Entradas */}
-                  <th className="py-2.5 px-2 text-right bg-emerald-950/40 text-emerald-300">Cant.</th>
-                  <th className="py-2.5 px-2 text-right bg-emerald-950/40 text-emerald-300">Costo ($)</th>
-                  <th className="py-2.5 px-2 text-right bg-emerald-950/40 text-emerald-300 border-r border-slate-800">Total ($)</th>
-                  
-                  {/* Salidas */}
-                  <th className="py-2.5 px-2 text-right bg-rose-950/40 text-rose-300">Cant.</th>
-                  <th className="py-2.5 px-2 text-right bg-rose-950/40 text-rose-300">Costo ($)</th>
-                  <th className="py-2.5 px-2 text-right bg-rose-950/40 text-rose-300 border-r border-slate-800">Total ($)</th>
-                  
-                  {/* Saldos */}
-                  <th className="py-2.5 px-2 text-right bg-amber-950/40 text-amber-300">Stock</th>
-                  <th className="py-2.5 px-2 text-right bg-amber-950/40 text-amber-300">{selectedProduct ? 'Costo Prom.' : 'Costo Unit.'}</th>
-                  <th className="py-2.5 px-3 text-right bg-amber-950/40 text-amber-300 font-bold">Valor Total</th>
+                  <th className="py-2.5 px-3">Detalle / Cliente / Prov.</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white font-medium text-slate-800">
                 {filteredMovements.length === 0 ? (
                   <tr>
-                    <td colSpan={selectedProduct ? 14 : 15} className="py-12 text-center text-slate-400">
+                    <td colSpan={selectedProduct ? 5 : 6} className="py-12 text-center text-slate-400">
                       <AlertCircle className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                       No se encontraron movimientos registrados para los filtros seleccionados.
                     </td>
@@ -1351,42 +1320,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                         </td>
 
                         {/* Detalle */}
-                        <td className="py-2.5 px-3 max-w-[200px] truncate border-r border-slate-100 text-slate-600" title={`${m.entityName} (${m.user})`}>
+                        <td className="py-2.5 px-3 max-w-[200px] truncate text-slate-600" title={`${m.entityName} (${m.user})`}>
                           <div className="font-semibold text-slate-800 truncate">{m.entityName}</div>
                           <div className="text-[10px] text-slate-400 truncate">Resp: {m.user}</div>
-                        </td>
-
-                        {/* Entradas */}
-                        <td className="py-2.5 px-2 text-right font-mono font-bold text-emerald-700 bg-emerald-50/20">
-                          {m.inQty > 0 ? m.inQty : '-'}
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono text-slate-600 bg-emerald-50/20">
-                          {m.inQty > 0 ? `$${m.inCost.toFixed(2)}` : '-'}
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono font-black text-emerald-800 bg-emerald-50/20 border-r border-slate-100">
-                          {m.inQty > 0 ? `$${m.inTotal.toFixed(2)}` : '-'}
-                        </td>
-
-                        {/* Salidas */}
-                        <td className="py-2.5 px-2 text-right font-mono font-bold text-rose-600 bg-rose-50/20">
-                          {m.outQty > 0 ? m.outQty : '-'}
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono text-slate-600 bg-rose-50/20">
-                          {m.outQty > 0 ? `$${m.outCost.toFixed(2)}` : '-'}
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono font-black text-rose-700 bg-rose-50/20 border-r border-slate-100">
-                          {m.outQty > 0 ? `$${m.outTotal.toFixed(2)}` : '-'}
-                        </td>
-
-                        {/* Saldos */}
-                        <td className="py-2.5 px-2 text-right font-mono font-black text-slate-950 bg-amber-50/30">
-                          {m.balanceQty}
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono font-bold text-emerald-800 bg-amber-50/30">
-                          ${m.balanceCost.toFixed(2)}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-black text-slate-950 bg-amber-50/30">
-                          ${m.balanceTotal.toFixed(2)}
                         </td>
                       </tr>
                     );
@@ -1638,24 +1574,10 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               <table className="w-full text-left text-[11px] border border-slate-300">
                 <thead className="bg-slate-100 text-slate-900 uppercase font-black text-[9px] border-b border-slate-300">
                   <tr>
-                    <th rowSpan={2} className="p-2 border-r border-slate-300">Fecha</th>
-                    <th rowSpan={2} className="p-2 border-r border-slate-300">Movimiento</th>
-                    <th rowSpan={2} className="p-2 border-r border-slate-300">Doc / Ref</th>
-                    {!selectedProduct && <th rowSpan={2} className="p-2 border-r border-slate-300">Producto / SKU</th>}
-                    <th colSpan={3} className="p-1.5 text-center border-r border-b border-slate-300 bg-emerald-50 text-emerald-900">ENTRADAS</th>
-                    <th colSpan={3} className="p-1.5 text-center border-r border-b border-slate-300 bg-rose-50 text-rose-900">SALIDAS</th>
-                    <th colSpan={3} className="p-1.5 text-center border-b border-slate-300 bg-blue-50 text-blue-900">SALDOS</th>
-                  </tr>
-                  <tr>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-emerald-50/50">Cant</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-emerald-50/50">Costo</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-emerald-50/50">Total</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-rose-50/50">Cant</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-rose-50/50">Costo</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-rose-50/50">Total</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-blue-50/50">Cant</th>
-                    <th className="p-1.5 text-right border-r border-slate-300 bg-blue-50/50">Costo Prom</th>
-                    <th className="p-1.5 text-right bg-blue-50/50">Total</th>
+                    <th className="p-2 border-r border-slate-300">Fecha</th>
+                    <th className="p-2 border-r border-slate-300">Movimiento</th>
+                    <th className="p-2 border-r border-slate-300">Doc / Ref</th>
+                    {!selectedProduct && <th className="p-2 border-slate-300">Producto / SKU</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -1665,20 +1587,11 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                       <td className="p-1.5 border-r border-slate-200 font-bold">{m.typeLabel}</td>
                       <td className="p-1.5 border-r border-slate-200 font-mono text-[10px]">{m.docNumber || '-'}</td>
                       {!selectedProduct && (
-                        <td className="p-1.5 border-r border-slate-200">
+                        <td className="p-1.5 border-slate-200">
                           <span className="font-bold block">{m.productName || 'Producto General'}</span>
                           <span className="text-[9px] font-mono text-slate-500">SKU: {m.sku || 'N/A'}</span>
                         </td>
                       )}
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.inQty > 0 ? m.inQty : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.inQty > 0 ? formatCostCurrency(m.inCost, settings.currencySymbol) : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono font-bold text-emerald-700">{m.inQty > 0 ? `$${m.inTotal.toFixed(2)}` : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.outQty > 0 ? m.outQty : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{m.outQty > 0 ? formatCostCurrency(m.outCost, settings.currencySymbol) : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono font-bold text-rose-700">{m.outQty > 0 ? `$${m.outTotal.toFixed(2)}` : '-'}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono font-black">{m.balanceQty}</td>
-                      <td className="p-1.5 border-r border-slate-200 text-right font-mono">{formatCostCurrency(m.balanceCost, settings.currencySymbol)}</td>
-                      <td className="p-1.5 text-right font-mono font-black text-slate-900">${m.balanceTotal.toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>

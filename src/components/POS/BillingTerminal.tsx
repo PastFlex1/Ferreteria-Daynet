@@ -1131,6 +1131,24 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                     setIsProductDropdownOpen(true);
                   }}
                   onFocus={() => setIsProductDropdownOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && productSearch) {
+                      const exactMatch = products.find(
+                        (p) =>
+                          p.sku.toLowerCase() === productSearch.toLowerCase() ||
+                          (p.barcode && p.barcode.toLowerCase() === productSearch.toLowerCase())
+                      );
+                      if (exactMatch) {
+                        handleAddToCart(exactMatch, 1);
+                        setProductSearch('');
+                        setIsProductDropdownOpen(false);
+                      } else if (filteredProducts.length === 1) {
+                        handleAddToCart(filteredProducts[0], 1);
+                        setProductSearch('');
+                        setIsProductDropdownOpen(false);
+                      }
+                    }
+                  }}
                   placeholder="Buscar producto por nombre, SKU o código de barras..."
                   className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200/90 rounded-2xl text-xs font-medium text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none transition"
                 />
@@ -1167,50 +1185,56 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         </button>
                       </div>
                     ) : (
-                      filteredProducts.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            handleAddToCart(p, 1);
-                            setProductSearch('');
-                            setIsProductDropdownOpen(false);
-                          }}
-                          className="w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between hover:bg-slate-50 transition cursor-pointer border-b border-slate-50 last:border-none"
-                        >
-                          <div>
-                            <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                              <span>{p.name}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
-                              {(() => {
-                                const promo = getActivePromoForProduct(p, 1);
-                                return promo ? (
+                      filteredProducts.map((p) => {
+                        const taxRate = typeof p.taxRate === 'number' ? p.taxRate : (settings.defaultTaxRate ?? 15);
+                        const priceWithTax = p.price * (1 + taxRate / 100);
+                        const promo = getActivePromoForProduct(p, 1);
+
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              handleAddToCart(p, 1);
+                              setProductSearch('');
+                              setIsProductDropdownOpen(false);
+                            }}
+                            className="w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between hover:bg-slate-50 transition cursor-pointer border-b border-slate-50 last:border-none"
+                          >
+                            <div>
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                <span>{p.name}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
+                                {promo && (
                                   <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
                                     🏷️ {promo.discountPercent}% OFF
                                   </span>
-                                ) : null;
-                              })()}
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
+                                <span>Cat: {p.category}</span>
+                                <span>•</span>
+                                <span className={p.stock <= p.minStock ? 'text-rose-600 font-bold' : 'text-slate-600'}>
+                                  Stock: {p.stock} {p.unit}
+                                </span>
+                                <span>•</span>
+                                <span className="font-bold text-orange-600">IVA: {taxRate}%</span>
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
-                              <span>Cat: {p.category}</span>
-                              <span>•</span>
-                              <span className={p.stock <= p.minStock ? 'text-rose-600 font-bold' : 'text-slate-600'}>
-                                Stock: {p.stock} {p.unit}
+                            <div className="text-right">
+                              <div className="text-sm font-black font-mono text-slate-900">
+                                {formatCurrency(priceWithTax, settings.currencySymbol)}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Sin IVA: {formatCurrency(p.price, settings.currencySymbol)}
+                              </div>
+                              <span className="block text-[10px] text-emerald-600 font-bold mt-0.5">
+                                + Agregar
                               </span>
-                              <span>•</span>
-                              <span className="font-bold text-orange-600">IVA: {p.taxRate ?? settings.defaultTaxRate}%</span>
                             </div>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-sm font-black font-mono text-slate-900">
-                              {formatCurrency(p.price, settings.currencySymbol)}
-                            </span>
-                            <span className="block text-[10px] text-emerald-600 font-bold">
-                              + Agregar
-                            </span>
-                          </div>
-                        </button>
-                      ))
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 )}
