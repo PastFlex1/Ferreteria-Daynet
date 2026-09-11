@@ -236,158 +236,181 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fadeIn">
-        <div className="bg-white border border-slate-200/90 rounded-3xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh] ring-1 ring-slate-900/10">
-          {/* Modal Top Actions Header */}
-          <div className="px-6 py-4 bg-slate-950 text-white border-b border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 no-print">
-            <div className="flex items-center space-x-3 min-w-0">
-              <div className="p-2.5 bg-orange-500/20 border border-orange-500/30 text-orange-400 rounded-2xl shrink-0 shadow-xs">
-                <FileText className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-black text-white text-sm sm:text-base tracking-tight truncate">
-                    {getDocumentTypeName(activeInvoice.documentType)} — <span className="font-mono text-orange-400">{activeInvoice.fullNumber}</span>
-                  </h3>
-                  {activeInvoice.documentType === 'FACTURA' && (
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 inline-flex items-center gap-1 ${
-                      activeInvoice.sriStatus === 'AUTORIZADO'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        : activeInvoice.sriStatus === 'DEVUELTA'
-                          ? 'bg-red-500/20 text-red-300 border-red-500/30 animate-pulse'
-                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
-                    }`}>
-                      <ShieldCheck className="w-3 h-3" />
-                      <span>
-                        {activeInvoice.sriStatus === 'AUTORIZADO' 
-                          ? 'SRI AUTORIZADO' 
-                          : activeInvoice.sriStatus === 'DEVUELTA' 
-                            ? 'SRI DEVUELTA' 
-                            : 'SRI PENDIENTE'}
-                      </span>
-                    </span>
-                  )}
+        <div className="bg-white border border-slate-200/90 rounded-3xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh] ring-1 ring-slate-900/10">
+          {/* Modal Top Actions Header (Clean 2-Tier Layout) */}
+          <div className="bg-slate-950 text-white border-b border-slate-800 no-print">
+            {/* Level 1: Document Identity, Status Badge & Format Toggle */}
+            <div className="px-6 py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/60">
+              <div className="flex items-center space-x-3 min-w-0">
+                <div className="p-2.5 bg-orange-500/20 border border-orange-500/30 text-orange-400 rounded-2xl shrink-0 shadow-xs">
+                  <FileText className="w-5 h-5" />
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  {formatFullDate(activeInvoice.createdAt)}
-                </p>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h3 className="font-black text-white text-base tracking-tight truncate">
+                      {getDocumentTypeName(activeInvoice.documentType)} —{' '}
+                      <span className="font-mono text-orange-400">{activeInvoice.fullNumber}</span>
+                    </h3>
+                    {activeInvoice.documentType === 'FACTURA' && (
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 inline-flex items-center gap-1 ${
+                          activeInvoice.sriStatus === 'AUTORIZADO'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : activeInvoice.sriStatus === 'DEVUELTA'
+                            ? 'bg-red-500/20 text-red-300 border-red-500/30 animate-pulse'
+                            : 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
+                        }`}
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        <span>
+                          {activeInvoice.sriStatus === 'AUTORIZADO'
+                            ? 'SRI AUTORIZADO'
+                            : activeInvoice.sriStatus === 'DEVUELTA'
+                            ? 'SRI DEVUELTA'
+                            : 'SRI PENDIENTE'}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5 whitespace-nowrap">
+                    {formatFullDate(activeInvoice.createdAt)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Top-Right: Format Switch & Close Button */}
+              <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
+                {/* Format Toggle */}
+                <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center shrink-0">
+                  <button
+                    onClick={() => setTicketFormat('A4')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap ${
+                      ticketFormat === 'A4'
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    A4 / Factura
+                  </button>
+                  <button
+                    onClick={() => setTicketFormat('THERMAL')}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap ${
+                      ticketFormat === 'THERMAL'
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Ticket 80mm
+                  </button>
+                </div>
+
+                <button
+                  onClick={onClose}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer shrink-0"
+                  title="Cerrar visor"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 shrink-0 w-full lg:w-auto justify-end">
-              {/* Botón para Transmisión en Vivo al SRI */}
-              {activeInvoice.documentType === 'FACTURA' && (
-                <button
-                  type="button"
-                  onClick={() => setIsSriModalOpen(true)}
-                  className={`px-3 py-1.5 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap ${
-                    activeInvoice.sriStatus === 'AUTORIZADO'
-                      ? 'bg-slate-800/90 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30'
-                      : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-orange-500/20 animate-pulse'
-                  }`}
-                >
-                  {activeInvoice.sriStatus === 'AUTORIZADO' ? (
-                    <>
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Ver SRI</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Transmitir SRI</span>
-                    </>
-                  )}
-                </button>
-              )}
+            {/* Level 2: Dedicated Actions Toolbar */}
+            <div className="px-6 py-2 bg-slate-900/70 flex flex-wrap items-center justify-between gap-2">
+              {/* Left Action Group: SRI & Operational Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Botón para Transmisión en Vivo al SRI / Ver SRI */}
+                {activeInvoice.documentType === 'FACTURA' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsSriModalOpen(true)}
+                    className={`px-3 py-1.5 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap ${
+                      activeInvoice.sriStatus === 'AUTORIZADO'
+                        ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white shadow-orange-500/20 animate-pulse'
+                    }`}
+                  >
+                    {activeInvoice.sriStatus === 'AUTORIZADO' ? (
+                      <>
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Ver SRI</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Transmitir SRI</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
-              {/* Format Toggle */}
-              <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex items-center shrink-0">
-                <button
-                  onClick={() => setTicketFormat('A4')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap ${
-                    ticketFormat === 'A4' ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  A4 / Factura
-                </button>
-                <button
-                  onClick={() => setTicketFormat('THERMAL')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer whitespace-nowrap ${
-                    ticketFormat === 'THERMAL' ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Ticket 80mm
-                </button>
+                {/* Descargar XML Autorizado */}
+                {(activeInvoice.sriStatus === 'AUTORIZADO' ||
+                  !!activeInvoice.sriNumeroAutorizacion ||
+                  !!activeInvoice.sriXmlFirmado) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const xml = getAuthorizedXmlContent(activeInvoice, settings, undefined, undefined, sriMode);
+                      downloadXML(xml, `factura-${activeInvoice.fullNumber || activeInvoice.number}-autorizada.xml`);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+                    title="Descargar XML oficial autorizado del SRI"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>XML Autorizado</span>
+                  </button>
+                )}
+
+                {/* Botón para Anular Factura SRI */}
+                {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion) && (
+                  <button
+                    type="button"
+                    onClick={handleAnular}
+                    disabled={isAnulando}
+                    className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-50"
+                    title="Anular comprobante electrónico en el SRI"
+                  >
+                    <X className="w-3.5 h-3.5 text-red-400" />
+                    <span>{isAnulando ? 'Anulando...' : 'Anular SRI'}</span>
+                  </button>
+                )}
+
+                {/* Convert Quote Button */}
+                {activeInvoice.documentType === 'COTIZACION' && onConvertQuoteToInvoice && (
+                  <button
+                    onClick={() => onConvertQuoteToInvoice(activeInvoice)}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-sm whitespace-nowrap"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Facturar</span>
+                  </button>
+                )}
               </div>
 
-              {/* Botón para Anular Factura SRI */}
-              {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion) && (
+              {/* Right Action Group: Export & Print */}
+              <div className="flex items-center gap-2">
+                {/* Descargar PDF Directo */}
                 <button
                   type="button"
-                  onClick={handleAnular}
-                  disabled={isAnulando}
-                  className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-50"
-                  title="Anular comprobante electrónico en el SRI"
+                  onClick={handleDownloadPdf}
+                  disabled={isGeneratingPdf}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/20 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  title="Generar y descargar archivo PDF del RIDE"
                 >
-                  <X className="w-3.5 h-3.5 text-red-400" />
-                  <span>{isAnulando ? 'Anulando...' : 'Anular SRI'}</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isGeneratingPdf ? 'Generando...' : 'Descargar PDF'}</span>
                 </button>
-              )}
 
-              {/* Descargar XML Autorizado */}
-              {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion || !!activeInvoice.sriXmlFirmado) && (
+                {/* Imprimir Dialog */}
                 <button
-                  type="button"
-                  onClick={() => {
-                    const xml = getAuthorizedXmlContent(activeInvoice, settings, undefined, undefined, sriMode);
-                    downloadXML(xml, `factura-${activeInvoice.fullNumber || activeInvoice.number}-autorizada.xml`);
-                  }}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
-                  title="Descargar XML oficial autorizado del SRI"
+                  onClick={handlePrint}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition border border-slate-700 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  title="Abrir diálogo de impresión del navegador"
                 >
-                  <Download className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>XML Autorizado</span>
+                  <Printer className="w-3.5 h-3.5 text-orange-400 stroke-[2.5]" />
+                  <span>Imprimir</span>
                 </button>
-              )}
-
-              {/* Convert Quote Button */}
-              {activeInvoice.documentType === 'COTIZACION' && onConvertQuoteToInvoice && (
-                <button
-                  onClick={() => onConvertQuoteToInvoice(activeInvoice)}
-                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-sm whitespace-nowrap"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Facturar</span>
-                </button>
-              )}
-
-              {/* Descargar PDF Directo */}
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                disabled={isGeneratingPdf}
-                className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-emerald-600/20 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
-                title="Generar y descargar archivo PDF del RIDE"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>{isGeneratingPdf ? 'Generando...' : 'Descargar PDF'}</span>
-              </button>
-
-              {/* Imprimir Dialog */}
-              <button
-                onClick={handlePrint}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition border border-slate-700 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                title="Abrir diálogo de impresión del navegador"
-              >
-                <Printer className="w-3.5 h-3.5 text-orange-400 stroke-[2.5]" />
-                <span>Imprimir</span>
-              </button>
-
-              <button
-                onClick={onClose}
-                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer ml-1 shrink-0"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              </div>
             </div>
           </div>
 
@@ -417,68 +440,109 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             </div>
           )}
 
+          {/* Dynamic Print Paper Styling (A4 vs 80mm POS Thermal Roll) */}
+          <style>{`
+            @media print {
+              ${
+                ticketFormat === 'THERMAL'
+                  ? `
+                @page {
+                  size: 80mm auto !important;
+                  margin: 0 !important;
+                }
+                body, html {
+                  width: 80mm !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                }
+                #printable-invoice {
+                  width: 76mm !important;
+                  max-width: 76mm !important;
+                  min-width: 76mm !important;
+                  margin: 0 auto !important;
+                  padding: 2mm 1.5mm !important;
+                  box-shadow: none !important;
+                  border: none !important;
+                  font-size: 10.5px !important;
+                }
+              `
+                  : `
+                @page {
+                  size: A4 portrait !important;
+                  margin: 6mm !important;
+                }
+                #printable-invoice {
+                  width: 100% !important;
+                  max-width: 100% !important;
+                  padding: 0 !important;
+                  margin: 0 auto !important;
+                  box-shadow: none !important;
+                  border: none !important;
+                }
+              `
+              }
+            }
+          `}</style>
+
           {ticketFormat === 'A4' ? (
             /* Official SRI Ecuador RIDE Layout */
-            <div id="printable-invoice" className="bg-white text-black p-4 sm:p-6 mx-auto max-w-4xl font-sans text-xs">
-              {/* TOP ROW: Emisor (Left) & SRI Info / Clave de Acceso (Right) - Diseño Idéntico al RIDE Oficial */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+            <div id="printable-invoice" className="ride-a4 bg-white text-black p-3 sm:p-5 mx-auto max-w-[820px] font-sans text-xs">
+              {/* TOP ROW: Emisor (Left) & SRI Info / Clave de Acceso (Right) - Diseño Idéntico al RIDE Oficial en 2 Columnas */}
+              <div className="grid grid-cols-2 gap-3 items-stretch" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
                 {/* Left Column: Logo & Emisor Box */}
-                <div className="flex flex-col justify-between space-y-3">
+                <div className="flex flex-col justify-between space-y-2">
                   {/* Logo Container */}
-                  <div className="flex items-center justify-center min-h-[110px] max-h-[140px] pb-1">
+                  <div className="flex items-center justify-center min-h-[60px] max-h-[90px] pb-1">
                     {settings.logoUrl ? (
-                      <img src={settings.logoUrl} alt="Logo" className="max-h-28 max-w-[220px] object-contain rounded-lg" />
+                      <img src={settings.logoUrl} alt="Logo" className="max-h-20 max-w-[200px] object-contain rounded-lg" />
                     ) : (
-                      <div className="w-[130px] h-[130px] bg-black rounded-2xl flex flex-col items-center justify-center p-3 text-white shadow-md relative overflow-hidden border border-zinc-800 select-none">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-zinc-600 via-zinc-300 to-white flex items-center justify-center mb-1 shadow-inner">
-                          <Building2 className="w-6 h-6 text-black" />
+                      <div className="w-[100px] h-[75px] bg-black rounded-xl flex flex-col items-center justify-center p-2 text-white shadow-xs relative overflow-hidden border border-zinc-800 select-none">
+                        <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-zinc-600 via-zinc-300 to-white flex items-center justify-center mb-0.5 shadow-inner">
+                          <Building2 className="w-4 h-4 text-black" />
                         </div>
-                        <span className="font-black text-[13px] tracking-wider text-center uppercase leading-none">
-                          {settings.storeName || 'APM INOX'}
-                        </span>
-                        <span className="text-[7.5px] tracking-widest text-zinc-400 uppercase mt-1">
-                          ACERO INOXIDABLE
+                        <span className="font-black text-[10px] tracking-wider text-center uppercase leading-none">
+                          {settings.storeName || 'FERRETERÍA'}
                         </span>
                       </div>
                     )}
                   </div>
 
                   {/* Emisor Box - high rounded corners border-black */}
-                  <div className="border border-black rounded-[24px] p-6 flex-1 text-xs leading-normal flex flex-col justify-between bg-white">
+                  <div className="border border-black rounded-2xl p-3.5 flex-1 text-[10.5px] leading-tight flex flex-col justify-between bg-white">
                     <div>
-                      <h2 className="font-bold text-[14.5px] text-black leading-snug tracking-tight">
-                        {settings.legalName || 'Andrés Paul Morales Tobar'}
+                      <h2 className="font-bold text-[13px] text-black leading-snug tracking-tight">
+                        {settings.legalName || 'JHON ANDRES CRUZ SANCHEZ'}
                       </h2>
-                      <h3 className="font-bold text-[14.5px] text-black leading-snug tracking-tight mt-0.5">
-                        {settings.storeName || settings.legalName || 'Apm Inox'}
+                      <h3 className="font-bold text-[12.5px] text-black leading-snug tracking-tight mt-0.5">
+                        {settings.storeName || settings.legalName || 'ALDAC FERRETERÍA'}
                       </h3>
                     </div>
 
-                    <div className="space-y-2 mt-2.5 text-[11.5px]">
+                    <div className="space-y-1.5 mt-2 text-[10px]">
                       <div>
                         <span className="text-black block font-normal">Dirección Matriz:</span>
                         <p className="text-zinc-900 leading-snug mt-0.5 font-normal">
-                          {settings.address || 'Figueroa Oe 4-14 y 25 de Mayo (a media cuadra del Obelisco de Cotocollao)'}
+                          {settings.address || 'Av. Guayaquil Diagonal al TIA'}
                         </p>
                       </div>
                       <div>
                         <span className="text-black block font-normal">Dirección Sucursal:</span>
                         <p className="text-zinc-900 leading-snug mt-0.5 font-normal">
-                          {settings.address || 'Figueroa Oe 4-14 y 25 de Mayo (a media cuadra del Obelisco de Cotocollao)'}
+                          {settings.address || 'Av. Guayaquil Diagonal al TIA'}
                         </p>
                       </div>
                     </div>
 
-                    <div className="mt-2 text-[11.5px] text-zinc-900 space-y-0.5 font-normal">
+                    <div className="mt-1.5 text-[10px] text-zinc-900 space-y-0.5 font-normal">
                       <div>
-                        Telf: {settings.phone || '025158093 - 0992769292 - 0989411821'}
+                        Telf: {settings.phone || '0963888954'}
                       </div>
                       <div>
-                        Email: {settings.email || 'amec.marcando.diferencia@hotmail.com'}
+                        Email: {settings.email || 'jhon.cruz_95@hotmail.com'}
                       </div>
                     </div>
 
-                    <div className="mt-2.5 text-[11.5px] space-y-1">
+                    <div className="mt-2 text-[10px] space-y-0.5">
                       <div className="font-bold text-black">
                         OBLIGADO A LLEVAR CONTABILIDAD: {settings.accountingRequired ? 'SI' : 'NO'}
                       </div>
@@ -490,33 +554,33 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </div>
 
                 {/* Right Column: SRI Box with Barcode - high rounded corners border-black */}
-                <div className="border border-black rounded-[24px] p-6 flex flex-col justify-between text-xs bg-white">
+                <div className="border border-black rounded-2xl p-3.5 flex flex-col justify-between text-[10.5px] bg-white">
                   <div>
-                    <div className="text-[17px] font-bold text-black tracking-tight">
-                      R.U.C.: <span className="font-bold">{settings.taxId || '1725389454001'}</span>
+                    <div className="text-[15px] font-bold text-black tracking-tight">
+                      R.U.C.: <span className="font-bold">{settings.taxId || '1207083070001'}</span>
                     </div>
-                    <div className="text-[22px] font-bold text-black tracking-normal mt-3 uppercase">
+                    <div className="text-[18px] font-bold text-black tracking-normal mt-1.5 uppercase">
                       {activeInvoice.documentType === 'FACTURA' ? 'FACTURA' : getDocumentTypeName(activeInvoice.documentType).toUpperCase()}
                     </div>
-                    <div className="text-[15px] font-bold text-black mt-3 mb-4">
-                      No. {activeInvoice.fullNumber || '001-100-000000285'}
+                    <div className="text-[13px] font-bold text-black mt-1 mb-2">
+                      No. {activeInvoice.fullNumber || '001-005-000000119'}
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-[12px] font-bold text-black uppercase tracking-tight">
+                    <div className="text-[10.5px] font-bold text-black uppercase tracking-tight">
                       NÚMERO DE AUTORIZACIÓN:
                     </div>
-                    <div className="text-[11px] font-mono text-zinc-900 leading-tight mt-1 mb-4 select-all break-all tracking-normal">
+                    <div className="text-[9.5px] font-mono text-zinc-900 leading-tight mt-0.5 mb-2 select-all break-all tracking-normal">
                       {activeInvoice.sriNumeroAutorizacion || claveAccesoCalculada}
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-[12px] font-bold text-black uppercase tracking-tight">
+                    <div className="text-[10.5px] font-bold text-black uppercase tracking-tight">
                       FECHA Y HORA DE AUTORIZACIÓN:
                     </div>
-                    <div className="text-[12px] text-zinc-900 mt-1 mb-4 font-normal">
+                    <div className="text-[10.5px] text-zinc-900 mt-0.5 mb-2 font-normal">
                       {(() => {
                         const dateStr = activeInvoice.sriFechaAutorizacion || activeInvoice.createdAt;
                         try {
@@ -534,23 +598,23 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="space-y-2 mb-4">
-                    <div className="flex items-center text-[12px]">
-                      <span className="font-bold text-black w-36 uppercase">AMBIENTE:</span>
+                  <div className="space-y-1 mb-2 text-[10px]">
+                    <div className="flex items-center">
+                      <span className="font-bold text-black w-28 uppercase">AMBIENTE:</span>
                       <span className="uppercase text-zinc-900 font-normal">
                         {sriMode === 'PRODUCCION' ? 'PRODUCCIÓN' : 'PRUEBAS'}
                       </span>
                     </div>
-                    <div className="flex items-center text-[12px]">
-                      <span className="font-bold text-black w-36 uppercase">EMISIÓN:</span>
+                    <div className="flex items-center">
+                      <span className="font-bold text-black w-28 uppercase">EMISIÓN:</span>
                       <span className="uppercase text-zinc-900 font-normal">NORMAL</span>
                     </div>
                   </div>
 
                   {/* Código de barras Code 128 con número de 49 dígitos centrado debajo */}
-                  <div className="pt-2 w-full flex flex-col items-center">
-                    <svg ref={barcodeRef} className="w-full max-w-[380px] h-12"></svg>
-                    <span className="font-mono text-[10.5px] tracking-wider text-black font-medium mt-1 select-all text-center">
+                  <div className="pt-1 w-full flex flex-col items-center">
+                    <svg ref={barcodeRef} className="w-full max-w-[320px] h-9"></svg>
+                    <span className="font-mono text-[9px] tracking-wider text-black font-medium mt-0.5 select-all text-center">
                       {claveAccesoCalculada}
                     </span>
                   </div>
@@ -558,16 +622,16 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               </div>
 
               {/* CLIENT / RECEPTOR SECTION - High rounded corners matching image */}
-              <div className="border border-black rounded-2xl p-5 bg-white mt-4 text-[12.5px] space-y-2">
-                <div className="grid grid-cols-[250px_1fr] items-center">
+              <div className="border border-black rounded-xl p-2.5 bg-white mt-2.5 text-[11px] space-y-1">
+                <div className="grid grid-cols-[210px_1fr] items-center">
                   <span className="text-black">Razón Social / Nombres y Apellidos:</span>
-                  <span className="font-bold uppercase text-black">{activeInvoice.customer.name || '593IMPORTACIONES S.A.S'}</span>
+                  <span className="font-bold uppercase text-black">{activeInvoice.customer.name || 'CRUZ SANCHEZ JHON ANDRES'}</span>
                 </div>
-                <div className="grid grid-cols-[250px_1fr] items-center">
+                <div className="grid grid-cols-[210px_1fr] items-center">
                   <span className="text-black">Identificación:</span>
-                  <span className="font-bold text-black">{activeInvoice.customer.docNumber || '1793220725001'}</span>
+                  <span className="font-bold text-black">{activeInvoice.customer.docNumber || '1207083070001'}</span>
                 </div>
-                <div className="grid grid-cols-[250px_1fr] items-center">
+                <div className="grid grid-cols-[210px_1fr] items-center">
                   <span className="text-black">Fecha:</span>
                   <span className="font-bold text-black">{(() => {
                     const d = new Date(activeInvoice.createdAt);
@@ -577,27 +641,27 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     return `${day}/${month}/${year}`;
                   })()}</span>
                 </div>
-                <div className="grid grid-cols-[250px_1fr] items-center">
+                <div className="grid grid-cols-[210px_1fr] items-center">
                   <span className="text-black">Dirección:</span>
                   <span className="text-black">{activeInvoice.customer.address || 'Puembo'}</span>
                 </div>
               </div>
 
               {/* PRODUCTS / DETAILS TABLE - Official SRI layout matching image */}
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full border border-black border-collapse text-[11px] bg-white">
+              <div className="mt-2.5 overflow-x-auto">
+                <table className="w-full border border-black border-collapse text-[10px] bg-white">
                   <thead>
-                    <tr className="border-b border-black font-bold text-black text-center">
-                      <th className="border-r border-black p-2">Cod.<br/>Principal</th>
-                      <th className="border-r border-black p-2">Cod.<br/>Auxiliar</th>
-                      <th className="border-r border-black p-2">Cantidad</th>
-                      <th className="border-r border-black p-2 text-center">Descripción</th>
-                      <th className="border-r border-black p-2">Detalle<br/>Adicional</th>
-                      <th className="border-r border-black p-2">Precio<br/>Unitario</th>
-                      <th className="border-r border-black p-2">Subsidio</th>
-                      <th className="border-r border-black p-2">Precio sin<br/>Subsidio</th>
-                      <th className="border-r border-black p-2">Descuento</th>
-                      <th className="p-2">Precio<br/>Total</th>
+                    <tr className="border-b border-black font-bold text-black text-center bg-slate-50/50">
+                      <th className="border-r border-black p-1.5">Cod.<br/>Principal</th>
+                      <th className="border-r border-black p-1.5">Cod.<br/>Auxiliar</th>
+                      <th className="border-r border-black p-1.5">Cantidad</th>
+                      <th className="border-r border-black p-1.5 text-center">Descripción</th>
+                      <th className="border-r border-black p-1.5">Detalle<br/>Adicional</th>
+                      <th className="border-r border-black p-1.5">Precio<br/>Unitario</th>
+                      <th className="border-r border-black p-1.5">Subsidio</th>
+                      <th className="border-r border-black p-1.5">Precio sin<br/>Subsidio</th>
+                      <th className="border-r border-black p-1.5">Descuento</th>
+                      <th className="p-1.5">Precio<br/>Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -623,18 +687,18 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
                       return (
                         <tr key={idx} className="border-b border-black text-black">
-                          <td className="border-r border-black p-2 text-center">{code}</td>
-                          <td className="border-r border-black p-2 text-center">{code}</td>
-                          <td className="border-r border-black p-2 text-center font-normal">{qty.toFixed(2)}</td>
-                          <td className="border-r border-black p-2 text-left">{desc}</td>
-                          <td className="border-r border-black p-2 text-center font-semibold text-[10px]">
+                          <td className="border-r border-black p-1.5 text-center">{code}</td>
+                          <td className="border-r border-black p-1.5 text-center">{code}</td>
+                          <td className="border-r border-black p-1.5 text-center font-normal">{qty.toFixed(2)}</td>
+                          <td className="border-r border-black p-1.5 text-left">{desc}</td>
+                          <td className="border-r border-black p-1.5 text-center font-semibold text-[9px]">
                             IVA {itemTaxRate}%
                           </td>
-                          <td className="border-r border-black p-2 text-center">${unitPrice.toFixed(2)}</td>
-                          <td className="border-r border-black p-2 text-center">0.00</td>
-                          <td className="border-r border-black p-2 text-center">0.00</td>
-                          <td className="border-r border-black p-2 text-center">${discountAmount.toFixed(2)}</td>
-                          <td className="p-2 text-center font-medium">${lineBase.toFixed(2)}</td>
+                          <td className="border-r border-black p-1.5 text-center">${unitPrice.toFixed(2)}</td>
+                          <td className="border-r border-black p-1.5 text-center">0.00</td>
+                          <td className="border-r border-black p-1.5 text-center">0.00</td>
+                          <td className="border-r border-black p-1.5 text-center">${discountAmount.toFixed(2)}</td>
+                          <td className="p-1.5 text-center font-medium">${lineBase.toFixed(2)}</td>
                         </tr>
                       );
                     })}
@@ -642,7 +706,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </table>
               </div>
 
-              {/* BOTTOM SECTION: Additional Info (Left) + Totals Breakdown (Right) */}
+              {/* BOTTOM SECTION: Additional Info (Left) + Totals Breakdown (Right) - 2 Columnas Side-by-Side */}
               {(() => {
                 const sriBreakdown = calculateSriTotals(activeInvoice.items, settings.defaultTaxRate);
                 const subtotal15 = sriBreakdown.subtotal15;
@@ -658,31 +722,31 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 const total = sriBreakdown.valorAPagar;
 
                 return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start mt-4">
+                  <div className="grid grid-cols-2 gap-3 items-start mt-2.5" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
                     {/* Left Column: Información Adicional con Forma de Pago al final */}
-                    <div className="border border-black rounded-2xl p-5 bg-white text-[12.5px] flex flex-col justify-between min-h-[350px]">
-                      <div className="space-y-3">
-                        <h4 className="font-bold text-[13.5px] text-black">Información Adicional</h4>
+                    <div className="border border-black rounded-xl p-3 bg-white text-[10.5px] flex flex-col justify-between h-full">
+                      <div className="space-y-2">
+                        <h4 className="font-bold text-[11.5px] text-black">Información Adicional</h4>
                         
-                        <div className="space-y-2 pt-1 text-black">
+                        <div className="space-y-1 pt-0.5 text-black text-[10px]">
                           <div>
-                            <span>Email Cliente: </span>
-                            <span>{activeInvoice.customer.email || '593importaciones.ec@gmail.com'}</span>
+                            <span className="font-semibold">Email Cliente: </span>
+                            <span>{activeInvoice.customer.email || 'jhon.cruz_95@hotmail.com'}</span>
                           </div>
                           <div>
-                            <span>Teléfono: </span>
-                            <span>{activeInvoice.customer.phone || '0984524519'}</span>
+                            <span className="font-semibold">Teléfono: </span>
+                            <span>{activeInvoice.customer.phone || '0963888954'}</span>
                           </div>
                           <div>
-                            <span>Dirección: </span>
+                            <span className="font-semibold">Dirección: </span>
                             <span>{activeInvoice.customer.address || 'Puembo'}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="pt-6 text-black flex items-center">
-                        <span>Forma de Pago:</span>
-                        <span className="font-bold uppercase ml-4">
+                      <div className="pt-3 text-black text-[10px] flex items-center border-t border-slate-200 mt-2">
+                        <span className="font-semibold">Forma de Pago:</span>
+                        <span className="font-bold uppercase ml-2">
                           {activeInvoice.paymentMethod === 'card'
                             ? 'TARJETA DE CRÉDITO'
                             : activeInvoice.paymentMethod === 'transfer'
@@ -694,77 +758,77 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
                     {/* Right Column: SRI Totals Table */}
                     <div className="bg-white">
-                      <table className="w-full text-[11.5px] border border-black border-collapse bg-white">
+                      <table className="w-full text-[10px] border border-black border-collapse bg-white">
                         <tbody>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL 15%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal15.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL 15%</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotal15.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL 5%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal5.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL 5%</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotal5.toFixed(2)}</td>
                           </tr>
                           {sriBreakdown.subtotalEspecial > 0 && (
                             <tr className="border-b border-black">
-                              <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL OTRAS TARIFAS</td>
-                              <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.subtotalEspecial.toFixed(2)}</td>
+                              <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL OTRAS TARIFAS</td>
+                              <td className="py-0.5 px-2 text-right font-medium text-black">${sriBreakdown.subtotalEspecial.toFixed(2)}</td>
                             </tr>
                           )}
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL 0%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal0.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL 0%</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotal0.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL NO OBJETO DE IVA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalNoObjeto.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL NO OBJETO DE IVA</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotalNoObjeto.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL EXENTO DE IVA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalExento.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL EXENTO DE IVA</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotalExento.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL SIN IMPUESTOS</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalSinImpuestos.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">SUBTOTAL SIN IMPUESTOS</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${subtotalSinImpuestos.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">TOTAL DESCUENTO</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${totalDescuento.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">TOTAL DESCUENTO</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${totalDescuento.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">ICE</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${valorIce.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">ICE</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${valorIce.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">IVA 15%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${iva15.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">IVA 15%</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${iva15.toFixed(2)}</td>
                           </tr>
                           {iva5 > 0 && (
                             <tr className="border-b border-black">
-                              <td className="p-1.5 pl-3 border-r border-black text-black">IVA 5%</td>
-                              <td className="p-1.5 pr-3 text-right font-medium text-black">${iva5.toFixed(2)}</td>
+                              <td className="py-0.5 px-2 border-r border-black text-black">IVA 5%</td>
+                              <td className="py-0.5 px-2 text-right font-medium text-black">${iva5.toFixed(2)}</td>
                             </tr>
                           )}
                           {sriBreakdown.ivaEspecial > 0 && (
                             <tr className="border-b border-black">
-                              <td className="p-1.5 pl-3 border-r border-black text-black">IVA OTRAS TARIFAS</td>
-                              <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.ivaEspecial.toFixed(2)}</td>
+                              <td className="py-0.5 px-2 border-r border-black text-black">IVA OTRAS TARIFAS</td>
+                              <td className="py-0.5 px-2 text-right font-medium text-black">${sriBreakdown.ivaEspecial.toFixed(2)}</td>
                             </tr>
                           )}
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">IVA 0%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">IVA 0%</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">$0.00</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">IRBPNR</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">IRBPNR</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">$0.00</td>
                           </tr>
                           <tr className="border-b border-black">
-                            <td className="p-1.5 pl-3 border-r border-black text-black">PROPINA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.propina10Amount.toFixed(2)}</td>
+                            <td className="py-0.5 px-2 border-r border-black text-black">PROPINA</td>
+                            <td className="py-0.5 px-2 text-right font-medium text-black">${sriBreakdown.propina10Amount.toFixed(2)}</td>
                           </tr>
-                          <tr className="border-b border-black font-bold text-[13px]">
-                            <td className="p-1.5 pl-3 border-r border-black text-black font-bold">VALOR TOTAL</td>
-                            <td className="p-1.5 pr-3 text-right font-bold text-black">${total.toFixed(2)}</td>
+                          <tr className="border-b border-black font-bold text-[12px] bg-slate-50/50">
+                            <td className="py-1 px-2 border-r border-black text-black font-bold">VALOR TOTAL</td>
+                            <td className="py-1 px-2 text-right font-bold text-black">${total.toFixed(2)}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -775,7 +839,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             </div>
           ) : (
             /* 80mm Thermal Receipt Layout */
-            <div id="printable-invoice" className="bg-white text-slate-900 rounded-xl p-5 shadow-xl mx-auto max-w-xs font-mono text-[11px] leading-snug border border-slate-300">
+            <div id="printable-invoice" className="ticket-80mm bg-white text-slate-900 rounded-xl p-4 sm:p-5 shadow-xl mx-auto w-full max-w-[320px] font-mono text-[11px] leading-snug border border-slate-300">
               <div className="text-center pb-3 border-b border-dashed border-slate-400 space-y-1">
                 {settings.logoUrl && (
                   <div className="flex justify-center mb-1.5">
@@ -944,6 +1008,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
       invoice={activeInvoice}
       settings={settings}
       onInvoiceUpdated={handleInvoiceUpdated}
+      autoTransmit={activeInvoice.sriStatus !== 'AUTORIZADO'}
     />
   </>
 );

@@ -146,6 +146,29 @@
     color: #000000 !important;
   }
 
+  #printable-invoice {
+    padding: 0 !important;
+    margin: 0 auto !important;
+  }
+
+  #printable-invoice.ride-a4 {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #printable-invoice.ticket-80mm {
+    width: 76mm !important;
+    max-width: 76mm !important;
+    min-width: 76mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 1mm !important;
+    box-sizing: border-box !important;
+  }
+
+  #printable-invoice .grid {
+    display: grid !important;
+  }
+
   /* Dedicated Cash Close Print Voucher Styling */
   #printable-cash-close {
     padding: 8mm !important;

@@ -2456,7 +2456,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>+ Nueva Promoción</span>
+                  <span>Nueva Promoción</span>
                 </button>
               </div>
 
@@ -2479,7 +2479,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                           <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                           <p className="font-bold text-slate-600">No hay promociones registradas</p>
                           <p className="text-[11px] text-slate-400 mt-1">
-                            Haz clic en "+ Nueva Promoción" para crear una campaña de descuentos.
+                            Haz clic en "Nueva Promoción" para crear una campaña de descuentos.
                           </p>
                         </td>
                       </tr>

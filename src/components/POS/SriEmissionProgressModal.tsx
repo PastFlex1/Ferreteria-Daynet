@@ -24,6 +24,7 @@ interface SriEmissionProgressModalProps {
   invoice: Invoice | null;
   settings: StoreSettings;
   onInvoiceUpdated?: (updatedInvoice: Invoice) => void;
+  autoTransmit?: boolean;
 }
 
 export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> = ({
@@ -32,6 +33,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   invoice,
   settings,
   onInvoiceUpdated,
+  autoTransmit = true,
 }) => {
   const [sriMode, setSriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
@@ -62,12 +64,76 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const isInvoiceAlreadyAuthorized = Boolean(
+    invoice?.sriStatus === 'AUTORIZADO' || !!invoice?.sriNumeroAutorizacion
+  );
+
   useEffect(() => {
-    if (isOpen && invoice) {
-      // Iniciar proceso automático paso a paso
-      ejecutarProcesoEmisionSRI();
+    if (!isOpen || !invoice) return;
+
+    // Calcular clave de acceso si no existe
+    const ambienteVal = sriMode === 'PRODUCCION' ? '2' : '1';
+    const sriData = convertERPInvoiceToSRI(invoice, settings, establishment, emissionPoint, ambienteVal);
+    const { claveAcceso: claveCalculada } = generateInvoiceXML(sriData);
+    const effectiveClave = invoice.sriClaveAcceso || claveCalculada;
+    setClaveAcceso(effectiveClave);
+
+    if (isInvoiceAlreadyAuthorized) {
+      // 🟢 SI YA ESTÁ AUTORIZADO: NO RE-TRANSMITIR AL SRI
+      // Cargar inmediatamente los 3 checks en verde, número y fecha de autorización
+      setCurrentStep(4);
+      setStep1Status('SUCCESS');
+      setStep1Details('Firma digital XAdES-BES completada y verificada.');
+      setStep2Status('SUCCESS');
+      setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
+      setStep3Status('SUCCESS');
+      setStep3Details(`N° Autorización SRI: ${invoice.sriNumeroAutorizacion || effectiveClave}`);
+
+      const numAuth = invoice.sriNumeroAutorizacion || effectiveClave;
+      const fechaAuth = invoice.sriFechaAutorizacion || (invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : new Date().toLocaleString());
+
+      setAutorizacionData({
+        numeroAutorizacion: numAuth,
+        fechaAutorizacion: fechaAuth,
+        estado: 'AUTORIZADO',
+        mensaje: '¡Comprobante legalmente AUTORIZADO por el SRI!',
+      });
+      setXmlFirmado(invoice.sriXmlFirmado || '');
+      setIsProcessing(false);
+      setErrorMessage(null);
+    } else if (invoice.sriStatus === 'DEVUELTA') {
+      // 🔴 DEVUELTA
+      setCurrentStep(2);
+      setStep1Status('SUCCESS');
+      setStep1Details('XML firmado digitalmente.');
+      setStep2Status('ERROR');
+      setStep2Details(`DEVUELTA: ${invoice.sriMensaje || 'Comprobante devuelto por el SRI.'}`);
+      setStep3Status('IDLE');
+      setStep3Details('Pendiente de corrección y autorización.');
+      setAutorizacionData(null);
+      setXmlFirmado(invoice.sriXmlFirmado || '');
+      setIsProcessing(false);
+      setErrorMessage(invoice.sriMensaje || 'El comprobante fue devuelto por el SRI.');
+    } else {
+      // 🟡 PENDIENTE
+      setCurrentStep(1);
+      setStep1Status('IDLE');
+      setStep1Details('Pendiente de firma digital XAdES-BES.');
+      setStep2Status('IDLE');
+      setStep2Details('Pendiente de envío a Recepción SRI.');
+      setStep3Status('IDLE');
+      setStep3Details('Pendiente de validación de autorización tributaria.');
+      setAutorizacionData(null);
+      setXmlFirmado('');
+      setErrorMessage(null);
+
+      if (autoTransmit) {
+        ejecutarProcesoEmisionSRI();
+      } else {
+        setIsProcessing(false);
+      }
     }
-  }, [isOpen, invoice?.id]);
+  }, [isOpen, invoice?.id, isInvoiceAlreadyAuthorized, autoTransmit]);
 
   const ejecutarProcesoEmisionSRI = async () => {
     if (!invoice) return;
@@ -325,6 +391,24 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
 
         {/* Content Body */}
         <div className="p-6 space-y-5 bg-slate-50/50 max-h-[75vh] overflow-y-auto">
+          {/* Banner si el comprobante está PENDIENTE */}
+          {!isInvoiceAlreadyAuthorized && invoice.sriStatus !== 'DEVUELTA' && !isProcessing && (
+            <div className="p-4 bg-amber-500/10 border border-amber-500/30 text-amber-900 rounded-2xl text-xs space-y-1.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 font-bold text-amber-800">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  <span className="uppercase tracking-wide">Estado del Comprobante: PENDIENTE SRI</span>
+                </div>
+                <span className="px-2.5 py-0.5 bg-amber-200 border border-amber-300 text-amber-900 rounded-full text-[10px] font-black uppercase">
+                  PENDIENTE
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                Este comprobante está guardado en el sistema pero aún no ha sido transmitido ni autorizado ante el SRI. Puedes emitirlo en cualquier momento con el botón "Transmitir al SRI ahora".
+              </p>
+            </div>
+          )}
+
           {/* Clave de acceso preview */}
           {claveAcceso && (
             <div className="p-3.5 bg-slate-900 rounded-2xl border border-slate-800 text-left space-y-1">
@@ -537,7 +621,19 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
           </div>
 
           <div className="flex items-center gap-2">
-            {errorMessage && !isProcessing && (
+            {/* Si está pendiente y no se está procesando, permitir transmitir al SRI */}
+            {!isInvoiceAlreadyAuthorized && !isProcessing && (
+              <button
+                type="button"
+                onClick={ejecutarProcesoEmisionSRI}
+                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Transmitir al SRI ahora</span>
+              </button>
+            )}
+
+            {errorMessage && !isProcessing && !isInvoiceAlreadyAuthorized && (
               <button
                 type="button"
                 onClick={ejecutarProcesoEmisionSRI}
@@ -552,9 +648,11 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
               type="button"
               onClick={onClose}
               disabled={isProcessing}
-              className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40"
+              className={`px-5 py-2 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 ${
+                isInvoiceAlreadyAuthorized ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-800 hover:bg-slate-700'
+              }`}
             >
-              {autorizacionData?.estado === 'AUTORIZADO' ? 'Finalizar' : 'Cerrar'}
+              {isInvoiceAlreadyAuthorized ? 'Listo / Cerrar' : 'Cerrar'}
             </button>
           </div>
         </div>
