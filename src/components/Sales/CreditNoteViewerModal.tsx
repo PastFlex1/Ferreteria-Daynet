@@ -12,6 +12,7 @@ import JsBarcode from 'jsbarcode';
 import { CreditNoteData, Invoice, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { downloadCreditNotePdf, printCreditNoteDocument } from '../../utils/creditNotePdfGenerator';
+import { calculateSriTotals } from '../../utils/sriCalculations';
 
 interface CreditNoteViewerModalProps {
   isOpen: boolean;
@@ -65,6 +66,14 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
   const subtotal = creditNote.subtotal ?? Math.round((creditNote.amount / 1.15) * 100) / 100;
   const tax = creditNote.tax ?? Math.round((creditNote.amount - subtotal) * 100) / 100;
   const total = creditNote.amount;
+
+  const sriBreakdown = items.length > 0 ? calculateSriTotals(items, settings.defaultTaxRate) : null;
+  const subtotal15 = sriBreakdown ? sriBreakdown.subtotal15 : (tax > 0 ? subtotal : 0);
+  const subtotal5 = sriBreakdown ? sriBreakdown.subtotal5 : 0;
+  const subtotal0 = sriBreakdown ? sriBreakdown.subtotal0 : (tax === 0 ? subtotal : 0);
+  const subtotalSinImpuestos = sriBreakdown ? sriBreakdown.subtotalSinImpuestos : subtotal;
+  const iva15 = sriBreakdown ? sriBreakdown.iva15 : (subtotal15 > 0 ? tax : 0);
+  const iva5 = sriBreakdown ? sriBreakdown.iva5 : 0;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 print:p-0 print:bg-white animate-fadeIn">
@@ -240,15 +249,28 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
               </thead>
               <tbody className="divide-y divide-black/20 bg-white">
                 {items.length > 0 ? (
-                  items.map((it, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="p-2 text-center font-mono">{it.sku || idx + 1}</td>
-                      <td className="p-2 font-medium">{it.productName || 'Producto'}</td>
-                      <td className="p-2 text-center font-bold">{it.quantity || 1}</td>
-                      <td className="p-2 text-right font-mono">{formatCurrency(it.unitPrice || 0, settings.currencySymbol)}</td>
-                      <td className="p-2 pr-3 text-right font-mono font-bold">{formatCurrency(it.subtotal || it.total || 0, settings.currencySymbol)}</td>
-                    </tr>
-                  ))
+                  items.map((it, idx) => {
+                    let itemTaxRate = settings.defaultTaxRate ?? 15;
+                    if (typeof (it as any).taxRate === 'number') {
+                      itemTaxRate = (it as any).taxRate;
+                    } else if (typeof (it as any).taxPercent === 'number') {
+                      itemTaxRate = (it as any).taxPercent;
+                    } else if ((it as any).taxAmount === 0 && ((it as any).subtotal || (it as any).unitPrice) > 0) {
+                      itemTaxRate = 0;
+                    }
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="p-2 text-center font-mono">{it.sku || idx + 1}</td>
+                        <td className="p-2 font-medium">
+                          <span>{it.productName || 'Producto'}</span>
+                          <span className="ml-2 text-[9.5px] px-1.5 py-0.5 rounded bg-slate-100 font-semibold text-slate-600">IVA {itemTaxRate}%</span>
+                        </td>
+                        <td className="p-2 text-center font-bold">{it.quantity || 1}</td>
+                        <td className="p-2 text-right font-mono">{formatCurrency(it.unitPrice || 0, settings.currencySymbol)}</td>
+                        <td className="p-2 pr-3 text-right font-mono font-bold">{formatCurrency(it.subtotal || it.total || 0, settings.currencySymbol)}</td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td className="p-2 text-center font-mono">NC-01</td>
@@ -268,20 +290,32 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
               <tbody>
                 <tr className="border-b border-black">
                   <td className="p-1.5 pl-3 border-r border-black font-medium">SUBTOTAL 15%</td>
-                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotal, settings.currencySymbol)}</td>
+                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotal15, settings.currencySymbol)}</td>
                 </tr>
+                {subtotal5 > 0 && (
+                  <tr className="border-b border-black">
+                    <td className="p-1.5 pl-3 border-r border-black font-medium">SUBTOTAL 5%</td>
+                    <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotal5, settings.currencySymbol)}</td>
+                  </tr>
+                )}
                 <tr className="border-b border-black">
                   <td className="p-1.5 pl-3 border-r border-black font-medium">SUBTOTAL 0%</td>
-                  <td className="p-1.5 pr-3 text-right font-mono font-bold">$0.00</td>
+                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotal0, settings.currencySymbol)}</td>
                 </tr>
                 <tr className="border-b border-black">
                   <td className="p-1.5 pl-3 border-r border-black font-medium">SUBTOTAL SIN IMPUESTOS</td>
-                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotal, settings.currencySymbol)}</td>
+                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(subtotalSinImpuestos, settings.currencySymbol)}</td>
                 </tr>
                 <tr className="border-b border-black">
                   <td className="p-1.5 pl-3 border-r border-black font-medium">IVA 15%</td>
-                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(tax, settings.currencySymbol)}</td>
+                  <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(iva15, settings.currencySymbol)}</td>
                 </tr>
+                {iva5 > 0 && (
+                  <tr className="border-b border-black">
+                    <td className="p-1.5 pl-3 border-r border-black font-medium">IVA 5%</td>
+                    <td className="p-1.5 pr-3 text-right font-mono font-bold">{formatCurrency(iva5, settings.currencySymbol)}</td>
+                  </tr>
+                )}
                 <tr className="bg-slate-900 text-white font-black text-[12.5px]">
                   <td className="p-2 pl-3 border-r border-black text-white uppercase">VALOR TOTAL</td>
                   <td className="p-2 pr-3 text-right font-mono text-orange-400 font-black text-sm">

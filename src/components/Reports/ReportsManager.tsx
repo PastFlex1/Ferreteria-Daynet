@@ -139,7 +139,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
 
   // Quick Date Presets
-  const handleSetPreset = (preset: 'HOY' | 'MES_ACTUAL' | 'MES_ANTERIOR' | 'ANIO_ACTUAL') => {
+  const handleSetPreset = (preset: 'HOY' | 'ESTA_SEMANA' | 'MES_ACTUAL' | 'MES_ANTERIOR' | 'ANIO_ACTUAL') => {
     const today = new Date();
     const pad = (n: number) => n.toString().padStart(2, '0');
     const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -148,6 +148,13 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
       const t = fmt(today);
       setStartDate(t);
       setEndDate(t);
+    } else if (preset === 'ESTA_SEMANA') {
+      const dayOfWeek = today.getDay(); // 0 is Sunday
+      const diffToMonday = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+      const monday = new Date(today.getFullYear(), today.getMonth(), diffToMonday);
+      const sunday = new Date(today.getFullYear(), today.getMonth(), diffToMonday + 6);
+      setStartDate(fmt(monday));
+      setEndDate(fmt(sunday));
     } else if (preset === 'MES_ACTUAL') {
       setStartDate(fmt(new Date(today.getFullYear(), today.getMonth(), 1)));
       setEndDate(fmt(new Date(today.getFullYear(), today.getMonth() + 1, 0)));
@@ -302,8 +309,152 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   const totalValorInventarioPVP = useMemo(() => filteredProducts.reduce((sum, p) => sum + ((p.price || 0) * (p.stock || 0)), 0), [filteredProducts]);
   const gananciaPotencialInventario = totalValorInventarioPVP - totalValorInventarioCosto;
 
-  const totalComprasPeriodo = useMemo(() => purchases.reduce((sum, p) => sum + (p.total || 0), 0), [purchases]);
-  const totalRetencionesPeriodo = useMemo(() => retenciones.reduce((sum, r) => sum + (r.totalRetained || 0), 0), [retenciones]);
+  // Filtered Purchases (by date range & search)
+  const filteredPurchases = useMemo(() => {
+    return (purchases || []).filter((pc: any) => {
+      const pDate = pc.date || pc.purchaseDate || (pc.createdAt ? pc.createdAt.split('T')[0] : '');
+      if (startDate && pDate && pDate < startDate) return false;
+      if (endDate && pDate && pDate > endDate) return false;
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const num = String(pc.invoiceNumber || pc.orderNumber || pc.id || '').toLowerCase();
+        const sup = String(pc.supplierName || '').toLowerCase();
+        const ruc = String(pc.supplierRuc || '').toLowerCase();
+        return num.includes(q) || sup.includes(q) || ruc.includes(q);
+      }
+      return true;
+    });
+  }, [purchases, startDate, endDate, searchTerm]);
+
+  // Filtered Retenciones (by date range)
+  const filteredRetenciones = useMemo(() => {
+    return (retenciones || []).filter((r: any) => {
+      const rDate = r.date || r.issueDate || (r.createdAt ? r.createdAt.split('T')[0] : '');
+      if (startDate && rDate && rDate < startDate) return false;
+      if (endDate && rDate && rDate > endDate) return false;
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const num = String(r.number || r.fullNumber || '').toLowerCase();
+        const prov = String(r.supplierName || r.clientName || '').toLowerCase();
+        return num.includes(q) || prov.includes(q);
+      }
+      return true;
+    });
+  }, [retenciones, startDate, endDate, searchTerm]);
+
+  // Filtered Devoluciones / Rechazos SRI (by date range & search)
+  const filteredDevoluciones = useMemo(() => {
+    return invoices.filter((i) => {
+      if (i.documentType !== 'FACTURA') return false;
+      const isDev = i.sriStatus === 'DEVUELTA' || i.sriStatus === 'NO AUTORIZADO' || (i.sriStatus === 'ERROR' && !!i.sriMensaje);
+      if (!isDev) return false;
+      const d = i.createdAt ? i.createdAt.split('T')[0] : '';
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const num = String(i.fullNumber || i.number || '').toLowerCase();
+        const c = String(i.customer?.name || '').toLowerCase();
+        return num.includes(q) || c.includes(q);
+      }
+      return true;
+    });
+  }, [invoices, startDate, endDate, searchTerm]);
+
+  // Filtered Comisiones por Vendedor en el Período
+  const commissionsSummary = useMemo(() => {
+    const map: Record<string, {
+      name: string;
+      role: string;
+      invoicesCount: number;
+      salesTotal: number;
+      salesSubtotal: number;
+      commissionRate: number;
+      commissionAmount: number;
+      goal: number;
+    }> = {};
+
+    // Initial sellers pool
+    (sellers || []).forEach((s: any) => {
+      const name = s.name || s.fullName;
+      if (name) {
+        map[name.toLowerCase().trim()] = {
+          name,
+          role: s.role || 'Vendedor Comercial',
+          invoicesCount: 0,
+          salesTotal: 0,
+          salesSubtotal: 0,
+          commissionRate: s.commissionRate || 3.0,
+          commissionAmount: 0,
+          goal: s.monthlyGoal || 5000
+        };
+      }
+    });
+
+    // Aggregate from filtered invoices in the date range
+    filteredInvoices.forEach((inv) => {
+      const sName = (inv.sellerName || 'Caja General').trim();
+      const key = sName.toLowerCase();
+      if (!map[key]) {
+        map[key] = {
+          name: sName,
+          role: 'Asesor de Ventas',
+          invoicesCount: 0,
+          salesTotal: 0,
+          salesSubtotal: 0,
+          commissionRate: 3.0,
+          commissionAmount: 0,
+          goal: 5000
+        };
+      }
+      map[key].invoicesCount += 1;
+      map[key].salesSubtotal += (inv.subtotal || 0);
+      map[key].salesTotal += (inv.total || 0);
+    });
+
+    Object.values(map).forEach((item) => {
+      item.commissionAmount = (item.salesSubtotal * item.commissionRate) / 100;
+    });
+
+    return Object.values(map).filter(m => m.invoicesCount > 0 || m.salesTotal > 0);
+  }, [sellers, filteredInvoices]);
+
+  // Filtered Rentabilidad y Margen en el Período
+  const profitabilitySummary = useMemo(() => {
+    let totalRevenue = 0;
+    let totalCost = 0;
+
+    filteredInvoices.forEach((inv) => {
+      (inv.items || []).forEach((it) => {
+        const rev = (it.unitPrice || 0) * (it.quantity || 0);
+        const originalProd = products.find(p => p.id === it.productId);
+        const costUnit = it.costPrice !== undefined ? it.costPrice : (originalProd?.costPrice || 0);
+        const cost = costUnit * (it.quantity || 0);
+        totalRevenue += rev;
+        totalCost += cost;
+      });
+    });
+
+    const grossProfit = totalRevenue - totalCost;
+    const marginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    return { totalRevenue, totalCost, grossProfit, marginPct };
+  }, [filteredInvoices, products]);
+
+  // Filtered Flujo de Caja (Efectivo y cobros vs compras operacionales en período)
+  const cashFlowSummary = useMemo(() => {
+    const cashIn = filteredInvoices
+      .filter(i => i.paymentStatus === 'PAGADA' && i.paymentMethod === 'EFECTIVO')
+      .reduce((s, i) => s + (i.total || 0), 0);
+    const electronicIn = filteredInvoices
+      .filter(i => i.paymentStatus === 'PAGADA' && i.paymentMethod !== 'EFECTIVO')
+      .reduce((s, i) => s + (i.total || 0), 0);
+    const purchasesOut = filteredPurchases.reduce((s, p) => s + (p.total || 0), 0);
+    const netFlow = (cashIn + electronicIn) - purchasesOut;
+    return { cashIn, electronicIn, totalInflow: cashIn + electronicIn, purchasesOut, netFlow };
+  }, [filteredInvoices, filteredPurchases]);
+
+  const totalComprasPeriodo = useMemo(() => filteredPurchases.reduce((sum, p) => sum + (p.total || 0), 0), [filteredPurchases]);
+  const totalRetencionesPeriodo = useMemo(() => filteredRetenciones.reduce((sum, r) => sum + (r.totalRetained || 0), 0), [filteredRetenciones]);
 
   // Sales Chart Trend (Daily timeline)
   const salesByDateChart = useMemo(() => {
@@ -618,9 +769,83 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
           paymentStatus: i.paymentStatus || 'PAGADA'
         }))
       });
+    } else if (subTab === 'REP_COMPRAS') {
+      exportToModernExcel({
+        filename: `Reporte_Compras_${startDate}_al_${endDate}.xlsx`,
+        sheetName: 'Compras Proveedores',
+        title: `REPORTE CONSOLIDADO DE COMPRAS (${startDate} AL ${endDate})`,
+        columns: [
+          { header: 'N° Factura', key: 'number', width: 18 },
+          { header: 'Fecha', key: 'date', width: 14, format: 'center' },
+          { header: 'Proveedor', key: 'supplier', width: 30 },
+          { header: 'RUC Proveedor', key: 'ruc', width: 16 },
+          { header: 'Subtotal ($)', key: 'subtotal', width: 14, format: 'currency' },
+          { header: 'IVA ($)', key: 'taxTotal', width: 14, format: 'currency' },
+          { header: 'Total ($)', key: 'total', width: 15, format: 'currency' },
+          { header: 'Estado', key: 'status', width: 14, format: 'center' }
+        ],
+        data: filteredPurchases.map((pc: any) => ({
+          number: pc.invoiceNumber || pc.orderNumber || '-',
+          date: pc.date || pc.purchaseDate || (pc.createdAt ? pc.createdAt.split('T')[0] : '-'),
+          supplier: pc.supplierName || 'Proveedor',
+          ruc: pc.supplierRuc || '-',
+          subtotal: pc.subtotal || 0,
+          taxTotal: pc.taxTotal || 0,
+          total: pc.total || 0,
+          status: pc.status || 'REGISTRADA'
+        }))
+      });
+    } else if (subTab === 'REP_COMISIONES') {
+      exportToModernExcel({
+        filename: `Reporte_Comisiones_${startDate}_al_${endDate}.xlsx`,
+        sheetName: 'Comisiones Vendedores',
+        title: `LIQUIDACIÓN DE COMISIONES POR VENDEDOR (${startDate} AL ${endDate})`,
+        columns: [
+          { header: 'Vendedor / Asesor', key: 'name', width: 28 },
+          { header: 'Cargo', key: 'role', width: 20 },
+          { header: 'Comprobantes', key: 'invoices', width: 15, format: 'number' },
+          { header: 'Meta Ventas ($)', key: 'goal', width: 16, format: 'currency' },
+          { header: 'Ventas Totales ($)', key: 'sales', width: 18, format: 'currency' },
+          { header: '% Comisión', key: 'rate', width: 14, format: 'center' },
+          { header: 'Comisión a Pagar ($)', key: 'amount', width: 20, format: 'currency' }
+        ],
+        data: commissionsSummary.map(c => ({
+          name: c.name,
+          role: c.role,
+          invoices: c.invoicesCount,
+          goal: c.goal,
+          sales: c.salesTotal,
+          rate: `${c.commissionRate.toFixed(1)}%`,
+          amount: c.commissionAmount
+        }))
+      });
+    } else if (subTab === 'REP_DEVOLUCIONES') {
+      exportToModernExcel({
+        filename: `Reporte_Devoluciones_SRI_${startDate}_al_${endDate}.xlsx`,
+        sheetName: 'Devoluciones SRI',
+        title: `REPORTE DE FACTURAS DEVUELTAS POR SRI (${startDate} AL ${endDate})`,
+        columns: [
+          { header: 'N° Factura', key: 'number', width: 18 },
+          { header: 'Fecha Emisión', key: 'date', width: 14, format: 'center' },
+          { header: 'Cliente', key: 'customer', width: 30 },
+          { header: 'RUC / Cédula', key: 'docNumber', width: 16 },
+          { header: 'Mensaje / Observación SRI', key: 'msg', width: 40 },
+          { header: 'Total ($)', key: 'total', width: 15, format: 'currency' },
+          { header: 'Estado SRI', key: 'status', width: 14, format: 'center' }
+        ],
+        data: filteredDevoluciones.map(i => ({
+          number: i.fullNumber || i.number,
+          date: i.createdAt ? i.createdAt.split('T')[0] : '-',
+          customer: i.customer?.name || 'Consumidor Final',
+          docNumber: i.customer?.docNumber || '9999999999999',
+          msg: i.sriMensaje || 'Comprobante devuelto por el SRI',
+          total: i.total || 0,
+          status: 'DEVUELTA'
+        }))
+      });
     } else {
       exportToModernExcel({
-        filename: `Reporte_${subTab}_${dateStamp}.xlsx`,
+        filename: `Reporte_${subTab}_${startDate}_al_${endDate}.xlsx`,
         sheetName: 'Reporte',
         title: `${currentMeta.title.toUpperCase()} (${startDate} AL ${endDate})`,
         columns: [
@@ -733,14 +958,15 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
             <span className="text-[11px] font-bold text-slate-400 mr-1">Preajustes:</span>
             {[
               { id: 'HOY', label: 'Hoy' },
+              { id: 'ESTA_SEMANA', label: 'Esta Semana' },
               { id: 'MES_ACTUAL', label: 'Este Mes' },
               { id: 'MES_ANTERIOR', label: 'Mes Anterior' },
-              { id: 'ANIO_ACTUAL', label: 'Año 2026' }
+              { id: 'ANIO_ACTUAL', label: `Año ${new Date().getFullYear()}` }
             ].map((p) => (
               <button
                 key={p.id}
                 onClick={() => handleSetPreset(p.id as any)}
-                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                className="px-2.5 py-1 bg-slate-100 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-200 border border-transparent text-slate-700 font-bold text-[10px] rounded-lg transition cursor-pointer"
               >
                 {p.label}
               </button>
@@ -1380,9 +1606,27 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
             </div>
 
             {/* Filter controls row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1 items-end">
               <div>
-                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Filtrar por Trabajador / Cajero</label>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Fecha Desde</label>
+                <CustomDatePicker
+                  value={startDate}
+                  onChange={setStartDate}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Fecha Hasta</label>
+                <CustomDatePicker
+                  value={endDate}
+                  onChange={setEndDate}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Filtrar por Trabajador</label>
                 <select
                   value={cajaWorkerFilter}
                   onChange={(e) => setCajaWorkerFilter(e.target.value)}
@@ -1418,7 +1662,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="N° Comprobante, cliente o RUC..."
+                    placeholder="N° Comprobante, cliente..."
                     value={cajaSearchTerm}
                     onChange={(e) => setCajaSearchTerm(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
@@ -1833,17 +2077,24 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                         }
                       });
 
-                      if (allSessions.length === 0) {
+                      const filteredSessions = allSessions.filter((s: any) => {
+                        const sDate = s.openedAt ? s.openedAt.split('T')[0] : '';
+                        if (startDate && sDate && sDate < startDate) return false;
+                        if (endDate && sDate && sDate > endDate) return false;
+                        return true;
+                      });
+
+                      if (filteredSessions.length === 0) {
                         return (
                           <tr>
                             <td colSpan={10} className="py-12 text-center text-slate-400 font-sans text-xs">
-                              No hay sesiones de caja registradas.
+                              No hay sesiones de caja registradas en el período seleccionado ({startDate} al {endDate}).
                             </td>
                           </tr>
                         );
                       }
 
-                      return allSessions.map((ses, idx) => {
+                      return filteredSessions.map((ses, idx) => {
                         const openStr = ses.openedAt ? ses.openedAt.substring(0, 16).replace('T', ' ') : '-';
                         const closeStr = ses.closedAt ? ses.closedAt.substring(0, 16).replace('T', ' ') : (ses.status === 'ABIERTA' ? 'En Curso' : '-');
                         const diff = ses.difference !== undefined ? ses.difference : 0;
@@ -2264,11 +2515,19 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
       {subTab === 'REP_COMPRAS' && (
         <div className="space-y-6">
           <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-indigo-500" />
-                <span>Facturas & Comprobantes de Adquisición a Proveedores ({purchases.length})</span>
-              </h3>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-indigo-500" />
+                  <span>Facturas & Comprobantes de Adquisición a Proveedores ({filteredPurchases.length})</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Período de compras: {startDate} al {endDate}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-indigo-50 text-indigo-700 font-black text-xs rounded-xl border border-indigo-200">
+                  Total Período: {formatCurrency(totalComprasPeriodo, settings.currencySymbol)}
+                </span>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -2286,17 +2545,17 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                  {purchases.length === 0 ? (
+                  {filteredPurchases.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-400 font-sans text-xs">
-                        No hay compras registradas en el período seleccionado.
+                        No hay compras registradas en el período seleccionado ({startDate} al {endDate}).
                       </td>
                     </tr>
                   ) : (
-                    purchases.map((pc: any) => (
+                    filteredPurchases.map((pc: any) => (
                       <tr key={pc.id} className="hover:bg-slate-50 transition">
                         <td className="py-3 px-4 font-black text-slate-900">{pc.invoiceNumber || pc.orderNumber || '-'}</td>
-                        <td className="py-3 px-4 text-slate-500">{pc.date || '-'}</td>
+                        <td className="py-3 px-4 text-slate-500">{pc.date || pc.purchaseDate || (pc.createdAt ? pc.createdAt.split('T')[0] : '-')}</td>
                         <td className="py-3 px-4 font-sans font-bold text-slate-800">{pc.supplierName || 'Proveedor'}</td>
                         <td className="py-3 px-4 text-slate-500">{pc.supplierRuc || '-'}</td>
                         <td className="py-3 px-4 text-right font-medium text-slate-600">{formatCurrency(pc.subtotal || 0, settings.currencySymbol)}</td>
@@ -2311,6 +2570,17 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                     ))
                   )}
                 </tbody>
+                {filteredPurchases.length > 0 && (
+                  <tfoot className="bg-slate-50 font-black border-t border-slate-200 text-xs">
+                    <tr>
+                      <td colSpan={4} className="py-3 px-4 uppercase text-slate-700 text-right">Totales Compras Período:</td>
+                      <td className="py-3 px-4 text-right text-slate-700">{formatCurrency(filteredPurchases.reduce((s, p) => s + (p.subtotal || 0), 0), settings.currencySymbol)}</td>
+                      <td className="py-3 px-4 text-right text-slate-700">{formatCurrency(filteredPurchases.reduce((s, p) => s + (p.taxTotal || 0), 0), settings.currencySymbol)}</td>
+                      <td className="py-3 px-4 text-right text-indigo-700 text-sm">{formatCurrency(totalComprasPeriodo, settings.currencySymbol)}</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
@@ -2449,14 +2719,299 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
       )}
 
       {/* 8. RESTO DE REPORTES (REP_COMISIONES, REP_RENTABILIDAD, REP_NOMINA, REP_DEVOLUCIONES, REP_ROTACION, REP_FLUJO_CAJA) */}
-      {!['REP_VENTAS', 'REP_PRODUCTOS', 'REP_INVENTARIO', 'REP_CAJA', 'REP_COMPRAS', 'REP_STOCK_MUERTO', 'REP_ATS', 'REP_FORMULARIO_104', 'REP_FORMULARIO_103'].includes(subTab) && (() => {
-        const isDevolucionesReport = subTab === 'REP_DEVOLUCIONES';
-        const displayList = isDevolucionesReport
-          ? invoices.filter((i) => i.documentType === 'FACTURA' && (i.sriStatus === 'DEVUELTA' || i.sriStatus === 'NO AUTORIZADO' || (i.sriStatus === 'ERROR' && !!i.sriMensaje)))
-          : filteredInvoices;
-        const totalMontoDisplay = isDevolucionesReport
-          ? displayList.reduce((acc, curr) => acc + Number(curr.total || 0), 0)
-          : totalVentasPeriodo;
+      {/* 8. REPORTE DE COMISIONES */}
+      {subTab === 'REP_COMISIONES' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Award className="w-4 h-4 text-amber-500" />
+                  <span>Liquidación de Comisiones por Vendedor ({commissionsSummary.length})</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Período evaluado: {startDate} al {endDate}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-amber-50 text-amber-700 font-black text-xs rounded-xl border border-amber-200">
+                  Total a Liquidar: {formatCurrency(commissionsSummary.reduce((s, c) => s + c.commissionAmount, 0), settings.currencySymbol)}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Agentes con Ventas</span>
+                <div className="text-2xl font-black text-slate-900 font-mono mt-1">{commissionsSummary.length}</div>
+                <div className="text-[11px] text-slate-500 font-medium">Asesores comerciales activos</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Ventas Netas Generadas</span>
+                <div className="text-2xl font-black text-emerald-600 font-mono mt-1">
+                  {formatCurrency(commissionsSummary.reduce((s, c) => s + c.salesSubtotal, 0), settings.currencySymbol)}
+                </div>
+                <div className="text-[11px] text-slate-500 font-medium">Base imponible de comisión</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Comisiones Totales</span>
+                <div className="text-2xl font-black text-amber-600 font-mono mt-1">
+                  {formatCurrency(commissionsSummary.reduce((s, c) => s + c.commissionAmount, 0), settings.currencySymbol)}
+                </div>
+                <div className="text-[11px] text-slate-500 font-medium">Liquidación del período</div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700 font-mono">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Vendedor / Asesor</th>
+                    <th className="py-3 px-4">Cargo / Función</th>
+                    <th className="py-3 px-4 text-center">Facturas</th>
+                    <th className="py-3 px-4 text-right">Meta Período</th>
+                    <th className="py-3 px-4 text-right">Venta Total</th>
+                    <th className="py-3 px-4 text-center">% Comisión</th>
+                    <th className="py-3 px-4 text-right">Comisión a Pagar</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {commissionsSummary.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400 font-sans text-xs">
+                        No hay ventas registradas por vendedores en el período {startDate} al {endDate}.
+                      </td>
+                    </tr>
+                  ) : (
+                    commissionsSummary.map((c, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-4 font-sans font-bold text-slate-900">{c.name}</td>
+                        <td className="py-3 px-4 text-slate-500">{c.role}</td>
+                        <td className="py-3 px-4 text-center font-black text-indigo-600">{c.invoicesCount}</td>
+                        <td className="py-3 px-4 text-right text-slate-600">{formatCurrency(c.goal, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">{formatCurrency(c.salesTotal, settings.currencySymbol)}</td>
+                        <td className="py-3 px-4 text-center font-bold text-emerald-600">{c.commissionRate.toFixed(1)}%</td>
+                        <td className="py-3 px-4 text-right font-black text-amber-600 text-sm">{formatCurrency(c.commissionAmount, settings.currencySymbol)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. REPORTE DE RENTABILIDAD & MARGEN BRUTO */}
+      {subTab === 'REP_RENTABILIDAD' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+                  <span>Análisis de Rentabilidad & Margen Bruto Operativo</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Período auditado: {startDate} al {endDate}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Ingresos Facturados</span>
+                <div className="text-xl font-black text-slate-900 font-mono mt-1">
+                  {formatCurrency(profitabilitySummary.totalRevenue, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">Total ventas brutas</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Costo de Mercadería (CMV)</span>
+                <div className="text-xl font-black text-rose-600 font-mono mt-1">
+                  {formatCurrency(profitabilitySummary.totalCost, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">Costo de adquisición items</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Utilidad Bruta</span>
+                <div className="text-xl font-black text-emerald-600 font-mono mt-1">
+                  {formatCurrency(profitabilitySummary.grossProfit, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">Ingresos menos CMV</div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Margen Bruto %</span>
+                <div className="text-xl font-black text-indigo-600 font-mono mt-1">
+                  {profitabilitySummary.marginPct.toFixed(1)}%
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">Rentabilidad promedio</div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700 font-mono">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">SKU</th>
+                    <th className="py-3 px-4">Producto</th>
+                    <th className="py-3 px-4 text-center">Unidades</th>
+                    <th className="py-3 px-4 text-right">Ingresos</th>
+                    <th className="py-3 px-4 text-right">Costo Total</th>
+                    <th className="py-3 px-4 text-right">Ganancia Bruta</th>
+                    <th className="py-3 px-4 text-center">Margen %</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {topProductsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400 font-sans text-xs">
+                        No hay ventas para calcular rentabilidad en el período {startDate} al {endDate}.
+                      </td>
+                    </tr>
+                  ) : (
+                    topProductsList.slice(0, 20).map((p, idx) => {
+                      const costTotal = p.cost * p.units;
+                      const profit = p.revenue - costTotal;
+                      const pct = p.revenue > 0 ? (profit / p.revenue) * 100 : 0;
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4 font-bold text-slate-900">{p.sku}</td>
+                          <td className="py-3 px-4 font-sans font-bold text-slate-800">{p.name}</td>
+                          <td className="py-3 px-4 text-center font-black text-slate-700">{p.units}</td>
+                          <td className="py-3 px-4 text-right font-black text-slate-900">{formatCurrency(p.revenue, settings.currencySymbol)}</td>
+                          <td className="py-3 px-4 text-right text-rose-600 font-medium">{formatCurrency(costTotal, settings.currencySymbol)}</td>
+                          <td className="py-3 px-4 text-right font-black text-emerald-600">{formatCurrency(profit, settings.currencySymbol)}</td>
+                          <td className="py-3 px-4 text-center font-black text-indigo-600">{pct.toFixed(1)}%</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. REPORTE DE FLUJO DE CAJA */}
+      {subTab === 'REP_FLUJO_CAJA' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-emerald-500" />
+                  <span>Flujo de Caja Operativo (Cash Flow)</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Ingresos recaudados vs egresos por compras: {startDate} al {endDate}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200">
+                <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block">Ingresos Efectivo</span>
+                <div className="text-xl font-black text-emerald-700 font-mono mt-1">
+                  {formatCurrency(cashFlowSummary.cashIn, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-emerald-600 font-medium">Recaudación en billete físico</div>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200">
+                <span className="text-[10px] font-black text-blue-800 uppercase tracking-wider block">Ingresos Electrónicos</span>
+                <div className="text-xl font-black text-blue-700 font-mono mt-1">
+                  {formatCurrency(cashFlowSummary.electronicIn, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-blue-600 font-medium">Bancos / Tarjetas / Transferencias</div>
+              </div>
+              <div className="bg-rose-50 p-4 rounded-2xl border border-rose-200">
+                <span className="text-[10px] font-black text-rose-800 uppercase tracking-wider block">Egresos por Compras</span>
+                <div className="text-xl font-black text-rose-700 font-mono mt-1">
+                  {formatCurrency(cashFlowSummary.purchasesOut, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-rose-600 font-medium">{filteredPurchases.length} adquisiciones registradas</div>
+              </div>
+              <div className="bg-slate-900 p-4 rounded-2xl text-white">
+                <span className="text-[10px] font-black text-orange-400 uppercase tracking-wider block">Flujo Neto del Período</span>
+                <div className={`text-xl font-black font-mono mt-1 ${cashFlowSummary.netFlow >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formatCurrency(cashFlowSummary.netFlow, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium">Saldo operativo de caja</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 11. REPORTE DE DEVOLUCIONES Y RECHAZOS SRI */}
+      {subTab === 'REP_DEVOLUCIONES' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-amber-500" />
+                  <span>Comprobantes Devueltos u Observados por el SRI ({filteredDevoluciones.length})</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Período de auditoría: {startDate} al {endDate}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-red-50 text-red-700 font-black text-xs rounded-xl border border-red-200">
+                  Total Observado: {formatCurrency(filteredDevoluciones.reduce((s, i) => s + (i.total || 0), 0), settings.currencySymbol)}
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700 font-mono">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Comprobante</th>
+                    <th className="py-3 px-4">Fecha</th>
+                    <th className="py-3 px-4">Cliente / Razón Social</th>
+                    <th className="py-3 px-4">Motivo / Mensaje del SRI</th>
+                    <th className="py-3 px-4 text-right">Total ($)</th>
+                    <th className="py-3 px-4 text-center">Estado SRI</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {filteredDevoluciones.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-400 font-sans text-xs">
+                        Excelente: No existen facturas devueltas por el SRI en el período {startDate} al {endDate}.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredDevoluciones.map((inv) => (
+                      <tr key={inv.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-4 font-black text-slate-900">{inv.fullNumber || inv.number}</td>
+                        <td className="py-3 px-4 text-slate-500">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
+                        <td className="py-3 px-4 font-sans text-slate-800">
+                          <strong className="text-slate-900 block">{inv.customer?.name || 'CONSUMIDOR FINAL'}</strong>
+                          <span className="text-[10px] text-slate-400 font-mono">{inv.customer?.docNumber || '9999999999999'}</span>
+                        </td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className="text-[11px] text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200/60 font-semibold block">
+                            {inv.sriMensaje || 'Comprobante devuelto por el SRI'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">
+                          {formatCurrency(inv.total || 0, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 font-black text-[10px] rounded-full border border-red-200">
+                            DEVUELTA
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 12. OTROS REPORTES (REP_NOMINA, REP_ROTACION) */}
+      {!['REP_VENTAS', 'REP_PRODUCTOS', 'REP_INVENTARIO', 'REP_CAJA', 'REP_COMPRAS', 'REP_STOCK_MUERTO', 'REP_ATS', 'REP_FORMULARIO_104', 'REP_FORMULARIO_103', 'REP_COMISIONES', 'REP_RENTABILIDAD', 'REP_FLUJO_CAJA', 'REP_DEVOLUCIONES'].includes(subTab) && (() => {
+        const displayList = filteredInvoices;
+        const totalMontoDisplay = totalVentasPeriodo;
 
         return (
           <div className="space-y-6">
@@ -2472,49 +3027,36 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    {isDevolucionesReport ? 'Total Facturas Devueltas' : 'Total Registros'}
+                    Total Registros Auditados
                   </span>
-                  <div className={`text-2xl font-black font-mono ${isDevolucionesReport ? 'text-red-600' : 'text-slate-900'}`}>
+                  <div className="text-2xl font-black font-mono text-slate-900">
                     {displayList.length}
                   </div>
                   <div className="text-xs text-slate-500 font-bold">
-                    {isDevolucionesReport ? 'Comprobantes observados por SRI' : 'Documentos auditados'}
+                    Comprobantes en el rango seleccionado
                   </div>
                 </div>
 
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    {isDevolucionesReport ? 'Monto Total Observado' : 'Monto Operacional'}
+                    Monto Operacional
                   </span>
-                  <div className={`text-2xl font-black font-mono ${isDevolucionesReport ? 'text-red-600' : 'text-emerald-600'}`}>
+                  <div className="text-2xl font-black font-mono text-emerald-600">
                     {formatCurrency(totalMontoDisplay, settings.currencySymbol)}
                   </div>
                   <div className="text-xs text-slate-500 font-bold">
-                    {isDevolucionesReport ? 'Volumen retenido pendiente de subsanar' : 'Volumen financiero procesado'}
+                    Volumen financiero procesado
                   </div>
                 </div>
 
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Estado de Verificación</span>
-                  <div className={`text-sm font-black flex items-center gap-1.5 mt-2 ${
-                    isDevolucionesReport && displayList.length > 0 ? 'text-amber-600' : 'text-emerald-600'
-                  }`}>
-                    {isDevolucionesReport && displayList.length > 0 ? (
-                      <>
-                        <RotateCcw className="w-4 h-4 text-amber-500 animate-pulse" />
-                        <span>REVISIÓN REQUERIDA</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>SIN DISCREPANCIAS</span>
-                      </>
-                    )}
+                  <div className="text-sm font-black flex items-center gap-1.5 mt-2 text-emerald-600">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>SIN DISCREPANCIAS</span>
                   </div>
                   <div className="text-xs text-slate-500 font-bold">
-                    {isDevolucionesReport && displayList.length > 0
-                      ? `${displayList.length} comprobantes devueltos para corregir`
-                      : 'Consistencia contable al 100%'}
+                    Consistencia contable en período
                   </div>
                 </div>
               </div>
@@ -2525,22 +3067,16 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                     <tr>
                       <th className="py-3 px-4">Referencia</th>
                       <th className="py-3 px-4">Fecha</th>
-                      <th className="py-3 px-4">
-                        {isDevolucionesReport ? 'Cliente & Motivo de Devolución SRI' : 'Concepto Detallado'}
-                      </th>
+                      <th className="py-3 px-4">Concepto Detallado</th>
                       <th className="py-3 px-4 text-right">Monto ($)</th>
-                      <th className="py-3 px-4 text-center">
-                        {isDevolucionesReport ? 'Estado SRI' : 'Estado'}
-                      </th>
+                      <th className="py-3 px-4 text-center">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
                     {displayList.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-12 text-center text-slate-400 font-sans text-xs">
-                          {isDevolucionesReport
-                            ? 'No hay facturas devueltas por el SRI registradas en el sistema.'
-                            : 'No hay movimientos registrados para este reporte en el período seleccionado.'}
+                          No hay movimientos registrados para este reporte en el período {startDate} al {endDate}.
                         </td>
                       </tr>
                     ) : (
@@ -2549,32 +3085,15 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
                           <td className="py-3 px-4 font-black text-slate-900">{inv.fullNumber || inv.number}</td>
                           <td className="py-3 px-4 text-slate-500">{inv.createdAt ? inv.createdAt.split('T')[0] : '-'}</td>
                           <td className="py-3 px-4 font-sans text-slate-800">
-                            {isDevolucionesReport ? (
-                              <div className="space-y-0.5">
-                                <div className="font-bold text-slate-900">
-                                  {inv.customer?.name || 'CONSUMIDOR FINAL'} ({inv.customer?.docNumber || inv.customer?.idNumber || '9999999999999'})
-                                </div>
-                                <div className="text-[10px] font-mono text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200/60 font-semibold inline-block">
-                                  {inv.sriMensaje || 'Comprobante devuelto por el SRI'}
-                                </div>
-                              </div>
-                            ) : (
-                              `${currentMeta.title}: ${inv.customer?.name || 'Consumidor Final'}`
-                            )}
+                            {`${currentMeta.title}: ${inv.customer?.name || 'Consumidor Final'}`}
                           </td>
                           <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">
                             {formatCurrency(inv.total || 0, settings.currencySymbol)}
                           </td>
                           <td className="py-3 px-4 text-center">
-                            {isDevolucionesReport ? (
-                              <span className="px-2 py-0.5 bg-red-100 text-red-700 font-black text-[10px] rounded-full border border-red-200">
-                                DEVUELTA
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded">
-                                {inv.paymentStatus || 'COMPLETADO'}
-                              </span>
-                            )}
+                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded">
+                              {inv.paymentStatus || 'COMPLETADO'}
+                            </span>
                           </td>
                         </tr>
                       ))

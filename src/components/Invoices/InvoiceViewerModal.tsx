@@ -606,7 +606,20 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                       const desc = it.productName || (it as any).description || (it as any).name || `Producto ${idx + 1}`;
                       const qty = it.quantity || 1;
                       const unitPrice = it.unitPrice || (it as any).price || 0;
-                      const totalItem = it.total || (unitPrice * qty);
+                      const discountAmount = Math.round(((unitPrice * qty * (it.discountPercent || 0)) / 100) * 100) / 100;
+                      const lineBase = Math.max(0, Math.round((unitPrice * qty - discountAmount) * 100) / 100);
+
+                      // Determine item tax rate accurately
+                      let itemTaxRate = settings.defaultTaxRate ?? 15;
+                      if (typeof it.taxRate === 'number') {
+                        itemTaxRate = it.taxRate;
+                      } else if (typeof (it as any).taxPercent === 'number') {
+                        itemTaxRate = (it as any).taxPercent;
+                      } else if (it.taxAmount === 0 && (it.subtotal || unitPrice) > 0) {
+                        itemTaxRate = 0;
+                      } else if (it.taxAmount > 0 && lineBase > 0) {
+                        itemTaxRate = Math.round((it.taxAmount / lineBase) * 100);
+                      }
 
                       return (
                         <tr key={idx} className="border-b border-black text-black">
@@ -614,12 +627,14 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                           <td className="border-r border-black p-2 text-center">{code}</td>
                           <td className="border-r border-black p-2 text-center font-normal">{qty.toFixed(2)}</td>
                           <td className="border-r border-black p-2 text-left">{desc}</td>
-                          <td className="border-r border-black p-2 text-center"></td>
+                          <td className="border-r border-black p-2 text-center font-semibold text-[10px]">
+                            IVA {itemTaxRate}%
+                          </td>
                           <td className="border-r border-black p-2 text-center">${unitPrice.toFixed(2)}</td>
                           <td className="border-r border-black p-2 text-center">0.00</td>
                           <td className="border-r border-black p-2 text-center">0.00</td>
-                          <td className="border-r border-black p-2 text-center">0.00</td>
-                          <td className="p-2 text-center">${totalItem.toFixed(2)}</td>
+                          <td className="border-r border-black p-2 text-center">${discountAmount.toFixed(2)}</td>
+                          <td className="p-2 text-center font-medium">${lineBase.toFixed(2)}</td>
                         </tr>
                       );
                     })}
@@ -631,7 +646,15 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               {(() => {
                 const sriBreakdown = calculateSriTotals(activeInvoice.items, settings.defaultTaxRate);
                 const subtotal15 = sriBreakdown.subtotal15;
+                const subtotal5 = sriBreakdown.subtotal5;
+                const subtotal0 = sriBreakdown.subtotal0;
+                const subtotalNoObjeto = sriBreakdown.subtotalNoObjeto;
+                const subtotalExento = sriBreakdown.subtotalExento;
+                const subtotalSinImpuestos = sriBreakdown.subtotalSinImpuestos;
+                const totalDescuento = sriBreakdown.totalDescuento;
+                const valorIce = sriBreakdown.valorIce;
                 const iva15 = sriBreakdown.iva15;
+                const iva5 = sriBreakdown.iva5;
                 const total = sriBreakdown.valorAPagar;
 
                 return (
@@ -678,33 +701,55 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                             <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal15.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
+                            <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL 5%</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal5.toFixed(2)}</td>
+                          </tr>
+                          {sriBreakdown.subtotalEspecial > 0 && (
+                            <tr className="border-b border-black">
+                              <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL OTRAS TARIFAS</td>
+                              <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.subtotalEspecial.toFixed(2)}</td>
+                            </tr>
+                          )}
+                          <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL 0%</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal0.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL NO OBJETO DE IVA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalNoObjeto.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL EXENTO DE IVA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalExento.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">SUBTOTAL SIN IMPUESTOS</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotal15.toFixed(2)}</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${subtotalSinImpuestos.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">TOTAL DESCUENTO</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${totalDescuento.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">ICE</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${valorIce.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">IVA 15%</td>
                             <td className="p-1.5 pr-3 text-right font-medium text-black">${iva15.toFixed(2)}</td>
                           </tr>
+                          {iva5 > 0 && (
+                            <tr className="border-b border-black">
+                              <td className="p-1.5 pl-3 border-r border-black text-black">IVA 5%</td>
+                              <td className="p-1.5 pr-3 text-right font-medium text-black">${iva5.toFixed(2)}</td>
+                            </tr>
+                          )}
+                          {sriBreakdown.ivaEspecial > 0 && (
+                            <tr className="border-b border-black">
+                              <td className="p-1.5 pl-3 border-r border-black text-black">IVA OTRAS TARIFAS</td>
+                              <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.ivaEspecial.toFixed(2)}</td>
+                            </tr>
+                          )}
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">IVA 0%</td>
                             <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
@@ -715,7 +760,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                           </tr>
                           <tr className="border-b border-black">
                             <td className="p-1.5 pl-3 border-r border-black text-black">PROPINA</td>
-                            <td className="p-1.5 pr-3 text-right font-medium text-black">$0.00</td>
+                            <td className="p-1.5 pr-3 text-right font-medium text-black">${sriBreakdown.propina10Amount.toFixed(2)}</td>
                           </tr>
                           <tr className="border-b border-black font-bold text-[13px]">
                             <td className="p-1.5 pl-3 border-r border-black text-black font-bold">VALOR TOTAL</td>
@@ -752,17 +797,30 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               </div>
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-2">
-                {activeInvoice.items.map((item, idx) => (
-                  <div key={idx} className="space-y-0.5">
-                    <p className="font-bold text-slate-900">{item.productName}</p>
-                    <div className="flex justify-between text-[10px]">
-                      <span>
-                        {item.quantity} {item.unit} x {formatCurrency(item.unitPrice, settings.currencySymbol)}
-                      </span>
-                      <span className="font-bold">{formatCurrency(item.total, settings.currencySymbol)}</span>
+                {activeInvoice.items.map((item, idx) => {
+                  let itemTaxRate = settings.defaultTaxRate ?? 15;
+                  if (typeof item.taxRate === 'number') {
+                    itemTaxRate = item.taxRate;
+                  } else if (typeof (item as any).taxPercent === 'number') {
+                    itemTaxRate = (item as any).taxPercent;
+                  } else if (item.taxAmount === 0 && (item.subtotal || item.unitPrice) > 0) {
+                    itemTaxRate = 0;
+                  }
+                  return (
+                    <div key={idx} className="space-y-0.5">
+                      <div className="flex justify-between items-start">
+                        <p className="font-bold text-slate-900">{item.productName}</p>
+                        <span className="text-[9.5px] font-semibold text-slate-600 ml-1">IVA {itemTaxRate}%</span>
+                      </div>
+                      <div className="flex justify-between text-[10px]">
+                        <span>
+                          {item.quantity} {item.unit} x {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                        </span>
+                        <span className="font-bold">{formatCurrency(item.total, settings.currencySymbol)}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {(() => {

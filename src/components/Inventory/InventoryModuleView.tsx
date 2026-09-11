@@ -50,7 +50,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { InventoryManager } from './InventoryManager';
 import { BarcodeLabelsManager } from './BarcodeLabelsManager';
 import { BulkProductImporterModal } from './BulkProductImporterModal';
-import { KardexManager } from './KardexManager';
+import { KardexManager, StockAdjustmentRecord } from './KardexManager';
 import { Select } from '../Shared/Select';
 import { useModal } from '../../context/ModalContext';
 import { defaultCategories } from '../../data/initialData';
@@ -707,6 +707,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   const [adjustTypeReason, setAdjustTypeReason] = useState<'ENTRADA_COMPRA' | 'ENTRADA_DEVOLUCION' | 'SALIDA_MERMA' | 'SALIDA_ROBO' | 'CORRECCION'>('CORRECCION');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustHistory, setAdjustHistory] = useState<{ id: string; date: string; product: string; qty: number; reason: string; user: string; }[]>([]);
+  const [stockAdjustments, setStockAdjustments] = useFirestoreSync<StockAdjustmentRecord[]>('ferreteria_stock_adjustments', []);
 
   // Interactive Multi-Product Stock Adjustment Rows State (matching image design)
   const [adjustMovementType, setAdjustMovementType] = useState<'INGRESO' | 'EGRESO'>('INGRESO');
@@ -763,6 +764,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
     let modifiedCount = 0;
     const newHistoryEntries: any[] = [];
+    const newStockAdjustments: StockAdjustmentRecord[] = [];
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
 
     adjustRows.forEach((r) => {
       if (r.adjustQty > 0) {
@@ -772,11 +775,25 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
         modifiedCount++;
         newHistoryEntries.push({
           id: `adj-${Date.now()}-${Math.random()}`,
-          date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          date: nowStr,
           product: r.name,
           qty: diff,
           reason: `Ajuste (${adjustMovementType}): ${r.currentStock} ➔ ${finalStock}`,
           user: 'Administrador POS',
+        });
+
+        const prod = products.find((p) => p.id === r.productId);
+        newStockAdjustments.push({
+          id: `adj-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          date: nowStr,
+          productId: r.productId,
+          productName: r.name,
+          sku: r.sku,
+          qty: diff,
+          reason: `Ajuste de Stock (${adjustMovementType}): ${r.currentStock} ➔ ${finalStock}`,
+          user: 'Administrador POS',
+          costPrice: prod?.costPrice || 0,
+          type: 'AJUSTE',
         });
       }
     });
@@ -784,10 +801,13 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     if (newHistoryEntries.length > 0) {
       setAdjustHistory((prev) => [...newHistoryEntries, ...prev]);
     }
+    if (newStockAdjustments.length > 0) {
+      setStockAdjustments([...newStockAdjustments, ...stockAdjustments]);
+    }
 
     showToast(
       modifiedCount > 0
-        ? `¡Ajuste de stock (${adjustMovementType}) guardado exitosamente! (${modifiedCount} productos actualizados)`
+        ? `¡Ajuste de stock (${adjustMovementType}) guardado y registrado en el Kardex! (${modifiedCount} productos actualizados)`
         : 'Registro guardado sin cambios en existencias.',
       'success'
     );
@@ -1401,10 +1421,26 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
     onStockAdjust(p.id, finalChange);
 
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const newRecord: StockAdjustmentRecord = {
+      id: `adj-${Date.now()}`,
+      date: nowStr,
+      productId: p.id,
+      productName: p.name,
+      sku: p.sku,
+      qty: finalChange,
+      reason: `Ajuste de Stock: ${adjustTypeReason.replace(/_/g, ' ')} (${adjustNotes.trim() || 'Sin notas adicionales'})`,
+      user: 'Administrador POS',
+      costPrice: p.costPrice || 0,
+      type: 'AJUSTE',
+    };
+
+    setStockAdjustments([newRecord, ...stockAdjustments]);
+
     setAdjustHistory([
       {
-        id: `adj-${Date.now()}`,
-        date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+        id: newRecord.id,
+        date: newRecord.date,
         product: p.name,
         qty: finalChange,
         reason: `${adjustTypeReason} (${adjustNotes || 'Sin nota'})`,
@@ -1415,6 +1451,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
     setAdjustNotes('');
     setAdjustQtyVal('10');
+    showToast('Ajuste formal guardado y registrado con éxito en el Kardex.', 'success');
   };
 
   // Download PDF Planilla for Manual Counting
@@ -1456,13 +1493,35 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     }
 
     showConfirm(
-      `Se ajustarán ${itemsToAdjust.length} productos que presentan discrepancias entre el conteo físico y el sistema.\n\n¿Desea aplicar los ajustes al inventario real?`,
+      `Se ajustarán ${itemsToAdjust.length} productos que presentan discrepancias entre el conteo físico y el sistema.\n\n¿Desea aplicar los ajustes al inventario real y asentarlos en el Kardex?`,
       () => {
         let adjustedCount = 0;
+        const auditRecords: StockAdjustmentRecord[] = [];
+        const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
         itemsToAdjust.forEach((item) => {
           onStockAdjust(item.productId, item.diff);
           adjustedCount++;
+
+          const prod = products.find((p) => p.id === item.productId);
+          const isSobrante = item.diff > 0;
+          auditRecords.push({
+            id: `audit-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            date: nowStr,
+            productId: item.productId,
+            productName: item.productName,
+            sku: item.sku,
+            qty: item.diff,
+            reason: `Toma Física (${isSobrante ? 'Sobrante' : 'Faltante'}): Conteo ${item.physicalStock} vs Sistema ${item.systemStock} (Dif: ${item.diff > 0 ? '+' : ''}${item.diff})${auditorName ? ` • Auditor: ${auditorName}` : ''}`,
+            user: auditorName ? `Auditor: ${auditorName}` : 'Auditor de Inventario',
+            costPrice: prod?.costPrice || 0,
+            type: 'TOMA_FISICA',
+          });
         });
+
+        if (auditRecords.length > 0) {
+          setStockAdjustments([...auditRecords, ...stockAdjustments]);
+        }
 
         // Update local items so systemStock now matches physicalStock
         setAuditItems(prev => prev.map(item => {
@@ -1477,11 +1536,11 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           return item;
         }));
 
-        showToast(`¡Ajuste de inventario aplicado! Se corrigieron ${adjustedCount} productos en el sistema.`, 'success');
-        setAuditSuccessMsg(`¡Auditoría aplicada exitosamente! Se corrigieron las existencias de ${adjustedCount} productos.`);
+        showToast(`¡Ajuste de inventario aplicado! Se corrigieron ${adjustedCount} productos en el sistema y se registraron en el Kardex.`, 'success');
+        setAuditSuccessMsg(`¡Auditoría aplicada exitosamente! Se corrigieron las existencias de ${adjustedCount} productos y quedaron asentadas en el Kardex.`);
       },
       'Confirmar Ajuste de Auditoría Física',
-      'Sí, Aplicar Ajustes',
+      'Sí, Aplicar Ajustes y Registrar en Kardex',
       'Cancelar'
     );
   };

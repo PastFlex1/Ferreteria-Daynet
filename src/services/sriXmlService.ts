@@ -146,16 +146,18 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
   
   // Tax grouping and calculations
   const taxGroups: { [key: string]: { base: number; valor: number; codigoPorcentaje: string; tarifa: string } } = {};
+  let totalDescuentoCalculado = 0;
   
   (data.items || []).forEach(i => {
     const mapping = getIvaMapping(i.ivaRate);
     const key = `${mapping.codigoPorcentaje}`;
     const totalLine = safe(i.cantidad) * safe(i.precioUnitario);
     const discount = safe(i.descuento);
+    totalDescuentoCalculado += discount;
     const netLine = Math.max(0, totalLine - discount);
     
     const baseVal = netLine;
-    const taxVal = netLine * mapping.multiplier;
+    const taxVal = Math.round(netLine * mapping.multiplier * 100) / 100;
     
     if (!taxGroups[key]) {
       taxGroups[key] = { base: 0, valor: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa };
@@ -207,7 +209,7 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
   xml += `        <identificacionComprador>${data.cliente.identificacion || '9999999999999'}</identificacionComprador>\n`;
   xml += `        <direccionComprador>${escapeXml(data.cliente.direccion || 'S/N')}</direccionComprador>\n`;
   xml += `        <totalSinImpuestos>${safe(subtotalTotal).toFixed(2)}</totalSinImpuestos>\n`;
-  xml += `        <totalDescuento>0.00</totalDescuento>\n\n`;
+  xml += `        <totalDescuento>${safe(totalDescuentoCalculado).toFixed(2)}</totalDescuento>\n\n`;
 
   xml += `        <totalConImpuestos>\n`;
   Object.values(taxGroups).forEach(group => {
@@ -326,14 +328,32 @@ export function convertERPInvoiceToSRI(
       email: invoice.customer?.email || '',
       telefono: invoice.customer?.phone || '',
     },
-    items: invoice.items.map(item => ({
-      codigo: item.sku || '0101',
-      descripcion: item.productName,
-      cantidad: item.quantity,
-      precioUnitario: item.unitPrice,
-      descuento: (item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100,
-      ivaRate: item.taxRate ?? 15,
-    })),
+    items: invoice.items.map(item => {
+      let ivaRate = 15;
+      if (typeof item.taxRate === 'number') {
+        ivaRate = item.taxRate;
+      } else if (typeof (item as any).taxPercent === 'number') {
+        ivaRate = (item as any).taxPercent;
+      } else if (item.taxAmount === 0 && (item.subtotal || item.unitPrice) > 0) {
+        ivaRate = 0;
+      } else if (item.taxAmount > 0 && (item.subtotal || (item.unitPrice * item.quantity)) > 0) {
+        const base = item.subtotal || (item.unitPrice * item.quantity);
+        ivaRate = Math.round((item.taxAmount / base) * 100);
+      } else if (typeof settings.defaultTaxRate === 'number') {
+        ivaRate = settings.defaultTaxRate;
+      }
+
+      const discount = Math.round(((item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100) * 100) / 100;
+
+      return {
+        codigo: item.sku || '0101',
+        descripcion: item.productName,
+        cantidad: item.quantity,
+        precioUnitario: item.unitPrice,
+        descuento: discount,
+        ivaRate,
+      };
+    }),
     formaPago: getSriPaymentCode(invoice.paymentMethod),
     tipoComprobante: '01',
     observaciones: invoice.notes,

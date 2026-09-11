@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { CreditNoteData, Invoice, StoreSettings } from '../types';
 import { formatCurrency, formatFullDate } from './formatters';
+import { calculateSriTotals } from './sriCalculations';
 
 export const downloadCreditNotePdf = (
   creditNote: CreditNoteData,
@@ -163,30 +164,59 @@ export const downloadCreditNotePdf = (
   const tax = creditNote.tax ?? Math.round((creditNote.amount - subtotal) * 100) / 100;
   const total = creditNote.amount;
 
+  const sriBreakdown = items && items.length > 0 ? calculateSriTotals(items, settings.defaultTaxRate) : null;
+  const subtotal15 = sriBreakdown ? sriBreakdown.subtotal15 : (tax > 0 ? subtotal : 0);
+  const subtotal5 = sriBreakdown ? sriBreakdown.subtotal5 : 0;
+  const subtotal0 = sriBreakdown ? sriBreakdown.subtotal0 : (tax === 0 ? subtotal : 0);
+  const subtotalSinImpuestos = sriBreakdown ? sriBreakdown.subtotalSinImpuestos : subtotal;
+  const iva15 = sriBreakdown ? sriBreakdown.iva15 : (subtotal15 > 0 ? tax : 0);
+  const iva5 = sriBreakdown ? sriBreakdown.iva5 : 0;
+
   const totalsTableX = pageWidth - 90;
+  const boxHeight = subtotal5 > 0 ? 36 : 31;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(totalsTableX, y, 75, 26, 2, 2, 'FD');
+  doc.roundedRect(totalsTableX, y, 75, boxHeight, 2, 2, 'FD');
 
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  doc.text('SUBTOTAL SIN IMPUESTOS:', totalsTableX + 4, y + 6);
-  doc.text(formatCurrency(subtotal, settings.currencySymbol), pageWidth - 18, y + 6, { align: 'right' });
+  let curY = y + 5;
+  doc.text('SUBTOTAL SIN IMPUESTOS:', totalsTableX + 4, curY);
+  doc.text(formatCurrency(subtotalSinImpuestos, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
 
-  doc.text('SUBTOTAL 15%:', totalsTableX + 4, y + 11);
-  doc.text(formatCurrency(subtotal, settings.currencySymbol), pageWidth - 18, y + 11, { align: 'right' });
+  curY += 4.5;
+  doc.text('SUBTOTAL 15%:', totalsTableX + 4, curY);
+  doc.text(formatCurrency(subtotal15, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
 
-  doc.text('IVA 15%:', totalsTableX + 4, y + 16);
-  doc.text(formatCurrency(tax, settings.currencySymbol), pageWidth - 18, y + 16, { align: 'right' });
+  if (subtotal5 > 0) {
+    curY += 4.5;
+    doc.text('SUBTOTAL 5%:', totalsTableX + 4, curY);
+    doc.text(formatCurrency(subtotal5, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
+  }
 
+  curY += 4.5;
+  doc.text('SUBTOTAL 0%:', totalsTableX + 4, curY);
+  doc.text(formatCurrency(subtotal0, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
+
+  curY += 4.5;
+  doc.text('IVA 15%:', totalsTableX + 4, curY);
+  doc.text(formatCurrency(iva15, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
+
+  if (iva5 > 0) {
+    curY += 4.5;
+    doc.text('IVA 5%:', totalsTableX + 4, curY);
+    doc.text(formatCurrency(iva5, settings.currencySymbol), pageWidth - 18, curY, { align: 'right' });
+  }
+
+  curY += 4;
   doc.setFillColor(15, 23, 42);
-  doc.rect(totalsTableX, y + 19, 75, 7, 'F');
+  doc.rect(totalsTableX, curY, 75, 7, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text('VALOR MODIFICADO:', totalsTableX + 4, y + 24);
+  doc.text('VALOR MODIFICADO:', totalsTableX + 4, curY + 4.8);
   doc.setTextColor(251, 146, 60); // orange-400
-  doc.text(formatCurrency(total, settings.currencySymbol), pageWidth - 18, y + 24, { align: 'right' });
+  doc.text(formatCurrency(total, settings.currencySymbol), pageWidth - 18, curY + 4.8, { align: 'right' });
 
   // Signatures
   y += 38;
@@ -231,16 +261,37 @@ export const printCreditNoteDocument = (
   const total = creditNote.amount;
   const clave = creditNote.claveAcceso || creditNote.numeroAutorizacion || '040920260417900123450011001001000000001123456781';
 
+  const sriBreakdown = items && items.length > 0 ? calculateSriTotals(items, settings.defaultTaxRate) : null;
+  const subtotal15 = sriBreakdown ? sriBreakdown.subtotal15 : (tax > 0 ? subtotal : 0);
+  const subtotal5 = sriBreakdown ? sriBreakdown.subtotal5 : 0;
+  const subtotal0 = sriBreakdown ? sriBreakdown.subtotal0 : (tax === 0 ? subtotal : 0);
+  const subtotalSinImpuestos = sriBreakdown ? sriBreakdown.subtotalSinImpuestos : subtotal;
+  const iva15 = sriBreakdown ? sriBreakdown.iva15 : (subtotal15 > 0 ? tax : 0);
+  const iva5 = sriBreakdown ? sriBreakdown.iva5 : 0;
+
   const itemsHtml = items.length > 0
-    ? items.map((item, idx) => `
+    ? items.map((item, idx) => {
+      let itemTaxRate = settings.defaultTaxRate ?? 15;
+      if (typeof (item as any).taxRate === 'number') {
+        itemTaxRate = (item as any).taxRate;
+      } else if (typeof (item as any).taxPercent === 'number') {
+        itemTaxRate = (item as any).taxPercent;
+      } else if ((item as any).taxAmount === 0 && ((item as any).subtotal || (item as any).unitPrice) > 0) {
+        itemTaxRate = 0;
+      }
+      return `
       <tr style="border-bottom: 1px solid #e2e8f0;">
         <td style="padding: 7px 10px; text-align: center; color: #64748b;">${item.sku || idx + 1}</td>
-        <td style="padding: 7px 10px; font-weight: 600; color: #1e293b;">${item.productName || 'Producto'}</td>
+        <td style="padding: 7px 10px; font-weight: 600; color: #1e293b;">
+          ${item.productName || 'Producto'}
+          <span style="margin-left: 6px; font-size: 9px; padding: 2px 4px; background: #f1f5f9; border-radius: 4px; color: #475569;">IVA ${itemTaxRate}%</span>
+        </td>
         <td style="padding: 7px 10px; text-align: center; font-weight: bold; color: #0f172a;">${item.quantity || 1}</td>
         <td style="padding: 7px 10px; text-align: right; color: #475569;">${formatCurrency(item.unitPrice || 0, settings.currencySymbol)}</td>
         <td style="padding: 7px 10px; text-align: right; font-weight: bold; color: #0f172a;">${formatCurrency(item.subtotal || item.total || 0, settings.currencySymbol)}</td>
       </tr>
-    `).join('')
+      `;
+    }).join('')
     : `
       <tr style="border-bottom: 1px solid #e2e8f0;">
         <td style="padding: 7px 10px; text-align: center; color: #64748b;">NC-01</td>
@@ -350,20 +401,30 @@ export const printCreditNoteDocument = (
         <table class="totals-table">
           <tr>
             <td style="border-bottom: 1px solid #e2e8f0;">SUBTOTAL 15%:</td>
-            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(subtotal, settings.currencySymbol)}</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(subtotal15, settings.currencySymbol)}</td>
           </tr>
+          ${subtotal5 > 0 ? `
+          <tr>
+            <td style="border-bottom: 1px solid #e2e8f0;">SUBTOTAL 5%:</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(subtotal5, settings.currencySymbol)}</td>
+          </tr>` : ''}
           <tr>
             <td style="border-bottom: 1px solid #e2e8f0;">SUBTOTAL 0%:</td>
-            <td style="border-bottom: 1px solid #e2e8f0; text-align: right;">$0.00</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right;">${formatCurrency(subtotal0, settings.currencySymbol)}</td>
           </tr>
           <tr>
             <td style="border-bottom: 1px solid #e2e8f0;">SUBTOTAL SIN IMPUESTOS:</td>
-            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(subtotal, settings.currencySymbol)}</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(subtotalSinImpuestos, settings.currencySymbol)}</td>
           </tr>
           <tr>
             <td style="border-bottom: 1px solid #e2e8f0;">IVA 15%:</td>
-            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(tax, settings.currencySymbol)}</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(iva15, settings.currencySymbol)}</td>
           </tr>
+          ${iva5 > 0 ? `
+          <tr>
+            <td style="border-bottom: 1px solid #e2e8f0;">IVA 5%:</td>
+            <td style="border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600;">${formatCurrency(iva5, settings.currencySymbol)}</td>
+          </tr>` : ''}
           <tr class="total-row">
             <td>VALOR TOTAL:</td>
             <td style="text-align: right; font-size: 13px;">${formatCurrency(total, settings.currencySymbol)}</td>

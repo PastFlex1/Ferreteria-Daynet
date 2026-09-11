@@ -43,6 +43,7 @@ export interface StockAdjustmentRecord {
   reason: string;
   user: string;
   costPrice: number;
+  type?: 'AJUSTE' | 'TOMA_FISICA';
 }
 
 export interface KardexMovement {
@@ -51,7 +52,7 @@ export interface KardexMovement {
   date: string;
   dateOnly: string;
   timeOnly: string;
-  type: 'SALDO_INICIAL' | 'COMPRA' | 'VENTA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SALIDA' | 'DEVOLUCION_VENTA' | 'MERMA_DANO' | 'TRANSFERENCIA_ENTRADA' | 'TRANSFERENCIA_SALIDA';
+  type: 'SALDO_INICIAL' | 'COMPRA' | 'VENTA' | 'AJUSTE_ENTRADA' | 'AJUSTE_SALIDA' | 'DEVOLUCION_VENTA' | 'MERMA_DANO' | 'TRANSFERENCIA_ENTRADA' | 'TRANSFERENCIA_SALIDA' | 'TOMA_FISICA_ENTRADA' | 'TOMA_FISICA_SALIDA';
   typeLabel: string;
   tipoBadge: 'Ingreso' | 'Egreso';
   motivo: string;
@@ -86,10 +87,14 @@ const getMotivo = (type: KardexMovement['type']): string => {
       return 'Venta';
     case 'COMPRA':
       return 'Compra';
+    case 'TOMA_FISICA_ENTRADA':
+    case 'TOMA_FISICA_SALIDA':
+      return 'Ajuste de Toma Física';
     case 'AJUSTE_ENTRADA':
     case 'AJUSTE_SALIDA':
-    case 'MERMA_DANO':
       return 'Ajuste de stock';
+    case 'MERMA_DANO':
+      return 'Merma / Daño';
     case 'DEVOLUCION_VENTA':
       return 'Devolución';
     case 'TRANSFERENCIA_ENTRADA':
@@ -111,6 +116,9 @@ const getReferencia = (type: KardexMovement['type'], isInput: boolean, docNumber
     return cleanDoc.toUpperCase().startsWith('FACTURA') || cleanDoc.toUpperCase().startsWith('COMPRA')
       ? cleanDoc
       : `FACTURA COMPRA ${cleanDoc}`;
+  }
+  if (type === 'TOMA_FISICA_ENTRADA' || type === 'TOMA_FISICA_SALIDA') {
+    return `Toma Física (${isInput ? 'SOBRANTE' : 'FALTANTE'})`;
   }
   if (type === 'AJUSTE_ENTRADA' || type === 'AJUSTE_SALIDA' || type === 'MERMA_DANO') {
     return `Ajuste de stock (${isInput ? 'INGRESO' : 'EGRESO'})`;
@@ -319,18 +327,47 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         const adjDate = adj.date || new Date().toISOString();
         const timestamp = new Date(adjDate).getTime() || Date.now();
         const isEntry = adj.qty > 0;
-        const isMerma = adj.reason?.toLowerCase().includes('merma') || adj.reason?.toLowerCase().includes('daño') || adj.reason?.toLowerCase().includes('robo');
+        const reasonLower = (adj.reason || '').toLowerCase();
+        const isTomaFisica = adj.type === 'TOMA_FISICA' || 
+          reasonLower.includes('toma física') || 
+          reasonLower.includes('toma fisica') || 
+          reasonLower.includes('auditoría') || 
+          reasonLower.includes('auditoria') ||
+          reasonLower.includes('correccion sobrante') ||
+          reasonLower.includes('correccion faltante');
+        const isMerma = !isTomaFisica && (reasonLower.includes('merma') || reasonLower.includes('daño') || reasonLower.includes('robo'));
         const cost = adj.costPrice || matchedProd?.costPrice || 0;
+
+        let movementType: KardexMovement['type'];
+        let typeLabel: string;
+        let docPrefix: string;
+
+        if (isTomaFisica) {
+          movementType = isEntry ? 'TOMA_FISICA_ENTRADA' : 'TOMA_FISICA_SALIDA';
+          typeLabel = isEntry ? 'Toma Física (+ Sobrante)' : 'Toma Física (- Faltante)';
+          docPrefix = 'TF';
+        } else if (isMerma) {
+          movementType = 'MERMA_DANO';
+          typeLabel = 'Salida por Merma (-)';
+          docPrefix = 'AJU';
+        } else {
+          movementType = isEntry ? 'AJUSTE_ENTRADA' : 'AJUSTE_SALIDA';
+          typeLabel = isEntry ? 'Ajuste Stock Entrada (+)' : 'Ajuste Stock Salida (-)';
+          docPrefix = 'AJU';
+        }
+
+        const cleanId = (adj.id || '').replace(/^(adj|audit)-/, '');
+        const docNumber = `${docPrefix}-${cleanId.substring(Math.max(0, cleanId.length - 6))}`;
 
         rawMovements.push({
           id: `adj-${adj.id}`,
           timestamp,
           dateStr: adjDate.replace('T', ' ').substring(0, 16),
-          type: isEntry ? 'AJUSTE_ENTRADA' : (isMerma ? 'MERMA_DANO' : 'AJUSTE_SALIDA'),
-          typeLabel: isEntry ? 'Ajuste Entrada (+)' : (isMerma ? 'Salida por Merma (-)' : 'Ajuste Salida (-)'),
-          docNumber: `AJU-${adj.id.substring(adj.id.length - 6)}`,
+          type: movementType,
+          typeLabel,
+          docNumber,
           warehouse: matchedProd?.location || 'Bodega Principal',
-          entityName: adj.reason || 'Ajuste Manual de Inventario',
+          entityName: isTomaFisica ? (adj.reason || 'Ajuste por Toma Física / Auditoría') : (adj.reason || 'Ajuste Manual de Inventario'),
           user: adj.user || 'Administrador',
           productId: matchedProd?.id || adj.productId || '',
           productName: matchedProd?.name || adj.productName || 'Producto Varios',
@@ -474,7 +511,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
       // Net change across this product's movements
       const netDelta = mList.reduce((acc, m) => {
-        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
+        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'TOMA_FISICA_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA'].includes(m.type);
         return acc + (isInput ? m.qty : -m.qty);
       }, 0);
 
@@ -483,7 +520,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       let runningCost = initialCost || 0;
 
       mList.forEach((m) => {
-        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA', 'SALDO_INICIAL'].includes(m.type);
+        const isInput = ['COMPRA', 'AJUSTE_ENTRADA', 'TOMA_FISICA_ENTRADA', 'DEVOLUCION_VENTA', 'TRANSFERENCIA_ENTRADA', 'SALDO_INICIAL'].includes(m.type);
         const stockAnt = runningQty;
         const cantidad = m.qty;
         let stockNuevo = 0;
@@ -575,7 +612,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       // Type Filter
       if (movementTypeFilter === 'VENTAS' && m.type !== 'VENTA') return false;
       if (movementTypeFilter === 'COMPRAS' && m.type !== 'COMPRA') return false;
-      if (movementTypeFilter === 'AJUSTES' && !['AJUSTE_ENTRADA', 'AJUSTE_SALIDA', 'MERMA_DANO'].includes(m.type)) return false;
+      if (movementTypeFilter === 'AJUSTES' && !['AJUSTE_ENTRADA', 'AJUSTE_SALIDA', 'MERMA_DANO', 'TOMA_FISICA_ENTRADA', 'TOMA_FISICA_SALIDA'].includes(m.type)) return false;
+      if (movementTypeFilter === 'AJUSTE_STOCK' && !['AJUSTE_ENTRADA', 'AJUSTE_SALIDA', 'MERMA_DANO'].includes(m.type)) return false;
+      if (movementTypeFilter === 'TOMA_FISICA' && !['TOMA_FISICA_ENTRADA', 'TOMA_FISICA_SALIDA'].includes(m.type)) return false;
       if (movementTypeFilter === 'DEVOLUCIONES' && m.type !== 'DEVOLUCION_VENTA') return false;
       if (movementTypeFilter === 'TRANSFERENCIAS' && !['TRANSFERENCIA_SALIDA', 'TRANSFERENCIA_ENTRADA'].includes(m.type)) return false;
 
@@ -715,6 +754,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     const isOut = ['SALIDA_MERMA', 'SALIDA_ROBO', 'CORRECCION_FALTANTE'].includes(adjustTypeReason);
     const finalChange = isOut ? -qty : qty;
+    const isPhysicalCorrection = ['CORRECCION_SOBRANTE', 'CORRECCION_FALTANTE'].includes(adjustTypeReason);
 
     const newRecord: StockAdjustmentRecord = {
       id: `adj-${Date.now()}`,
@@ -723,9 +763,10 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       productName: selectedProduct.name,
       sku: selectedProduct.sku,
       qty: finalChange,
-      reason: `${adjustTypeReason.replace(/_/g, ' ')}: ${adjustNotes.trim() || 'Ajuste de inventario'}`,
+      reason: `${adjustTypeReason.replace(/_/g, ' ')}: ${adjustNotes.trim() || (isPhysicalCorrection ? 'Corrección de toma física' : 'Ajuste de inventario')}`,
       user: 'Administrador POS',
       costPrice: selectedProduct.costPrice,
+      type: isPhysicalCorrection ? 'TOMA_FISICA' : 'AJUSTE',
     };
 
     // Save adjustment to database
@@ -1208,7 +1249,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               </Select>
             </div>
 
-            <div className="w-48">
+            <div className="w-52">
               <Select
                 value={movementTypeFilter}
                 onChange={(e: any) => setMovementTypeFilter(e.target.value)}
@@ -1217,7 +1258,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 <option value="TODOS">Todos los Movimientos</option>
                 <option value="VENTAS">Solo Ventas (POS)</option>
                 <option value="COMPRAS">Solo Compras (Proveedores)</option>
-                <option value="AJUSTES">Solo Ajustes & Toma Física</option>
+                <option value="AJUSTES">Ajustes & Toma Física (Todos)</option>
+                <option value="AJUSTE_STOCK">Solo Ajustes de Stock</option>
+                <option value="TOMA_FISICA">Solo Ajustes de Toma Física</option>
                 <option value="DEVOLUCIONES">Solo Devoluciones</option>
                 <option value="TRANSFERENCIAS">Solo Transferencias Bodega</option>
               </Select>
@@ -1433,8 +1476,22 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                         </td>
 
                         {/* 5. Motivo */}
-                        <td className="py-3 px-3 whitespace-nowrap text-slate-800 text-xs">
-                          {m.motivo}
+                        <td className="py-3 px-3 whitespace-nowrap text-xs">
+                          {m.type.startsWith('TOMA_FISICA') ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md text-[11px]">
+                              📋 {m.motivo}
+                            </span>
+                          ) : m.type.startsWith('AJUSTE') ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[11px]">
+                              ⚙️ {m.motivo}
+                            </span>
+                          ) : m.type === 'MERMA_DANO' ? (
+                            <span className="inline-flex items-center gap-1 font-bold text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md text-[11px]">
+                              ⚠️ {m.motivo}
+                            </span>
+                          ) : (
+                            <span className="text-slate-800">{m.motivo}</span>
+                          )}
                         </td>
 
                         {/* 6. Stock ant. */}
