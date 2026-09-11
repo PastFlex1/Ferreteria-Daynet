@@ -57,6 +57,17 @@ export interface CartItem {
   appliedPromo?: string; // nombre/código de la promo aplicada automáticamente
 }
 
+export interface PromotionItem {
+  productId: string;
+  productName: string;
+  sku?: string;
+  barcode?: string;
+  currentPrice: number;
+  discountPercent: number;
+  discountAmount: number;
+  finalPrice: number;
+}
+
 export interface Promotion {
   id: string;
   code: string;
@@ -69,6 +80,7 @@ export interface Promotion {
   appliedCategory: string; // nombre de la categoría a la que aplica
   productId?: string; // ID de producto específico (opcional)
   productName?: string; // Nombre del producto específico (opcional)
+  items?: PromotionItem[]; // Lista de productos incluidos con descuentos específicos
 }
 
 

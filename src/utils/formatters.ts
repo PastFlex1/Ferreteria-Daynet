@@ -1,17 +1,37 @@
 import { DocumentType, Invoice, StoreSettings } from '../types';
 
-export const formatCurrency = (amount: number, symbol: string = '$', maxDecimals: number = 2): string => {
-  if (amount == null || isNaN(amount)) {
+export const formatCurrency = (amount: number | string | null | undefined, symbol: string = '$', maxDecimals: number = 2): string => {
+  if (amount == null || amount === '') {
     return `${symbol} 0.00`;
   }
-  return `${symbol} ${amount.toLocaleString('es-MX', {
+  const cleanStr = typeof amount === 'string' ? amount.trim().replace(/,/g, '.') : amount;
+  const num = typeof cleanStr === 'string' ? parseFloat(cleanStr) : cleanStr;
+  if (isNaN(num)) {
+    return `${symbol} 0.00`;
+  }
+  return `${symbol} ${num.toLocaleString('es-MX', {
     minimumFractionDigits: 2,
     maximumFractionDigits: maxDecimals,
   })}`;
 };
 
-export const formatCostCurrency = (amount: number, symbol: string = '$'): string => {
+export const formatCostCurrency = (amount: number | string | null | undefined, symbol: string = '$'): string => {
   return formatCurrency(amount, symbol, 4);
+};
+
+export const formatDecimalNumber = (amount: number | string | null | undefined, minDecimals: number = 2, maxDecimals: number = 2): string => {
+  if (amount == null || amount === '') {
+    return '0.00';
+  }
+  const cleanStr = typeof amount === 'string' ? amount.trim().replace(/,/g, '.') : amount;
+  const num = typeof cleanStr === 'string' ? parseFloat(cleanStr) : cleanStr;
+  if (isNaN(num)) {
+    return '0.00';
+  }
+  return num.toLocaleString('es-MX', {
+    minimumFractionDigits: minDecimals,
+    maximumFractionDigits: maxDecimals,
+  });
 };
 
 export const formatDate = (dateString: string): string => {

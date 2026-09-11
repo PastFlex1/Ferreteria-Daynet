@@ -29,7 +29,8 @@ import {
   Clock, 
   ShieldCheck,
   FileSpreadsheet,
-  Check
+  Check,
+  FileText
 } from 'lucide-react';
 import { AssetsSubTab, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
@@ -109,12 +110,34 @@ export interface AssetTransfer {
 
 export interface AssetHistoryLog {
   id: string;
+  assetId?: string;
   assetCode: string;
   assetName: string;
   date: string;
-  eventType: 'ALTA' | 'DEPRECIACION' | 'MANTENIMIENTO' | 'TRANSFERENCIA' | 'REVALORIZACION' | 'BAJA';
+  eventType: 
+    | 'ALTA' 
+    | 'DEPRECIACION' 
+    | 'MANTENIMIENTO' 
+    | 'TRANSFERENCIA' 
+    | 'MEJORA_CAPITALIZABLE' 
+    | 'REVALORIZACION' 
+    | 'DETERIORO' 
+    | 'BAJA' 
+    | 'BAJA_CHATARRIZACION' 
+    | 'BAJA_VENTA';
   description: string;
   user: string;
+  // Auditoría e impacto financiero en libros
+  previousBookValue?: number;
+  financialImpact?: number;
+  newBookValue?: number;
+  documentRef?: string;
+  accountingEntryRef?: string;
+  // Trazabilidad física y custodia
+  originArea?: string;
+  targetArea?: string;
+  originCustodian?: string;
+  targetCustodian?: string;
 }
 
 export interface AssetArea {
@@ -172,6 +195,13 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
   const [isAreaModalOpen, setIsAreaModalOpen] = useState(false);
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [isLocModalOpen, setIsLocModalOpen] = useState(false);
+  const [isDisposalModalOpen, setIsDisposalModalOpen] = useState(false);
+  const [isRevalModalOpen, setIsRevalModalOpen] = useState(false);
+
+  // Filtros avanzados para Bitácora & Expediente
+  const [historyAssetFilter, setHistoryAssetFilter] = useState('ALL');
+  const [historyEventFilter, setHistoryEventFilter] = useState('ALL');
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
 
   // Form States
   const [newAsset, setNewAsset] = useState<Partial<FixedAssetItem>>({
@@ -205,6 +235,27 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
     newCustodian: '',
     reason: '',
     authorizedBy: ''
+  });
+
+  const [newDisposal, setNewDisposal] = useState({
+    assetId: '',
+    type: 'BAJA_CHATARRIZACION' as 'BAJA_CHATARRIZACION' | 'BAJA_VENTA' | 'DETERIORO',
+    date: new Date().toISOString().split('T')[0],
+    documentRef: '',
+    reason: '',
+    saleAmount: 0,
+    user: 'Auditor Contable'
+  });
+
+  const [newReval, setNewReval] = useState({
+    assetId: '',
+    type: 'MEJORA_CAPITALIZABLE' as 'MEJORA_CAPITALIZABLE' | 'REVALORIZACION' | 'DETERIORO',
+    date: new Date().toISOString().split('T')[0],
+    amount: 0,
+    additionalYears: 0,
+    documentRef: '',
+    description: '',
+    user: 'Dirección Financiera / Peritaje'
   });
 
   const [newArea, setNewArea] = useState({ code: '', name: '', responsiblePerson: '' });
@@ -252,12 +303,22 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
     setHistoryLogs([
       {
         id: `log-${Date.now()}`,
+        assetId: item.id,
         assetCode: item.code,
         assetName: item.name,
         date: new Date().toISOString().split('T')[0],
         eventType: 'ALTA',
-        description: `Ingreso de nuevo activo fijo por valor de ${purchaseVal}.`,
-        user: 'Usuario Sistema'
+        description: `Ingreso y capitalización de nuevo bien de capital por valor original de ${formatCurrency(purchaseVal, settings.currencySymbol)}. Asignado al área ${ar.name}.`,
+        user: 'Usuario Sistema',
+        previousBookValue: 0,
+        financialImpact: purchaseVal,
+        newBookValue: purchaseVal,
+        documentRef: `FAC-COMPRA-${item.code}`,
+        accountingEntryRef: `ASIENTO-ALTA-${item.code}`,
+        originArea: ar.name,
+        targetArea: ar.name,
+        originCustodian: item.custodian,
+        targetCustodian: item.custodian
       },
       ...historyLogs
     ]);
@@ -301,12 +362,17 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
     setHistoryLogs([
       {
         id: `log-${Date.now()}`,
+        assetId: ast.id,
         assetCode: ast.code,
         assetName: ast.name,
         date: newMnt.date,
         eventType: 'MANTENIMIENTO',
-        description: `Mantenimiento ${newMnt.type} programado/realizado con costo ${costNum}.`,
-        user: 'Técnico'
+        description: `Mantenimiento ${newMnt.type} registrado con proveedor ${mnt.provider}. Costo: ${formatCurrency(costNum, settings.currencySymbol)}. Detalle: ${mnt.description}`,
+        user: 'Departamento Técnico',
+        previousBookValue: ast.currentBookValue,
+        financialImpact: -costNum,
+        newBookValue: ast.currentBookValue,
+        documentRef: `ORD-MNT-${mnt.id.slice(-6).toUpperCase()}`
       },
       ...historyLogs
     ]);
@@ -359,12 +425,21 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
     setHistoryLogs([
       {
         id: `log-${Date.now()}`,
+        assetId: ast.id,
         assetCode: ast.code,
         assetName: ast.name,
         date: trf.date,
         eventType: 'TRANSFERENCIA',
-        description: `Transferido de ${ast.areaName} a ${targetAr.name}. Custodio anterior: ${ast.custodian}, nuevo: ${trf.newCustodian}.`,
-        user: 'Administrador'
+        description: `Traslado de custodia y reubicación: de ${ast.areaName} (${ast.locationName}) a ${targetAr.name} (${targetLoc.name}). Motivo: ${trf.reason}.`,
+        user: trf.authorizedBy || 'Administrador',
+        previousBookValue: ast.currentBookValue,
+        financialImpact: 0,
+        newBookValue: ast.currentBookValue,
+        documentRef: `ACTA-TRAS-${trf.id.slice(-6).toUpperCase()}`,
+        originArea: ast.areaName,
+        targetArea: targetAr.name,
+        originCustodian: ast.custodian,
+        targetCustodian: trf.newCustodian
       },
       ...historyLogs
     ]);
@@ -378,6 +453,185 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
       reason: '',
       authorizedBy: 'Gerencia'
     });
+  };
+
+  // HANDLER: Baja / Venta / Chatarrización
+  const handleSaveDisposal = (e: React.FormEvent) => {
+    e.preventDefault();
+    const ast = assets.find(a => a.id === newDisposal.assetId);
+    if (!ast) return;
+
+    const prevBook = ast.currentBookValue;
+    const impact = -prevBook;
+
+    const eventLabel = newDisposal.type === 'BAJA_CHATARRIZACION' 
+      ? 'Baja por Chatarrización / Destrucción' 
+      : newDisposal.type === 'BAJA_VENTA' 
+      ? `Baja por Venta a Terceros (Recuperación: ${formatCurrency(newDisposal.saleAmount, settings.currencySymbol)})`
+      : 'Baja por Deterioro Total / Obsolescencia';
+
+    const updatedAssets = assets.map(a => a.id === ast.id ? {
+      ...a,
+      status: 'BAJA' as const,
+      currentBookValue: 0
+    } : a);
+
+    const log: AssetHistoryLog = {
+      id: `log-disposal-${Date.now()}`,
+      assetId: ast.id,
+      assetCode: ast.code,
+      assetName: ast.name,
+      date: newDisposal.date || new Date().toISOString().split('T')[0],
+      eventType: newDisposal.type,
+      description: `${eventLabel}. Motivo: ${newDisposal.reason}. Valor en libros liquidado a cero.`,
+      user: newDisposal.user || 'Auditor Contable',
+      previousBookValue: prevBook,
+      financialImpact: impact,
+      newBookValue: 0,
+      documentRef: newDisposal.documentRef || `ACTA-BAJA-${ast.code}`,
+      accountingEntryRef: `ASIENTO-BAJA-${ast.code}`
+    };
+
+    setAssets(updatedAssets);
+    setHistoryLogs([log, ...historyLogs]);
+    setIsDisposalModalOpen(false);
+    setNewDisposal({
+      assetId: '',
+      type: 'BAJA_CHATARRIZACION',
+      date: new Date().toISOString().split('T')[0],
+      documentRef: '',
+      reason: '',
+      saleAmount: 0,
+      user: 'Auditor Contable'
+    });
+  };
+
+  // HANDLER: Revalorización / Mejora Capitalizable / Deterioro
+  const handleSaveReval = (e: React.FormEvent) => {
+    e.preventDefault();
+    const ast = assets.find(a => a.id === newReval.assetId);
+    if (!ast) return;
+
+    const amount = parseFloat(newReval.amount.toString()) || 0;
+    const addYears = parseInt(newReval.additionalYears.toString()) || 0;
+    const isDeterioro = newReval.type === 'DETERIORO';
+    const financialDelta = isDeterioro ? -Math.abs(amount) : Math.abs(amount);
+
+    const prevBook = ast.currentBookValue;
+    const newBook = Math.max(0, prevBook + financialDelta);
+    const newPurchaseVal = Math.max(0, ast.purchaseValue + financialDelta);
+    const newUsefulLife = Math.max(1, ast.usefulLifeYears + addYears);
+
+    const updatedAssets = assets.map(a => a.id === ast.id ? {
+      ...a,
+      purchaseValue: newPurchaseVal,
+      currentBookValue: newBook,
+      usefulLifeYears: newUsefulLife
+    } : a);
+
+    const logTypeLabel = newReval.type === 'MEJORA_CAPITALIZABLE' 
+      ? 'Mejora Capitalizable' 
+      : newReval.type === 'REVALORIZACION' 
+      ? 'Revalorización Técnica por Peritaje' 
+      : 'Ajuste por Deterioro de Valor';
+
+    const log: AssetHistoryLog = {
+      id: `log-reval-${Date.now()}`,
+      assetId: ast.id,
+      assetCode: ast.code,
+      assetName: ast.name,
+      date: newReval.date || new Date().toISOString().split('T')[0],
+      eventType: newReval.type,
+      description: `${logTypeLabel}: ${newReval.description}. Variación monetaria: ${formatCurrency(financialDelta, settings.currencySymbol)}${addYears > 0 ? ` (+${addYears} años de vida útil extendida)` : ''}.`,
+      user: newReval.user || 'Dirección Financiera',
+      previousBookValue: prevBook,
+      financialImpact: financialDelta,
+      newBookValue: newBook,
+      documentRef: newReval.documentRef || `INF-TECNICO-${ast.code}`,
+      accountingEntryRef: `ASIENTO-${newReval.type}-${ast.code}`
+    };
+
+    setAssets(updatedAssets);
+    setHistoryLogs([log, ...historyLogs]);
+    setIsRevalModalOpen(false);
+    setNewReval({
+      assetId: '',
+      type: 'MEJORA_CAPITALIZABLE',
+      date: new Date().toISOString().split('T')[0],
+      amount: 0,
+      additionalYears: 0,
+      documentRef: '',
+      description: '',
+      user: 'Dirección Financiera / Peritaje'
+    });
+  };
+
+  // HANDLER: Corrida Mensual de Depreciación
+  const handleRunMonthlyDepreciation = () => {
+    const activeAssets = assets.filter(a => a.status === 'OPERATIVO' && a.currentBookValue > (a.residualValue || 0));
+    if (activeAssets.length === 0) {
+      alert('No hay activos fijos operativos con saldo depreciable para este período.');
+      return;
+    }
+
+    const currentDate = new Date().toISOString().split('T')[0];
+    const newLogs: AssetHistoryLog[] = [];
+    const updatedAssets = assets.map(ast => {
+      if (ast.status !== 'OPERATIVO' || ast.currentBookValue <= (ast.residualValue || 0)) {
+        return ast;
+      }
+      const depreciableBase = ast.purchaseValue - (ast.residualValue || 0);
+      const monthlyDep = Math.min(
+        depreciableBase / (ast.usefulLifeYears * 12),
+        ast.currentBookValue - (ast.residualValue || 0)
+      );
+      if (monthlyDep <= 0.0001) return ast;
+
+      const prevBook = ast.currentBookValue;
+      const newBook = Math.max(ast.residualValue || 0, prevBook - monthlyDep);
+      const newAccDep = ast.accumulatedDepreciation + monthlyDep;
+
+      newLogs.push({
+        id: `log-dep-${ast.id}-${Date.now()}`,
+        assetId: ast.id,
+        assetCode: ast.code,
+        assetName: ast.name,
+        date: currentDate,
+        eventType: 'DEPRECIACION',
+        description: `Corrida mensual de depreciación lineal: cuota de ${formatCurrency(monthlyDep, settings.currencySymbol)} aplicada al ejercicio contable.`,
+        user: 'Proceso Automático / Contabilidad',
+        previousBookValue: prevBook,
+        financialImpact: -monthlyDep,
+        newBookValue: newBook,
+        documentRef: `DEP-MENSUAL-${new Date().toISOString().slice(0, 7)}`,
+        accountingEntryRef: `ASIENTO-DEP-${ast.code}`
+      });
+
+      return {
+        ...ast,
+        accumulatedDepreciation: newAccDep,
+        currentBookValue: newBook
+      };
+    });
+
+    if (newLogs.length === 0) {
+      alert('Todos los activos ya se encuentran totalmente depreciados a su valor residual.');
+      return;
+    }
+
+    setAssets(updatedAssets);
+    setHistoryLogs([...newLogs, ...historyLogs]);
+    alert(`Corrida mensual de depreciación ejecutada con éxito. Se procesaron ${newLogs.length} activos fijos y se generó su registro en la bitácora inmutable.`);
+  };
+
+  const handleOpenDisposalForAsset = (assetId: string) => {
+    setNewDisposal(prev => ({ ...prev, assetId }));
+    setIsDisposalModalOpen(true);
+  };
+
+  const handleOpenRevalForAsset = (assetId: string) => {
+    setNewReval(prev => ({ ...prev, assetId }));
+    setIsRevalModalOpen(true);
   };
 
   const handleSaveArea = (e: React.FormEvent) => {
@@ -514,6 +768,7 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
                   <th className="py-3 px-4 text-right">Dep. Acumulada</th>
                   <th className="py-3 px-4 text-right">Valor Libros</th>
                   <th className="py-3 px-4 text-center">Estado</th>
+                  <th className="py-3 px-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
@@ -555,6 +810,26 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
                           {ast.status}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-center font-sans">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenRevalForAsset(ast.id)}
+                            className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg transition"
+                            title="Registrar Mejora Capitalizable o Revalorización"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                          {ast.status !== 'BAJA' && (
+                            <button
+                              onClick={() => handleOpenDisposalForAsset(ast.id)}
+                              className="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition"
+                              title="Dar de Baja / Chatarrizar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                 ))}
               </tbody>
@@ -578,6 +853,15 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
                 Método de depreciación en línea recta NIIF, vida útil estimada y generación automática de asientos contables.
               </p>
             </div>
+
+            <button
+              onClick={handleRunMonthlyDepreciation}
+              className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+              title="Aplica la corrida mensual y asienta los movimientos en la bitácora inmutable"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Ejecutar Corrida del Mes</span>
+            </button>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -768,44 +1052,379 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 5: HISTORICOS_ACTIVOS
+          SUBTAB 5: HISTORICOS_ACTIVOS (Expediente Inmutable y Bitácora de Eventos)
          --------------------------------------------------------------------- */}
-      {subTab === 'HISTORICOS_ACTIVOS' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <History className="w-5 h-5 text-cyan-500" />
-                <span>Histórico & Bitácora de Eventos de Activos Fijos</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Auditoría completa de bajas, revalorizaciones, transferencias y ciclo de vida de activos.
-              </p>
-            </div>
-          </div>
+      {subTab === 'HISTORICOS_ACTIVOS' && (() => {
+        // Filtrado dinámico
+        const filteredLogs = historyLogs.filter((log) => {
+          const matchAsset = historyAssetFilter === 'ALL' || log.assetId === historyAssetFilter || log.assetCode === historyAssetFilter;
+          const matchType = historyEventFilter === 'ALL' || log.eventType === historyEventFilter;
+          const matchSearch = !historySearchTerm || 
+            log.assetCode.toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+            log.assetName.toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+            log.description.toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+            log.user.toLowerCase().includes(historySearchTerm.toLowerCase()) ||
+            (log.documentRef && log.documentRef.toLowerCase().includes(historySearchTerm.toLowerCase()));
+          return matchAsset && matchType && matchSearch;
+        });
 
-          <div className="space-y-3 font-mono text-xs">
-            {historyLogs.map((log) => (
-              <div key={log.id} className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-black text-indigo-600">{log.assetCode}</span>
-                    <span className="font-sans font-bold text-slate-900">{log.assetName}</span>
-                    <span className="px-2 py-0.5 bg-slate-900 text-white font-black text-[10px] rounded uppercase">
-                      {log.eventType}
-                    </span>
-                  </div>
-                  <p className="text-slate-700 font-sans text-xs">{log.description}</p>
-                </div>
-                <div className="text-right shrink-0 text-[10px]">
-                  <div className="font-bold text-slate-500">{log.date}</div>
-                  <div className="text-slate-400">Usuario: {log.user}</div>
+        // Activo seleccionado para ficha individual
+        const selectedAssetItem = historyAssetFilter !== 'ALL' 
+          ? assets.find(a => a.id === historyAssetFilter || a.code === historyAssetFilter)
+          : null;
+
+        // Métricas de auditoría
+        const totalNetVariation = historyLogs.reduce((acc, l) => acc + (l.financialImpact || 0), 0);
+        const totalDisposals = historyLogs.filter(l => ['BAJA', 'BAJA_CHATARRIZACION', 'BAJA_VENTA'].includes(l.eventType)).length;
+        const totalImprovements = historyLogs.filter(l => ['MEJORA_CAPITALIZABLE', 'REVALORIZACION'].includes(l.eventType)).length;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            {/* Header con Acciones */}
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                  <History className="w-5 h-5 text-cyan-600" />
+                  <span>Expediente Inmutable & Bitácora de Eventos de Activos Fijos</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Auditoría completa del ciclo de vida, trazabilidad física y reflejo del valor neto en libros en tiempo real.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setIsRevalModalOpen(true)}
+                  className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4 text-indigo-600" />
+                  <span>Mejora / Revalorización</span>
+                </button>
+
+                <button
+                  onClick={() => setIsDisposalModalOpen(true)}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Dar de Baja / Chatarrizar</span>
+                </button>
+
+                <button
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer"
+                  title="Imprimir Hoja de Vida y Expediente de Auditoría"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir Expediente</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Banner de Indicadores Clave de Auditoría */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Eventos Auditados</div>
+                <div className="text-xl font-black text-slate-900 mt-1 flex items-baseline gap-1">
+                  <span>{historyLogs.length}</span>
+                  <span className="text-xs font-bold text-slate-400">sucesos</span>
                 </div>
               </div>
-            ))}
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Impacto Financiero Histórico</div>
+                <div className={`text-xl font-black mt-1 ${totalNetVariation >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {formatCurrency(totalNetVariation, settings.currencySymbol)}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Bajas & Chatarrizaciones</div>
+                <div className="text-xl font-black text-rose-600 mt-1 flex items-baseline gap-1">
+                  <span>{totalDisposals}</span>
+                  <span className="text-xs font-bold text-slate-400">activos</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Mejoras & Revalorizaciones</div>
+                <div className="text-xl font-black text-indigo-600 mt-1 flex items-baseline gap-1">
+                  <span>{totalImprovements}</span>
+                  <span className="text-xs font-bold text-slate-400">ajustes</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Barra de Filtros: Filtro por Activo Individual (Expediente Único), Tipo de Evento y Búsqueda */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 p-3 rounded-2xl">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1 flex items-center gap-1">
+                  <Filter className="w-3 h-3 text-cyan-600" />
+                  <span>Expediente de Activo Fijo</span>
+                </label>
+                <Select
+                  value={historyAssetFilter}
+                  onChange={(e) => setHistoryAssetFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                >
+                  <option value="ALL">📋 Todos los Activos (Bitácora General)</option>
+                  {assets.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} - {a.name} ({a.areaName})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1 flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-cyan-600" />
+                  <span>Tipo de Suceso</span>
+                </label>
+                <Select
+                  value={historyEventFilter}
+                  onChange={(e) => setHistoryEventFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900"
+                >
+                  <option value="ALL">🔍 Todos los Tipos de Eventos</option>
+                  <option value="ALTA">🟢 ALTA / CAPITALIZACIÓN</option>
+                  <option value="DEPRECIACION">📉 DEPRECIACIÓN MENSUAL</option>
+                  <option value="MANTENIMIENTO">🔧 MANTENIMIENTO TÉCNICO</option>
+                  <option value="TRANSFERENCIA">🔄 TRASLADO DE CUSTODIA</option>
+                  <option value="MEJORA_CAPITALIZABLE">⭐ MEJORA CAPITALIZABLE</option>
+                  <option value="REVALORIZACION">📈 REVALORIZACIÓN TÉCNICA</option>
+                  <option value="DETERIORO">⚠️ DETERIORO DE VALOR</option>
+                  <option value="BAJA_CHATARRIZACION">🗑️ BAJA / CHATARRIZACIÓN</option>
+                  <option value="BAJA_VENTA">💲 BAJA POR VENTA</option>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1 flex items-center gap-1">
+                  <Search className="w-3 h-3 text-cyan-600" />
+                  <span>Buscar en la Bitácora</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Buscar por código, descripción, usuario o documento..."
+                  value={historySearchTerm}
+                  onChange={(e) => setHistorySearchTerm(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium placeholder-slate-400 outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Ficha Resumen del Activo (Si se filtra por un bien específico) */}
+            {selectedAssetItem && (
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-slate-800 shadow-md">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center font-mono font-black text-indigo-300">
+                      ACT
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-amber-400 text-sm">{selectedAssetItem.code}</span>
+                        <h3 className="font-bold text-sm text-white">{selectedAssetItem.name}</h3>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                          selectedAssetItem.status === 'OPERATIVO'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : selectedAssetItem.status === 'BAJA'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}>
+                          {selectedAssetItem.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Serie: <span className="font-mono text-slate-300">{selectedAssetItem.serialNumber}</span> | Categoría: <span className="text-slate-300">{selectedAssetItem.classificationName}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right font-mono">
+                    <div className="text-[10px] uppercase text-slate-400">Valor Neto en Libros</div>
+                    <div className="text-xl font-black text-emerald-400">
+                      {formatCurrency(selectedAssetItem.currentBookValue, settings.currencySymbol)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 text-xs font-mono">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase">Custodio Responsable</span>
+                    <span className="font-sans font-bold text-slate-200">{selectedAssetItem.custodian}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase">Área & Ubicación</span>
+                    <span className="font-sans font-bold text-slate-200">{selectedAssetItem.areaName} ({selectedAssetItem.locationName})</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase">Valor Compra Original</span>
+                    <span className="font-bold text-slate-200">{formatCurrency(selectedAssetItem.purchaseValue, settings.currencySymbol)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase">Depreciación Acumulada</span>
+                    <span className="font-bold text-rose-400">-{formatCurrency(selectedAssetItem.accumulatedDepreciation, settings.currencySymbol)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Línea de Tiempo / Timeline Cronológico e Inmutable */}
+            <div className="space-y-4">
+              {filteredLogs.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                  <History className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-600">No se encontraron sucesos con los filtros seleccionados.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">La bitácora se alimentará conforme ocurran altas, depreciaciones, traslados o bajas.</p>
+                </div>
+              ) : (
+                <div className="relative pl-6 space-y-6 before:absolute before:left-3 before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-200">
+                  {filteredLogs.map((log) => {
+                    // Configuración visual por tipo de evento
+                    const isAlta = log.eventType === 'ALTA';
+                    const isDep = log.eventType === 'DEPRECIACION';
+                    const isMnt = log.eventType === 'MANTENIMIENTO';
+                    const isTrf = log.eventType === 'TRANSFERENCIA';
+                    const isReval = ['MEJORA_CAPITALIZABLE', 'REVALORIZACION'].includes(log.eventType);
+                    const isBaja = ['BAJA', 'BAJA_CHATARRIZACION', 'BAJA_VENTA', 'DETERIORO'].includes(log.eventType);
+
+                    const badgeColor = isAlta
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                      : isDep
+                      ? 'bg-purple-100 text-purple-800 border-purple-300'
+                      : isMnt
+                      ? 'bg-amber-100 text-amber-800 border-amber-300'
+                      : isTrf
+                      ? 'bg-teal-100 text-teal-800 border-teal-300'
+                      : isReval
+                      ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                      : 'bg-rose-100 text-rose-800 border-rose-300';
+
+                    const dotColor = isAlta
+                      ? 'bg-emerald-500 ring-emerald-200'
+                      : isDep
+                      ? 'bg-purple-500 ring-purple-200'
+                      : isMnt
+                      ? 'bg-amber-500 ring-amber-200'
+                      : isTrf
+                      ? 'bg-teal-500 ring-teal-200'
+                      : isReval
+                      ? 'bg-indigo-500 ring-indigo-200'
+                      : 'bg-rose-500 ring-rose-200';
+
+                    return (
+                      <div key={log.id} className="relative group">
+                        {/* Dot del timeline */}
+                        <div className={`absolute -left-6 top-3 w-3 h-3 rounded-full ring-4 ${dotColor} bg-white transition`} />
+
+                        {/* Tarjeta del Suceso */}
+                        <div className="bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-2xl p-4 transition space-y-3 shadow-xs">
+                          {/* Encabezado del Suceso */}
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-black text-indigo-600 text-xs px-2 py-0.5 bg-indigo-50 rounded-md border border-indigo-200">
+                                {log.assetCode}
+                              </span>
+                              <span className="font-sans font-black text-slate-900 text-xs">
+                                {log.assetName}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${badgeColor}`}>
+                                {log.eventType.replace('_', ' ')}
+                              </span>
+                            </div>
+
+                            <div className="text-right font-mono text-[11px] text-slate-500 flex items-center gap-2">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="font-bold text-slate-700">{log.date}</span>
+                            </div>
+                          </div>
+
+                          {/* Descripción detallada */}
+                          <p className="text-xs text-slate-800 font-sans leading-relaxed">
+                            {log.description}
+                          </p>
+
+                          {/* Trazabilidad de custodia si fue traslado */}
+                          {(log.originArea || log.targetArea || log.originCustodian || log.targetCustodian) && (
+                            <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-xs grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
+                              <div>
+                                <span className="text-[10px] font-bold text-rose-700 uppercase block">Origen</span>
+                                <div className="font-sans text-slate-700 font-bold">{log.originArea}</div>
+                                <div className="text-[10px] text-slate-400 font-sans">Custodio: {log.originCustodian || 'N/A'}</div>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-emerald-700 uppercase block">Destino</span>
+                                <div className="font-sans text-slate-700 font-bold">{log.targetArea}</div>
+                                <div className="text-[10px] text-slate-500 font-sans font-bold">Custodio: {log.targetCustodian || 'N/A'}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tarjeta de Impacto Contable y Financiero en Libros */}
+                          {log.financialImpact !== undefined && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+                              <div>
+                                <div className="text-[10px] text-slate-400 uppercase font-bold">Valor en Libros Antes</div>
+                                <div className="text-slate-700 font-bold text-sm mt-0.5">
+                                  {formatCurrency(log.previousBookValue || 0, settings.currencySymbol)}
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="text-[10px] text-slate-400 uppercase font-bold">Impacto Financiero</div>
+                                <div className={`font-black text-sm mt-0.5 ${
+                                  (log.financialImpact || 0) > 0 
+                                    ? 'text-emerald-600' 
+                                    : (log.financialImpact || 0) < 0 
+                                    ? 'text-rose-600' 
+                                    : 'text-slate-600'
+                                }`}>
+                                  {(log.financialImpact || 0) > 0 ? '+' : ''}
+                                  {formatCurrency(log.financialImpact || 0, settings.currencySymbol)}
+                                </div>
+                              </div>
+
+                              <div>
+                                <div className="text-[10px] text-indigo-600 uppercase font-black">Nuevo Valor en Libros</div>
+                                <div className="text-emerald-600 font-black text-sm mt-0.5">
+                                  {formatCurrency(log.newBookValue || 0, settings.currencySymbol)}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Footer de Auditoría Legal y Usuario */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] font-mono text-slate-500 border-t border-slate-200/60">
+                            <div className="flex items-center gap-3">
+                              {log.documentRef && (
+                                <span className="flex items-center gap-1 text-slate-600 font-medium">
+                                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>Doc: <strong className="text-slate-800">{log.documentRef}</strong></span>
+                                </span>
+                              )}
+                              {log.accountingEntryRef && (
+                                <span className="hidden sm:inline-block text-slate-400">
+                                  Ref Contable: <strong className="text-slate-600">{log.accountingEntryRef}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1 text-slate-600">
+                              <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Registrado por: <strong className="text-slate-800">{log.user}</strong></span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 6: AREAS_ACTIVOS
@@ -1429,6 +2048,294 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
                 </button>
                 <button type="submit" className="px-3 py-1.5 bg-orange-500 text-white rounded-xl font-black cursor-pointer">
                   Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BAJA / CHATARRIZACION / VENTA */}
+      {isDisposalModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fadeIn">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-black text-slate-950 text-sm flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Expediente de Baja / Chatarrización de Activo Fijo</span>
+              </h3>
+              <button onClick={() => setIsDisposalModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDisposal} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Seleccionar Bien de Capital *</label>
+                <Select
+                  value={newDisposal.assetId}
+                  onChange={(e) => setNewDisposal({ ...newDisposal, assetId: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-900"
+                  required
+                >
+                  <option value="">-- Seleccionar Activo Fijo --</option>
+                  {assets
+                    .filter(a => a.status !== 'BAJA')
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code} - {a.name} (Libros: {formatCurrency(a.currentBookValue, settings.currencySymbol)})
+                      </option>
+                    ))}
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Tipo de Disposición *</label>
+                  <Select
+                    value={newDisposal.type}
+                    onChange={(e) => setNewDisposal({ ...newDisposal, type: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-900"
+                  >
+                    <option value="BAJA_CHATARRIZACION">Chatarrización / Destrucción</option>
+                    <option value="BAJA_VENTA">Enajenación / Venta a Terceros</option>
+                    <option value="DETERIORO">Obsolescencia / Daño Irreparable</option>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Fecha de la Baja</label>
+                  <input
+                    type="date"
+                    required
+                    value={newDisposal.date}
+                    onChange={(e) => setNewDisposal({ ...newDisposal, date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Nº Acta de Baja / Soporte Legal *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="ej: ACTA-BAJA-2026-004"
+                    value={newDisposal.documentRef}
+                    onChange={(e) => setNewDisposal({ ...newDisposal, documentRef: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-slate-900"
+                  />
+                </div>
+
+                {newDisposal.type === 'BAJA_VENTA' ? (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Precio Venta / Recuperación ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      placeholder="0.00"
+                      value={newDisposal.saleAmount || ''}
+                      onChange={(e) => setNewDisposal({ ...newDisposal, saleAmount: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-slate-900"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Auditor / Responsable</label>
+                    <input
+                      type="text"
+                      placeholder="ej: Lic. Roberto Paredes"
+                      value={newDisposal.user}
+                      onChange={(e) => setNewDisposal({ ...newDisposal, user: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Motivo Justificativo del Descarte *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Detallar causa técnica o comercial de la baja, estado del equipo y destino de los residuos..."
+                  value={newDisposal.reason}
+                  onChange={(e) => setNewDisposal({ ...newDisposal, reason: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 resize-none"
+                />
+              </div>
+
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[11px] text-rose-800 space-y-1">
+                <div className="font-black flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Impacto Contable Inmutable:</span>
+                </div>
+                <p>
+                  El valor en libros de este activo se liquidará a <strong>$0.00</strong> y su estado pasará a <strong>BAJA</strong>. No podrá ser depreciado en períodos futuros.
+                </p>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDisposalModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-gradient-to-r from-rose-600 to-red-600 text-white font-black rounded-xl shadow-md cursor-pointer"
+                >
+                  Confirmar Asiento de Baja
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REVALORIZACION / MEJORA CAPITALIZABLE */}
+      {isRevalModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fadeIn">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-black text-slate-950 text-sm flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-indigo-600" />
+                <span>Mejora Capitalizable / Revalorización Técnica</span>
+              </h3>
+              <button onClick={() => setIsRevalModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReval} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Seleccionar Bien de Capital *</label>
+                <Select
+                  value={newReval.assetId}
+                  onChange={(e) => setNewReval({ ...newReval, assetId: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-900"
+                  required
+                >
+                  <option value="">-- Seleccionar Activo Fijo --</option>
+                  {assets
+                    .filter(a => a.status !== 'BAJA')
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code} - {a.name} (Libros: {formatCurrency(a.currentBookValue, settings.currencySymbol)})
+                      </option>
+                    ))}
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Naturaleza del Ajuste *</label>
+                  <Select
+                    value={newReval.type}
+                    onChange={(e) => setNewReval({ ...newReval, type: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold text-slate-900"
+                  >
+                    <option value="MEJORA_CAPITALIZABLE">Mejora Capitalizable (Aumenta Valor/Vida)</option>
+                    <option value="REVALORIZACION">Revalorización por Peritaje Técnico</option>
+                    <option value="DETERIORO">Ajuste por Deterioro de Valor (NIC 36)</option>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Fecha de Entrada en Vigencia</label>
+                  <input
+                    type="date"
+                    required
+                    value={newReval.date}
+                    onChange={(e) => setNewReval({ ...newReval, date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 font-mono">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    {newReval.type === 'DETERIORO' ? 'Monto a Reducir ($) *' : 'Monto a Incrementar ($) *'}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={newReval.amount || ''}
+                    onChange={(e) => setNewReval({ ...newReval, amount: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Años de Vida Adicionales</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newReval.additionalYears || ''}
+                    onChange={(e) => setNewReval({ ...newReval, additionalYears: parseInt(e.target.value) || 0 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Nº Informe Técnico / Peritaje *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="ej: INF-PERITAJE-2026-08"
+                    value={newReval.documentRef}
+                    onChange={(e) => setNewReval({ ...newReval, documentRef: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Perito / Funcionario Responsable</label>
+                  <input
+                    type="text"
+                    placeholder="ej: Ing. Mario Santos (Perito)"
+                    value={newReval.user}
+                    onChange={(e) => setNewReval({ ...newReval, user: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Detalle Técnico de la Mejora o Ajuste *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Detallar la repotenciación efectuada, componentes reemplazados o criterios de valuación del perito..."
+                  value={newReval.description}
+                  onChange={(e) => setNewReval({ ...newReval, description: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsRevalModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black rounded-xl shadow-md cursor-pointer"
+                >
+                  Asentar Mejora / Revalorización
                 </button>
               </div>
             </form>

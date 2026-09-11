@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { 
   BookOpen, 
@@ -47,7 +47,11 @@ import {
   Square,
   ExternalLink,
   ArrowRight,
-  RotateCcw
+  RotateCcw,
+  Upload,
+  Sparkles,
+  CheckCheck,
+  Info
 } from 'lucide-react';
 import { useModal } from '../../context/ModalContext';
 import { generateAtsXml } from '../../services/sriAtsService';
@@ -151,6 +155,30 @@ export interface JournalEntry {
   status: 'ASENTADO' | 'BORRADOR';
 }
 
+export interface AccountingVoucher {
+  id: string;
+  voucherNumber: string; // ej: CI-2026-0001 o CE-2026-0001
+  type: 'INGRESO' | 'EGRESO';
+  date: string;
+  beneficiaryOrPayer: string;
+  identification: string;
+  paymentMethod: 'EFECTIVO' | 'TRANSFERENCIA' | 'CHEQUE' | 'TARJETA';
+  bankAccountId?: string;
+  bankName?: string;
+  referenceNumber?: string;
+  concept: string;
+  amount: number;
+  relatedInvoiceNumber?: string;
+  items: JournalEntryItem[];
+  totalDebit: number;
+  totalCredit: number;
+  status: 'ASENTADO' | 'ANULADO';
+  journalEntryId?: string;
+  user: string;
+  reviewedBy?: string;
+  approvedBy?: string;
+}
+
 export interface AccountPlanItem {
   code: string;
   name: string;
@@ -167,6 +195,38 @@ export interface FiscalPeriod {
   status: 'ABIERTO' | 'CERRADO';
   closedDate?: string;
   closingEntriesCount: number;
+}
+
+export interface BankStatementLine {
+  id: string;
+  date: string;
+  reference: string;
+  description: string;
+  type: 'CREDITO' | 'DEBITO'; // CREDITO = Depósito / Cobro / Acreditación en banco; DEBITO = Retiro / Transferencia enviada / Comisión
+  amount: number;
+  matchedInternalId?: string; // ID del comprobante interno o cheque asociado
+  isReconciled: boolean;
+  isAdjustmentCreated?: boolean;
+}
+
+export interface BankReconciliationRecord {
+  id: string;
+  bankAccountId: string;
+  bankName: string;
+  accountNumber: string;
+  periodMonth: string; // ej: '2026-09'
+  closingDate: string;
+  statementClosingBalance: number;
+  bookBalance: number;
+  reconciledBankBalance: number;
+  reconciledBookBalance: number;
+  difference: number;
+  statementLines: BankStatementLine[];
+  reconciledInternalIds: string[];
+  status: 'BORRADOR' | 'CONCILIADO';
+  notes?: string;
+  reconciledAt?: string;
+  reconciledBy?: string;
 }
 
 export const AccountingManager: React.FC<AccountingManagerProps> = ({
@@ -209,7 +269,185 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   const [invoices] = useFirestoreSync<any[]>('ferreteria_invoices', []);
   const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
   const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
-  const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
+  const [bankAccounts, setBankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
+  const [customers] = useFirestoreSync<any[]>('ferreteria_customers', []);
+  const [suppliers] = useFirestoreSync<any[]>('ferreteria_suppliers', []);
+
+  // 8. Comprobantes Contables de Ingreso y Egreso
+  const [accountingVouchers, setAccountingVouchers] = useFirestoreSync<AccountingVoucher[]>('ferreteria_accounting_vouchers', []);
+
+  // 9. Conciliación Bancaria Mensual
+  const [bankReconciliations, setBankReconciliations] = useFirestoreSync<BankReconciliationRecord[]>('ferreteria_bank_reconciliations', []);
+
+  // UI States para Comprobantes
+  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+  const [voucherModalType, setVoucherModalType] = useState<'INGRESO' | 'EGRESO'>('INGRESO');
+  const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<AccountingVoucher | null>(null);
+  const [voucherSearchTerm, setVoucherSearchTerm] = useState('');
+  const [voucherPaymentFilter, setVoucherPaymentFilter] = useState('ALL');
+
+  const [newVoucher, setNewVoucher] = useState<{
+    date: string;
+    beneficiaryOrPayer: string;
+    identification: string;
+    paymentMethod: 'EFECTIVO' | 'TRANSFERENCIA' | 'CHEQUE' | 'TARJETA';
+    bankAccountId: string;
+    referenceNumber: string;
+    concept: string;
+    amount: number;
+    relatedInvoiceNumber: string;
+    counterAccountCode: string;
+    items: JournalEntryItem[];
+  }>({
+    date: new Date().toISOString().split('T')[0],
+    beneficiaryOrPayer: '',
+    identification: '',
+    paymentMethod: 'TRANSFERENCIA',
+    bankAccountId: '',
+    referenceNumber: '',
+    concept: '',
+    amount: 0,
+    relatedInvoiceNumber: '',
+    counterAccountCode: '',
+    items: []
+  });
+
+  const handleOpenNewVoucher = (type: 'INGRESO' | 'EGRESO') => {
+    setVoucherModalType(type);
+    const defaultBank = bankAccounts.length > 0 ? bankAccounts[0].id : '';
+    const defaultCounter = type === 'INGRESO' ? '1.1.02.01.01' : '2.1.01.01.01';
+    setNewVoucher({
+      date: new Date().toISOString().split('T')[0],
+      beneficiaryOrPayer: '',
+      identification: '',
+      paymentMethod: 'TRANSFERENCIA',
+      bankAccountId: defaultBank,
+      referenceNumber: '',
+      concept: type === 'INGRESO' ? 'Recaudación y cobro de factura' : 'Pago de obligación a proveedor',
+      amount: 0,
+      relatedInvoiceNumber: '',
+      counterAccountCode: defaultCounter,
+      items: []
+    });
+    setIsVoucherModalOpen(true);
+  };
+
+  const handleSaveVoucher = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVoucher.beneficiaryOrPayer.trim()) {
+      showAlert('Atención', 'Debe ingresar el nombre del beneficiario o pagador.');
+      return;
+    }
+    const voucherAmount = Number(newVoucher.amount) || 0;
+    if (voucherAmount <= 0) {
+      showAlert('Atención', 'El monto del comprobante debe ser mayor a 0.');
+      return;
+    }
+
+    // Resolver cuentas para la partida doble
+    const selectedBank = bankAccounts.find(b => b.id === newVoucher.bankAccountId);
+    const treasuryAccountCode = newVoucher.paymentMethod === 'EFECTIVO' 
+      ? '1.1.01.01' 
+      : '1.1.01.02.01';
+    
+    const treasuryAccountName = newVoucher.paymentMethod === 'EFECTIVO'
+      ? 'Caja General'
+      : (selectedBank ? `${selectedBank.bankName} - Cta. ${selectedBank.accountNumber}` : 'Bancos Locales Moneda Nacional');
+
+    const counterAccount = accountPlan.find(a => a.code === newVoucher.counterAccountCode) || {
+      code: newVoucher.counterAccountCode || (voucherModalType === 'INGRESO' ? '1.1.02.01.01' : '2.1.01.01.01'),
+      name: voucherModalType === 'INGRESO' ? 'Cuentas por Cobrar Clientes Locales' : 'Cuentas por Pagar Proveedores Locales'
+    };
+
+    // Construcción de la Partida Doble estricta
+    let finalItems: JournalEntryItem[] = [];
+    if (newVoucher.items && newVoucher.items.length > 0) {
+      finalItems = newVoucher.items;
+    } else {
+      if (voucherModalType === 'INGRESO') {
+        // Ingreso: DEBE Caja/Banco, HABER Contrapartida (Clientes)
+        finalItems = [
+          { accountCode: treasuryAccountCode, accountName: treasuryAccountName, debit: voucherAmount, credit: 0 },
+          { accountCode: counterAccount.code, accountName: counterAccount.name, debit: 0, credit: voucherAmount }
+        ];
+      } else {
+        // Egreso: DEBE Contrapartida (Proveedores/Gastos), HABER Caja/Banco
+        finalItems = [
+          { accountCode: counterAccount.code, accountName: counterAccount.name, debit: voucherAmount, credit: 0 },
+          { accountCode: treasuryAccountCode, accountName: treasuryAccountName, debit: 0, credit: voucherAmount }
+        ];
+      }
+    }
+
+    const totalDebit = finalItems.reduce((acc, it) => acc + (it.debit || 0), 0);
+    const totalCredit = finalItems.reduce((acc, it) => acc + (it.credit || 0), 0);
+
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      showAlert('Error de Partida Doble', `El comprobante no está cuadrado. Total Debe ($${totalDebit.toFixed(2)}) !== Total Haber ($${totalCredit.toFixed(2)}).`);
+      return;
+    }
+
+    // Generar correlativo foliado oficial
+    const currentCount = accountingVouchers.filter(v => v.type === voucherModalType).length + 1;
+    const prefix = voucherModalType === 'INGRESO' ? 'CI' : 'CE';
+    const year = new Date(newVoucher.date).getFullYear() || 2026;
+    const voucherNumber = `${prefix}-${year}-${currentCount.toString().padStart(4, '0')}`;
+    const voucherId = `vouch-${Date.now()}`;
+    const journalId = `je-vouch-${Date.now()}`;
+
+    // 1. Asiento Contable en Libro Diario
+    const newEntry: JournalEntry = {
+      id: journalId,
+      entryNumber: voucherNumber,
+      date: newVoucher.date,
+      concept: `[${voucherNumber}] ${newVoucher.concept} - ${newVoucher.beneficiaryOrPayer}`,
+      type: voucherModalType,
+      items: finalItems,
+      totalDebit,
+      totalCredit,
+      status: 'ASENTADO'
+    };
+
+    // 2. Comprobante Contable Foliado
+    const voucherDoc: AccountingVoucher = {
+      id: voucherId,
+      voucherNumber,
+      type: voucherModalType,
+      date: newVoucher.date,
+      beneficiaryOrPayer: newVoucher.beneficiaryOrPayer.trim(),
+      identification: newVoucher.identification.trim(),
+      paymentMethod: newVoucher.paymentMethod,
+      bankAccountId: newVoucher.bankAccountId || undefined,
+      bankName: selectedBank ? selectedBank.bankName : undefined,
+      referenceNumber: newVoucher.referenceNumber.trim() || undefined,
+      concept: newVoucher.concept.trim(),
+      amount: voucherAmount,
+      relatedInvoiceNumber: newVoucher.relatedInvoiceNumber.trim() || undefined,
+      items: finalItems,
+      totalDebit,
+      totalCredit,
+      status: 'ASENTADO',
+      journalEntryId: journalId,
+      user: 'Usuario Sistema',
+      reviewedBy: 'Contabilidad General',
+      approvedBy: 'Gerencia Financiera'
+    };
+
+    // 3. Afectación de Tesorería (Saldo Bancario si aplica)
+    if (newVoucher.paymentMethod !== 'EFECTIVO' && newVoucher.bankAccountId && selectedBank) {
+      const balanceDelta = voucherModalType === 'INGRESO' ? voucherAmount : -voucherAmount;
+      setBankAccounts(bankAccounts.map(b => b.id === selectedBank.id ? {
+        ...b,
+        currentBalance: Number((b.currentBalance || 0) + balanceDelta)
+      } : b));
+    }
+
+    setJournalEntries([newEntry, ...journalEntries]);
+    setAccountingVouchers([voucherDoc, ...accountingVouchers]);
+    setIsVoucherModalOpen(false);
+    showToast(`${voucherModalType === 'INGRESO' ? 'Comprobante de Ingreso' : 'Comprobante de Egreso'} ${voucherNumber} emitido y asentado con éxito.`, 'success');
+    setSelectedVoucherForPrint(voucherDoc);
+  };
 
   // Cálculo de Saldos Mayorizados en Tiempo Real por Cuenta a partir del Libro Diario
   const accountBalances = useMemo(() => {
@@ -1440,6 +1678,567 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     );
   };
 
+  // -------------------------------------------------------------------------
+  // CONCILIACIÓN BANCARIA MENSUAL: ESTADO & LÓGICA DE AUDITORÍA
+  // -------------------------------------------------------------------------
+  const [reconBankId, setReconBankId] = useState<string>('');
+  const [reconPeriod, setReconPeriod] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [statementBalanceInput, setStatementBalanceInput] = useState<number | string>('');
+  const [statementLines, setStatementLines] = useState<BankStatementLine[]>([]);
+  const [reconciledInternalIds, setReconciledInternalIds] = useState<string[]>([]);
+  const [reconSearchTerm, setReconSearchTerm] = useState<string>('');
+  const [reconFilterTab, setReconFilterTab] = useState<'TODOS' | 'CONCILIADOS' | 'PENDIENTES'>('TODOS');
+
+  // Modales de Conciliación Bancaria
+  const [isImportStatementModalOpen, setIsImportStatementModalOpen] = useState(false);
+  const [rawStatementText, setRawStatementText] = useState('');
+  const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+  const [activeAdjustmentLine, setActiveAdjustmentLine] = useState<BankStatementLine | null>(null);
+  const [adjustmentExpenseAccount, setAdjustmentExpenseAccount] = useState('5.2.03.01.01'); // Comisiones Bancarias
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportReconciliationData, setReportReconciliationData] = useState<BankReconciliationRecord | null>(null);
+
+  // Inicializar reconBankId al cargar cuentas bancarias
+  useEffect(() => {
+    if (!reconBankId && bankAccounts.length > 0) {
+      setReconBankId(bankAccounts[0].id);
+    }
+  }, [bankAccounts, reconBankId]);
+
+  // Cargar registro de conciliación existente al cambiar de banco o periodo
+  useEffect(() => {
+    if (!reconBankId) return;
+    const existing = bankReconciliations.find(r => r.bankAccountId === reconBankId && r.periodMonth === reconPeriod);
+    if (existing) {
+      setStatementBalanceInput(existing.statementClosingBalance);
+      setStatementLines(existing.statementLines || []);
+      setReconciledInternalIds(existing.reconciledInternalIds || []);
+    } else {
+      const bank = bankAccounts.find(b => b.id === reconBankId);
+      if (bank && (statementBalanceInput === '' || statementBalanceInput === 0)) {
+        setStatementBalanceInput(Number(bank.currentBalance || bank.balance || 0));
+      }
+    }
+  }, [reconBankId, reconPeriod, bankReconciliations, bankAccounts]);
+
+  const selectedReconBank = useMemo(() => {
+    return bankAccounts.find(b => b.id === reconBankId) || bankAccounts[0];
+  }, [bankAccounts, reconBankId]);
+
+  // Universo de movimientos internos en el periodo fiscal
+  const internalBankMovements = useMemo(() => {
+    if (!selectedReconBank) return [];
+
+    const movements: {
+      id: string;
+      source: 'INGRESO' | 'EGRESO' | 'CHEQUE';
+      date: string;
+      docNumber: string;
+      reference: string;
+      beneficiaryOrPayer: string;
+      concept: string;
+      type: 'DEBITO' | 'CREDITO';
+      amount: number;
+      isReconciled: boolean;
+      originalItem?: any;
+    }[] = [];
+
+    // 1. Comprobantes de Ingreso (C.I.)
+    accountingVouchers
+      .filter(v => v.type === 'INGRESO' && (v.bankAccountId === selectedReconBank.id || !v.bankAccountId) && v.date.startsWith(reconPeriod))
+      .forEach(v => {
+        const id = `v-in-${v.id}`;
+        movements.push({
+          id,
+          source: 'INGRESO',
+          date: v.date,
+          docNumber: v.voucherNumber,
+          reference: v.referenceNumber || '',
+          beneficiaryOrPayer: v.beneficiaryOrPayer,
+          concept: v.concept,
+          type: 'DEBITO', // Aumenta saldo en libros
+          amount: v.amount,
+          isReconciled: reconciledInternalIds.includes(id),
+          originalItem: v
+        });
+      });
+
+    // 2. Comprobantes de Egreso (C.E.)
+    accountingVouchers
+      .filter(v => v.type === 'EGRESO' && (v.bankAccountId === selectedReconBank.id || !v.bankAccountId) && v.date.startsWith(reconPeriod) && v.paymentMethod !== 'CHEQUE')
+      .forEach(v => {
+        const id = `v-eg-${v.id}`;
+        movements.push({
+          id,
+          source: 'EGRESO',
+          date: v.date,
+          docNumber: v.voucherNumber,
+          reference: v.referenceNumber || '',
+          beneficiaryOrPayer: v.beneficiaryOrPayer,
+          concept: v.concept,
+          type: 'CREDITO', // Disminuye saldo en libros
+          amount: v.amount,
+          isReconciled: reconciledInternalIds.includes(id),
+          originalItem: v
+        });
+      });
+
+    // 3. Cheques Emitidos
+    issuedChecks
+      .filter(chk => {
+        const matchesBank = chk.bankAccountId === selectedReconBank.id || 
+          (chk.bankName && selectedReconBank.bankName && chk.bankName.toLowerCase().includes(selectedReconBank.bankName.toLowerCase())) ||
+          (chk.bankName && selectedReconBank.accountNumber && chk.bankName.includes(selectedReconBank.accountNumber));
+        const inPeriod = (chk.deliveryDate || chk.issueDate || '').startsWith(reconPeriod);
+        return matchesBank && inPeriod && chk.status !== 'ANULADO';
+      })
+      .forEach(chk => {
+        const id = `chk-${chk.id}`;
+        movements.push({
+          id,
+          source: 'CHEQUE',
+          date: chk.issueDate,
+          docNumber: `CHQ-${chk.checkNumber}`,
+          reference: chk.checkNumber,
+          beneficiaryOrPayer: chk.beneficiary,
+          concept: chk.concept,
+          type: 'CREDITO',
+          amount: chk.amount,
+          isReconciled: chk.status === 'COBRADO' || reconciledInternalIds.includes(id),
+          originalItem: chk
+        });
+      });
+
+    return movements.sort((a, b) => b.date.localeCompare(a.date));
+  }, [selectedReconBank, reconPeriod, accountingVouchers, issuedChecks, reconciledInternalIds]);
+
+  // Saldo según Libros actual
+  const bankBookBalance = useMemo(() => {
+    return Number(selectedReconBank?.currentBalance || selectedReconBank?.balance || 0);
+  }, [selectedReconBank]);
+
+  // Saldo según Extracto Bancario ingresado
+  const parsedStatementBalance = useMemo(() => {
+    const val = Number(statementBalanceInput);
+    return isNaN(val) ? 0 : val;
+  }, [statementBalanceInput]);
+
+  // PARTIDAS CONCILIATORIAS
+  // 1. Depósitos en tránsito
+  const depositosEnTransito = useMemo(() => {
+    return internalBankMovements.filter(m => m.type === 'DEBITO' && !m.isReconciled);
+  }, [internalBankMovements]);
+  const totalDepositosEnTransito = useMemo(() => {
+    return depositosEnTransito.reduce((acc, m) => acc + m.amount, 0);
+  }, [depositosEnTransito]);
+
+  // 2. Cheques girados en tránsito
+  const chequesGiradosEnTransito = useMemo(() => {
+    return internalBankMovements.filter(m => m.source === 'CHEQUE' && !m.isReconciled);
+  }, [internalBankMovements]);
+  const totalChequesGiradosEnTransito = useMemo(() => {
+    return chequesGiradosEnTransito.reduce((acc, m) => acc + m.amount, 0);
+  }, [chequesGiradosEnTransito]);
+
+  // 3. Notas de Débito Bancarias no registradas en libros
+  const notasDebitoNoRegistradas = useMemo(() => {
+    return statementLines.filter(l => l.type === 'DEBITO' && !l.isReconciled);
+  }, [statementLines]);
+  const totalNotasDebitoNoRegistradas = useMemo(() => {
+    return notasDebitoNoRegistradas.reduce((acc, l) => acc + l.amount, 0);
+  }, [notasDebitoNoRegistradas]);
+
+  // 4. Notas de Crédito Bancarias no registradas en libros
+  const notasCreditoNoRegistradas = useMemo(() => {
+    return statementLines.filter(l => l.type === 'CREDITO' && !l.isReconciled);
+  }, [statementLines]);
+  const totalNotasCreditoNoRegistradas = useMemo(() => {
+    return notasCreditoNoRegistradas.reduce((acc, l) => acc + l.amount, 0);
+  }, [notasCreditoNoRegistradas]);
+
+  // SALDOS CONCILIADOS
+  const saldoConciliadoBanco = useMemo(() => {
+    return round2(parsedStatementBalance + totalDepositosEnTransito - totalChequesGiradosEnTransito);
+  }, [parsedStatementBalance, totalDepositosEnTransito, totalChequesGiradosEnTransito]);
+
+  const saldoConciliadoLibros = useMemo(() => {
+    return round2(bankBookBalance + totalNotasCreditoNoRegistradas - totalNotasDebitoNoRegistradas);
+  }, [bankBookBalance, totalNotasCreditoNoRegistradas, totalNotasDebitoNoRegistradas]);
+
+  const diferenciaConciliacion = useMemo(() => {
+    return round2(saldoConciliadoBanco - saldoConciliadoLibros);
+  }, [saldoConciliadoBanco, saldoConciliadoLibros]);
+
+  const isCuadrado = Math.abs(diferenciaConciliacion) < 0.01;
+
+  // Cruce Automático Inteligente
+  const handleAutoMatch = () => {
+    if (statementLines.length === 0) {
+      showAlert('Extracto Vacío', 'Debe cargar primero las líneas del extracto bancario para ejecutar el cruce.');
+      return;
+    }
+
+    let matchCount = 0;
+    const newReconciledInternal = new Set(reconciledInternalIds);
+    const updatedStatement = statementLines.map(line => ({ ...line }));
+
+    updatedStatement.forEach(line => {
+      if (line.isReconciled) return;
+
+      const match = internalBankMovements.find(internal => {
+        if (newReconciledInternal.has(internal.id)) return false;
+
+        const isCompatible = (line.type === 'CREDITO' && internal.type === 'DEBITO') ||
+                             (line.type === 'DEBITO' && internal.type === 'CREDITO');
+        if (!isCompatible) return false;
+
+        const matchAmount = Math.abs(line.amount - internal.amount) < 0.01;
+        if (!matchAmount) return false;
+
+        const cleanRefLine = (line.reference || '').replace(/\D/g, '');
+        const cleanRefInternal = (internal.reference || internal.docNumber || '').replace(/\D/g, '');
+        const matchRef = cleanRefLine && cleanRefInternal && (cleanRefLine.includes(cleanRefInternal) || cleanRefInternal.includes(cleanRefLine));
+
+        const dLine = new Date(line.date).getTime();
+        const dInt = new Date(internal.date).getTime();
+        const diffDays = Math.abs(dLine - dInt) / (1000 * 3600 * 24);
+        const matchDate = diffDays <= 5;
+
+        return matchRef || matchDate;
+      });
+
+      if (match) {
+        line.isReconciled = true;
+        line.matchedInternalId = match.id;
+        newReconciledInternal.add(match.id);
+        matchCount++;
+
+        if (match.source === 'CHEQUE' && match.originalItem) {
+          const chkId = match.originalItem.id;
+          setIssuedChecks(prev => prev.map(c => c.id === chkId ? { ...c, status: 'COBRADO' as const, clearedDate: line.date } : c));
+        }
+      }
+    });
+
+    setStatementLines(updatedStatement);
+    setReconciledInternalIds(Array.from(newReconciledInternal));
+
+    if (matchCount > 0) {
+      showToast(`¡Cruce automático completado! Se emparejaron ${matchCount} partidas exitosamente.`, 'success');
+    } else {
+      showToast('No se encontraron nuevas coincidencias exactas por monto y referencia/fecha.', 'info');
+    }
+  };
+
+  // Toggle manual de línea del extracto
+  const handleToggleStatementLine = (lineId: string) => {
+    setStatementLines(prev => prev.map(l => {
+      if (l.id !== lineId) return l;
+      const nextState = !l.isReconciled;
+      if (!nextState && l.matchedInternalId) {
+        setReconciledInternalIds(rIds => rIds.filter(id => id !== l.matchedInternalId));
+      }
+      return { ...l, isReconciled: nextState, matchedInternalId: nextState ? l.matchedInternalId : undefined };
+    }));
+  };
+
+  // Toggle manual de movimiento interno
+  const handleToggleInternalMovement = (m: any) => {
+    if (m.isReconciled) {
+      setReconciledInternalIds(prev => prev.filter(id => id !== m.id));
+      setStatementLines(prev => prev.map(l => l.matchedInternalId === m.id ? { ...l, isReconciled: false, matchedInternalId: undefined } : l));
+      if (m.source === 'CHEQUE' && m.originalItem) {
+        setIssuedChecks(prev => prev.map(c => c.id === m.originalItem.id ? { ...c, status: 'ENTREGADO' as const } : c));
+      }
+      showToast(`Movimiento ${m.docNumber} desmarcado de conciliación.`, 'info');
+    } else {
+      setReconciledInternalIds(prev => [...prev, m.id]);
+      if (m.source === 'CHEQUE' && m.originalItem) {
+        setIssuedChecks(prev => prev.map(c => c.id === m.originalItem.id ? { ...c, status: 'COBRADO' as const, clearedDate: new Date().toISOString().split('T')[0] } : c));
+      }
+      showToast(`Movimiento ${m.docNumber} marcado como conciliado manualmente.`, 'success');
+    }
+  };
+
+  // Cargar datos de prueba del extracto bancario
+  const handleLoadSampleStatement = () => {
+    if (!selectedReconBank) return;
+    const yearMonth = reconPeriod || '2026-09';
+    const sampleLines: BankStatementLine[] = [
+      {
+        id: `stmt-${Date.now()}-1`,
+        date: `${yearMonth}-03`,
+        reference: 'DEP-884102',
+        description: 'DEPOSITO EFECTIVO VENTA DEL DIA',
+        type: 'CREDITO',
+        amount: 850.00,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-2`,
+        date: `${yearMonth}-08`,
+        reference: 'TRF-CLIENTE-551',
+        description: 'TRANSF INTERBANCARIA PAGO FACTURA',
+        type: 'CREDITO',
+        amount: 1420.50,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-3`,
+        date: `${yearMonth}-12`,
+        reference: 'CHQ-001045',
+        description: 'COBRO DE CHEQUE EN VENTANILLA',
+        type: 'DEBITO',
+        amount: 450.00,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-4`,
+        date: `${yearMonth}-15`,
+        reference: 'TRF-PROV-9921',
+        description: 'TRANSFERENCIA A PROVEEDOR MATERIALES',
+        type: 'DEBITO',
+        amount: 1200.00,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-5`,
+        date: `${yearMonth}-20`,
+        reference: 'ND-COM-045',
+        description: 'COMISION TRANSFERENCIA INTERBANCARIA SPI',
+        type: 'DEBITO',
+        amount: 0.45,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-6`,
+        date: `${yearMonth}-28`,
+        reference: 'ND-MANT-CTA',
+        description: 'MANTENIMIENTO CUENTA CORRIENTE Y PORTES',
+        type: 'DEBITO',
+        amount: 3.50,
+        isReconciled: false
+      },
+      {
+        id: `stmt-${Date.now()}-7`,
+        date: `${yearMonth}-30`,
+        reference: 'NC-INT-001',
+        description: 'INTERESES GANADOS SALDO EN CUENTA',
+        type: 'CREDITO',
+        amount: 4.85,
+        isReconciled: false
+      }
+    ];
+
+    setStatementLines(sampleLines);
+    showToast(`Se cargaron ${sampleLines.length} movimientos de extracto bancario para el periodo ${yearMonth}.`, 'success');
+  };
+
+  // Procesar texto importado de extracto
+  const handleProcessImportedStatement = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rawStatementText.trim()) {
+      showAlert('Texto Requerido', 'Por favor pegue el contenido de las líneas del extracto bancario.');
+      return;
+    }
+
+    const lines = rawStatementText.split('\n').filter(l => l.trim().length > 0);
+    const parsed: BankStatementLine[] = [];
+
+    lines.forEach((lineStr, idx) => {
+      const cols = lineStr.split(/[\t,;|]/).map(c => c.trim().replace(/^["']|["']$/g, ''));
+      if (cols.length >= 4) {
+        const date = cols[0];
+        const reference = cols[1];
+        const description = cols[2];
+        const rawType = (cols[3] || '').toUpperCase();
+        const type: 'CREDITO' | 'DEBITO' = rawType.includes('CRED') || rawType.includes('DEP') || rawType.includes('HABER') ? 'CREDITO' : 'DEBITO';
+        const amount = Math.abs(parseFloat(cols[4] || cols[3] || '0')) || 0;
+
+        if (amount > 0) {
+          parsed.push({
+            id: `stmt-imp-${Date.now()}-${idx}`,
+            date: date.length === 10 ? date : new Date().toISOString().split('T')[0],
+            reference: reference || `REF-${idx + 1}`,
+            description: description || 'Movimiento Bancario',
+            type,
+            amount,
+            isReconciled: false
+          });
+        }
+      }
+    });
+
+    if (parsed.length === 0) {
+      showAlert('Formato no reconocido', 'No se pudieron interpretar las filas. Formato esperado: Fecha, Referencia, Descripción, Débito/Crédito, Monto');
+      return;
+    }
+
+    setStatementLines([...statementLines, ...parsed]);
+    setRawStatementText('');
+    setIsImportStatementModalOpen(false);
+    showToast(`Se importaron ${parsed.length} movimientos del extracto con éxito.`, 'success');
+  };
+
+  // Abrir modal de Asiento de Ajuste
+  const handleOpenAdjustmentModal = (line: BankStatementLine) => {
+    setActiveAdjustmentLine(line);
+    setAdjustmentExpenseAccount(line.type === 'DEBITO' ? '5.2.03.01.01' : '4.2.01.01');
+    setIsAdjustmentModalOpen(true);
+  };
+
+  // Crear Asiento de Ajuste en Partida Doble
+  const handleCreateAdjustmentEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeAdjustmentLine || !selectedReconBank) return;
+
+    const today = activeAdjustmentLine.date || new Date().toISOString().split('T')[0];
+    const journalEntryId = `asi-adj-${Date.now()}`;
+    const nextEntryNum = `ASI-2026-${String(journalEntries.length + 1).padStart(4, '0')}`;
+    
+    const bankAccountCode = selectedReconBank.accountType === 'Ahorros' ? '1.1.01.02.02' : '1.1.01.02.01';
+    const bankAccountName = `${selectedReconBank.bankName} - Cta. ${selectedReconBank.accountNumber}`;
+    const targetAccount = accountPlan.find(a => a.code === adjustmentExpenseAccount) || {
+      code: adjustmentExpenseAccount,
+      name: activeAdjustmentLine.type === 'DEBITO' ? 'Comisiones Bancarias y Portes Financieros' : 'Intereses Ganados en Bancos'
+    };
+
+    let items: JournalEntryItem[] = [];
+    if (activeAdjustmentLine.type === 'DEBITO') {
+      items = [
+        {
+          accountCode: targetAccount.code,
+          accountName: targetAccount.name,
+          debit: activeAdjustmentLine.amount,
+          credit: 0
+        },
+        {
+          accountCode: bankAccountCode,
+          accountName: bankAccountName,
+          debit: 0,
+          credit: activeAdjustmentLine.amount
+        }
+      ];
+    } else {
+      items = [
+        {
+          accountCode: bankAccountCode,
+          accountName: bankAccountName,
+          debit: activeAdjustmentLine.amount,
+          credit: 0
+        },
+        {
+          accountCode: targetAccount.code,
+          accountName: targetAccount.name,
+          debit: 0,
+          credit: activeAdjustmentLine.amount
+        }
+      ];
+    }
+
+    const newJournalEntry: JournalEntry = {
+      id: journalEntryId,
+      entryNumber: nextEntryNum,
+      date: today,
+      concept: `Ajuste Conciliación Bancaria: ${activeAdjustmentLine.description} (Ref: ${activeAdjustmentLine.reference || 'S/N'})`,
+      type: 'AJUSTE',
+      status: 'ASENTADO',
+      items,
+      totalDebit: activeAdjustmentLine.amount,
+      totalCredit: activeAdjustmentLine.amount
+    };
+
+    const delta = activeAdjustmentLine.type === 'DEBITO' ? -activeAdjustmentLine.amount : activeAdjustmentLine.amount;
+    setBankAccounts(bankAccounts.map(b => b.id === selectedReconBank.id ? {
+      ...b,
+      currentBalance: round2(Number((b.currentBalance || b.balance || 0) + delta))
+    } : b));
+
+    setJournalEntries([newJournalEntry, ...journalEntries]);
+
+    setStatementLines(prev => prev.map(l => l.id === activeAdjustmentLine.id ? {
+      ...l,
+      isReconciled: true,
+      isAdjustmentCreated: true,
+      matchedInternalId: journalEntryId
+    } : l));
+
+    setIsAdjustmentModalOpen(false);
+    setActiveAdjustmentLine(null);
+    showToast(`Asiento de ajuste ${nextEntryNum} registrado y mayorizado en Libro Diario.`, 'success');
+  };
+
+  // Guardar registro de conciliación mensual
+  const handleSaveReconciliation = () => {
+    if (!selectedReconBank) return;
+
+    const recordId = `rec-${selectedReconBank.id}-${reconPeriod}`;
+    const today = new Date().toISOString().split('T')[0];
+
+    const newRecord: BankReconciliationRecord = {
+      id: recordId,
+      bankAccountId: selectedReconBank.id,
+      bankName: selectedReconBank.bankName,
+      accountNumber: selectedReconBank.accountNumber,
+      periodMonth: reconPeriod,
+      closingDate: today,
+      statementClosingBalance: parsedStatementBalance,
+      bookBalance: bankBookBalance,
+      reconciledBankBalance: saldoConciliadoBanco,
+      reconciledBookBalance: saldoConciliadoLibros,
+      difference: diferenciaConciliacion,
+      statementLines: [...statementLines],
+      reconciledInternalIds: [...reconciledInternalIds],
+      status: isCuadrado ? 'CONCILIADO' : 'BORRADOR',
+      reconciledAt: new Date().toLocaleString(),
+      reconciledBy: 'Contador General',
+      notes: isCuadrado ? 'Conciliación bancaria cerrada con cuadre perfecto de $0.00.' : `Conciliación guardada con diferencia de ${formatCurrency(diferenciaConciliacion, settings.currencySymbol)} pendiente de justificar.`
+    };
+
+    const existingIdx = bankReconciliations.findIndex(r => r.id === recordId || (r.bankAccountId === selectedReconBank.id && r.periodMonth === reconPeriod));
+    if (existingIdx >= 0) {
+      const updated = [...bankReconciliations];
+      updated[existingIdx] = newRecord;
+      setBankReconciliations(updated);
+    } else {
+      setBankReconciliations([newRecord, ...bankReconciliations]);
+    }
+
+    showToast(`Conciliación del periodo ${reconPeriod} para ${selectedReconBank.bankName} guardada exitosamente (${newRecord.status}).`, 'success');
+  };
+
+  // Abrir reporte oficial
+  const handleOpenCertificateModal = (record?: BankReconciliationRecord) => {
+    if (record) {
+      setReportReconciliationData(record);
+    } else {
+      if (!selectedReconBank) return;
+      const currentData: BankReconciliationRecord = {
+        id: `rec-${selectedReconBank.id}-${reconPeriod}`,
+        bankAccountId: selectedReconBank.id,
+        bankName: selectedReconBank.bankName,
+        accountNumber: selectedReconBank.accountNumber,
+        periodMonth: reconPeriod,
+        closingDate: new Date().toISOString().split('T')[0],
+        statementClosingBalance: parsedStatementBalance,
+        bookBalance: bankBookBalance,
+        reconciledBankBalance: saldoConciliadoBanco,
+        reconciledBookBalance: saldoConciliadoLibros,
+        difference: diferenciaConciliacion,
+        statementLines: [...statementLines],
+        reconciledInternalIds: [...reconciledInternalIds],
+        status: isCuadrado ? 'CONCILIADO' : 'BORRADOR',
+        reconciledAt: new Date().toLocaleString(),
+        reconciledBy: 'Contador General'
+      };
+      setReportReconciliationData(currentData);
+    }
+    setIsReportModalOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* ---------------------------------------------------------------------
@@ -2276,110 +3075,751 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
           SUBTAB 4: CONCILIACION_BANCARIA
          --------------------------------------------------------------------- */}
       {subTab === 'CONCILIACION_BANCARIA' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Landmark className="w-5 h-5 text-emerald-500" />
-                <span>Conciliación Bancaria Mensual</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Cotejo entre el Estado de Cuenta Bancario enviado por la entidad y el Libro Auxiliar de Bancos.
-              </p>
+        <div className="space-y-6">
+          {/* Header & Acciones Principales */}
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 shadow-sm">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-2xl ring-1 ring-emerald-100">
+                  <Landmark className="w-7 h-7" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-950 tracking-tight flex items-center gap-2">
+                    <span>Conciliación Bancaria Mensual & Auditoría de Tesorería</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                      NIIF / Partida Doble
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+                    Sincronización matemática entre el Libro Auxiliar de Bancos y el Estado de Cuenta Oficial emitido por la entidad. Aislamiento de partidas en tránsito (cheques y depósitos) y registro inmediato de ajustes contables.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botones de acción superior */}
+              <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsImportStatementModalOpen(true)}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                  title="Importar extracto bancario en CSV, Excel o texto delimitado"
+                >
+                  <Upload className="w-4 h-4 text-slate-600" />
+                  <span>Importar Extracto</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLoadSampleStatement}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
+                  title="Cargar datos de extracto bancario de demostración para el periodo"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Datos Demo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAutoMatch}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black rounded-xl transition-all shadow-md cursor-pointer"
+                  title="Cruce automático por monto exacto, número de referencia/cheque y proximidad de fechas"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Cruce Inteligente</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenCertificateModal()}
+                  className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm cursor-pointer"
+                  title="Ver e Imprimir Acta Oficial de Liquidación y Certificación Contable"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Acta de Liquidación</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Control de Parámetros: Cuenta, Periodo y Saldo Extracto */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-5 items-end">
+              {/* Selector de Cuenta Bancaria */}
+              <div className="md:col-span-4 space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Landmark className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Cuenta Bancaria a Conciliar:</span>
+                </label>
+                <Select
+                  value={reconBankId}
+                  onChange={(e) => setReconBankId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-900"
+                >
+                  {bankAccounts.map((b: any) => (
+                    <option key={b.id} value={b.id}>
+                      🏦 {b.bankName} - {b.accountType} ({b.accountNumber}) - Saldo: {formatCurrency(b.currentBalance || b.balance || 0, settings.currencySymbol)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              {/* Selector de Mes / Periodo Fiscal */}
+              <div className="md:col-span-3 space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Periodo Mensual:</span>
+                </label>
+                <input
+                  type="month"
+                  value={reconPeriod}
+                  onChange={(e) => setReconPeriod(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 outline-none"
+                />
+              </div>
+
+              {/* Saldo según Extracto Bancario Oficial */}
+              <div className="md:col-span-3 space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Saldo según Extracto Banco ($):</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={statementBalanceInput}
+                    onChange={(e) => setStatementBalanceInput(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-white border border-emerald-300 ring-1 ring-emerald-200 rounded-xl pl-7 pr-3 py-2 text-xs font-mono font-black text-emerald-950 outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Botón Guardar / Cerrar Periodo */}
+              <div className="md:col-span-2">
+                <button
+                  type="button"
+                  onClick={handleSaveReconciliation}
+                  className={`w-full py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                    isCuadrado 
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-500/20' 
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
+                  }`}
+                >
+                  <CheckCheck className="w-4 h-4" />
+                  <span>{isCuadrado ? 'Cerrar Periodo' : 'Guardar Estado'}</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 font-mono text-xs">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-              <h3 className="font-black text-slate-900 uppercase text-xs">Libro Auxiliar de Bancos (POS)</h3>
-              <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200">
-                <div className="flex justify-between py-1 border-b">
-                  <span>Saldo según Libros:</span>
-                  <span className="font-black text-slate-900">{formatCurrency(bankAccounts.reduce((sum: number, b: any) => sum + (b.balance || 0), 0), settings.currencySymbol)}</span>
+          {/* Ecuación Fundamental del Cuadre de Liquidación NIIF (Dashboard Superior) */}
+          <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-md border border-slate-800 space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">
+                  Ecuación de Liquidación Contable
                 </div>
-                <div className="flex justify-between py-1 border-b text-emerald-600">
-                  <span>(+) Depósitos no acreditados:</span>
-                  <span className="font-bold">{formatCurrency(0, settings.currencySymbol)}</span>
+                <h3 className="text-base font-black text-white mt-0.5">
+                  Resumen de Cuadre: {selectedReconBank ? `${selectedReconBank.bankName} (${selectedReconBank.accountNumber})` : 'Cuenta Bancaria'} — Periodo {reconPeriod}
+                </h3>
+              </div>
+
+              {/* Badge de Certificación de Cuadre */}
+              <div>
+                {isCuadrado ? (
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-2xl font-mono text-xs font-black">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>CUADRE PERFECTO: $0.00 DIFERENCIA</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-2xl font-mono text-xs font-black">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    <span>DIFERENCIA A JUSTIFICAR: {formatCurrency(diferenciaConciliacion, settings.currencySymbol)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Dos Perspectivas Matemáticas: Enfoque Banco vs Enfoque Libros */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 font-mono text-xs">
+              {/* Perspectiva 1: Saldo según Extracto Bancario */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4.5 space-y-2.5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider flex items-center gap-1.5">
+                    <Landmark className="w-3.5 h-3.5" />
+                    <span>1. Enfoque Extracto Bancario</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-sans">Movimientos Banco</span>
                 </div>
-                <div className="flex justify-between py-1 text-rose-600">
-                  <span>(-) Cheques girados en tránsito:</span>
-                  <span className="font-bold">-{formatCurrency(totalEnTransito, settings.currencySymbol)}</span>
+
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between py-1 text-slate-300 border-b border-slate-800/80">
+                    <span>Saldo según Extracto Oficial:</span>
+                    <span className="font-black text-white">{formatCurrency(parsedStatementBalance, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-emerald-400 border-b border-slate-800/80">
+                    <span>(+) Depósitos / Cobros en Tránsito ({depositosEnTransito.length}):</span>
+                    <span className="font-bold">+{formatCurrency(totalDepositosEnTransito, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-rose-400 border-b border-slate-800/80">
+                    <span>(-) Cheques Girados en Tránsito ({chequesGiradosEnTransito.length}):</span>
+                    <span className="font-bold">-{formatCurrency(totalChequesGiradosEnTransito, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 text-sm font-black bg-slate-900/90 px-3 rounded-xl border border-emerald-500/30 text-emerald-300">
+                    <span>(=) Saldo Conciliado de Banco:</span>
+                    <span>{formatCurrency(saldoConciliadoBanco, settings.currencySymbol)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Perspectiva 2: Saldo según Libro Auxiliar de Bancos */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4.5 space-y-2.5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-[11px] font-black uppercase text-sky-400 tracking-wider flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>2. Enfoque Libro Auxiliar (ERP)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-sans">Contabilidad Interna</span>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between py-1 text-slate-300 border-b border-slate-800/80">
+                    <span>Saldo según Libros Mayores:</span>
+                    <span className="font-black text-white">{formatCurrency(bankBookBalance, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-emerald-400 border-b border-slate-800/80">
+                    <span>(+) Notas de Crédito Bancarias no Contab. ({notasCreditoNoRegistradas.length}):</span>
+                    <span className="font-bold">+{formatCurrency(totalNotasCreditoNoRegistradas, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-rose-400 border-b border-slate-800/80">
+                    <span>(-) Notas de Débito / Comisiones ({notasDebitoNoRegistradas.length}):</span>
+                    <span className="font-bold">-{formatCurrency(totalNotasDebitoNoRegistradas, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 text-sm font-black bg-slate-900/90 px-3 rounded-xl border border-sky-500/30 text-sky-300">
+                    <span>(=) Saldo Conciliado de Libros:</span>
+                    <span>{formatCurrency(saldoConciliadoLibros, settings.currencySymbol)}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-              <h3 className="font-black text-slate-900 uppercase text-xs">Estado de Cuenta Banco (Extracto)</h3>
-              <div className="space-y-1 bg-white p-3 rounded-xl border border-slate-200">
-                <div className="flex justify-between py-1 border-b">
-                  <span>Saldo según Banco:</span>
-                  <span className="font-black text-slate-900">{formatCurrency(bankAccounts.reduce((sum: number, b: any) => sum + (b.balance || 0), 0), settings.currencySymbol)}</span>
+            {/* Banner Informativo de Partidas Pendientes */}
+            {!isCuadrado && (
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-300 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold">Guía para el Cuadre de Auditoría:</div>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed font-sans">
+                    Existe una diferencia de <strong className="font-mono">{formatCurrency(diferenciaConciliacion, settings.currencySymbol)}</strong>. Revise el panel derecho de movimientos de extracto bancario: si existen comisiones bancarias o notas de débito no contabilizadas, pulse el botón <strong>"Generar Asiento de Ajuste"</strong> para que el sistema cree la partida doble en Libro Diario y el saldo contable cuadre con precisión milimétrica.
+                  </p>
                 </div>
-                <div className="flex justify-between py-1 text-emerald-600 font-black">
-                  <span>Saldo Conciliado Disponible:</span>
-                  <span>{formatCurrency(Math.max(0, bankAccounts.reduce((sum: number, b: any) => sum + (b.balance || 0), 0) - totalEnTransito), settings.currencySymbol)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Mesa de Trabajo Transaccional: Split View (Libros Internos vs Extracto Bancario) */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white border border-slate-200 p-3.5 rounded-2xl">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar por referencia, comprobante, beneficiario, descripción o monto..."
+                  value={reconSearchTerm}
+                  onChange={(e) => setReconSearchTerm(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setReconFilterTab('TODOS')}
+                  className={`px-3 py-1.5 rounded-lg transition ${reconFilterTab === 'TODOS' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReconFilterTab('PENDIENTES')}
+                  className={`px-3 py-1.5 rounded-lg transition ${reconFilterTab === 'PENDIENTES' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                >
+                  Pendientes ({internalBankMovements.filter(m => !m.isReconciled).length + statementLines.filter(l => !l.isReconciled).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReconFilterTab('CONCILIADOS')}
+                  className={`px-3 py-1.5 rounded-lg transition ${reconFilterTab === 'CONCILIADOS' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                >
+                  Conciliados
+                </button>
+              </div>
+            </div>
+
+            {/* Tableros Comparativos Frente a Frente */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* PANEL IZQUIERDO: MOVIMIENTOS INTERNOS EN LIBROS (ERP) */}
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-sky-600" />
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                      Libro Auxiliar Interno ({internalBankMovements.length})
+                    </h4>
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-500">
+                    Conciliados: <strong className="text-emerald-600">{internalBankMovements.filter(m => m.isReconciled).length}</strong> / {internalBankMovements.length}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-[500px]">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-slate-900 text-white text-[10px] uppercase font-black sticky top-0 z-10">
+                      <tr>
+                        <th className="py-2.5 px-3">Fecha / Doc</th>
+                        <th className="py-2.5 px-3">Detalle / Beneficiario</th>
+                        <th className="py-2.5 px-3 text-right">Monto ($)</th>
+                        <th className="py-2.5 px-3 text-center">Estado</th>
+                        <th className="py-2.5 px-3 text-center">Cruce</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                      {internalBankMovements.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-10 text-center text-slate-400 font-sans italic text-xs">
+                            No hay comprobantes contables registrados para esta cuenta en el periodo {reconPeriod}.
+                          </td>
+                        </tr>
+                      ) : (
+                        internalBankMovements
+                          .filter(m => {
+                            if (reconFilterTab === 'CONCILIADOS') return m.isReconciled;
+                            if (reconFilterTab === 'PENDIENTES') return !m.isReconciled;
+                            return true;
+                          })
+                          .filter(m => {
+                            if (!reconSearchTerm.trim()) return true;
+                            const q = reconSearchTerm.toLowerCase();
+                            return m.docNumber.toLowerCase().includes(q) ||
+                                   m.beneficiaryOrPayer.toLowerCase().includes(q) ||
+                                   m.concept.toLowerCase().includes(q) ||
+                                   m.reference.toLowerCase().includes(q) ||
+                                   String(m.amount).includes(q);
+                          })
+                          .map((m) => (
+                            <tr key={m.id} className={`hover:bg-slate-50 transition-colors ${m.isReconciled ? 'bg-emerald-50/40' : ''}`}>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-slate-900">{m.docNumber}</div>
+                                <div className="text-[10px] text-slate-400">{m.date}</div>
+                                {m.reference && <div className="text-[9px] text-indigo-600 font-bold">Ref: {m.reference}</div>}
+                              </td>
+                              <td className="py-2.5 px-3 font-sans">
+                                <div className="font-bold text-slate-800 truncate max-w-[170px]">{m.beneficiaryOrPayer}</div>
+                                <div className="text-[10px] text-slate-500 truncate max-w-[170px]">{m.concept}</div>
+                                <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600">
+                                  {m.source}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-black">
+                                <span className={m.type === 'DEBITO' ? 'text-emerald-600' : 'text-rose-600'}>
+                                  {m.type === 'DEBITO' ? '+' : '-'}{formatCurrency(m.amount, settings.currencySymbol)}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {m.isReconciled ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <Check className="w-2.5 h-2.5" />
+                                    <span>CONCILIADO</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-800 border border-amber-200">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    <span>EN TRÁNSITO</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleInternalMovement(m)}
+                                  className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                    m.isReconciled 
+                                      ? 'bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600' 
+                                      : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                  }`}
+                                  title={m.isReconciled ? 'Desmarcar de conciliación' : 'Conciliar manualmente'}
+                                >
+                                  {m.isReconciled ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PANEL DERECHO: MOVIMIENTOS DEL EXTRACTO BANCARIO (BANCO) */}
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="w-4 h-4 text-emerald-600" />
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                      Extracto Bancario Oficial ({statementLines.length})
+                    </h4>
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-500">
+                    Conciliados: <strong className="text-emerald-600">{statementLines.filter(l => l.isReconciled).length}</strong> / {statementLines.length}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-[500px]">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-slate-900 text-white text-[10px] uppercase font-black sticky top-0 z-10">
+                      <tr>
+                        <th className="py-2.5 px-3">Fecha / Ref</th>
+                        <th className="py-2.5 px-3">Descripción Extracto</th>
+                        <th className="py-2.5 px-3 text-right">Monto ($)</th>
+                        <th className="py-2.5 px-3 text-center">Estado</th>
+                        <th className="py-2.5 px-3 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                      {statementLines.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-10 text-center text-slate-400 font-sans italic text-xs space-y-2">
+                            <p>No se ha cargado el extracto bancario de este mes.</p>
+                            <button
+                              type="button"
+                              onClick={() => setIsImportStatementModalOpen(true)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Cargar Extracto Digital Ahora</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ) : (
+                        statementLines
+                          .filter(l => {
+                            if (reconFilterTab === 'CONCILIADOS') return l.isReconciled;
+                            if (reconFilterTab === 'PENDIENTES') return !l.isReconciled;
+                            return true;
+                          })
+                          .filter(l => {
+                            if (!reconSearchTerm.trim()) return true;
+                            const q = reconSearchTerm.toLowerCase();
+                            return l.reference.toLowerCase().includes(q) ||
+                                   l.description.toLowerCase().includes(q) ||
+                                   String(l.amount).includes(q);
+                          })
+                          .map((line) => (
+                            <tr key={line.id} className={`hover:bg-slate-50 transition-colors ${line.isReconciled ? 'bg-emerald-50/40' : ''}`}>
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-slate-900">{line.reference}</div>
+                                <div className="text-[10px] text-slate-400">{line.date}</div>
+                              </td>
+                              <td className="py-2.5 px-3 font-sans">
+                                <div className="font-bold text-slate-800 truncate max-w-[180px]">{line.description}</div>
+                                <span className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-black ${
+                                  line.type === 'CREDITO' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                }`}>
+                                  {line.type === 'CREDITO' ? 'CRÉDITO (ABONO)' : 'DÉBITO (CARGO)'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-black">
+                                <span className={line.type === 'CREDITO' ? 'text-emerald-600' : 'text-rose-600'}>
+                                  {line.type === 'CREDITO' ? '+' : '-'}{formatCurrency(line.amount, settings.currencySymbol)}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {line.isReconciled ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <Check className="w-2.5 h-2.5" />
+                                    <span>CONCILIADO</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-800 border border-amber-200">
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    <span>NO CONCILIADO</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleStatementLine(line.id)}
+                                    className={`p-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                      line.isReconciled 
+                                        ? 'bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600' 
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                    }`}
+                                    title={line.isReconciled ? 'Desmarcar de extracto' : 'Marcar conciliado manualmente'}
+                                  >
+                                    {line.isReconciled ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                                  </button>
+
+                                  {!line.isReconciled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenAdjustmentModal(line)}
+                                      className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold transition cursor-pointer shadow-xs whitespace-nowrap"
+                                      title="Generar Asiento Contable de Ajuste automático por comisión, nota de débito o interés"
+                                    >
+                                      + Ajuste
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Listado de Cheques en Tránsito para Conciliar */}
-          <div className="space-y-3 pt-3 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-amber-600" />
-                <span>Partidas Conciliatorias: Cheques Girados en Tránsito ({chequesEnTransito.length})</span>
-              </h3>
-              <span className="text-xs font-mono font-bold text-rose-600">
-                Total en Tránsito: -{formatCurrency(totalEnTransito, settings.currencySymbol)}
-              </span>
-            </div>
+          {/* Historial de Conciliaciones Cerradas / Guardadas */}
+          {bankReconciliations.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <FileCheck2 className="w-4 h-4 text-indigo-600" />
+                  <span>Historial de Conciliaciones Mensuales Guardadas ({bankReconciliations.length})</span>
+                </h4>
+              </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-left text-xs text-slate-700 font-mono">
-                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                  <tr>
-                    <th className="py-2.5 px-3">N° Cheque</th>
-                    <th className="py-2.5 px-3">Banco</th>
-                    <th className="py-2.5 px-3">Fecha Emisión</th>
-                    <th className="py-2.5 px-3">Beneficiario</th>
-                    <th className="py-2.5 px-3">Concepto</th>
-                    <th className="py-2.5 px-3 text-right">Monto</th>
-                    <th className="py-2.5 px-3 text-center">Estado</th>
-                    <th className="py-2.5 px-3 text-center">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                  {chequesEnTransito.length === 0 ? (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 font-mono text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
                     <tr>
-                      <td colSpan={8} className="py-6 text-center text-slate-400 font-sans italic">
-                        ¡Conciliación al día! No hay cheques girados pendientes de cobro en tránsito.
-                      </td>
+                      <th className="py-2.5 px-3">Periodo</th>
+                      <th className="py-2.5 px-3">Banco / Cuenta</th>
+                      <th className="py-2.5 px-3 text-right">Saldo Extracto</th>
+                      <th className="py-2.5 px-3 text-right">Saldo Libros</th>
+                      <th className="py-2.5 px-3 text-right">Diferencia</th>
+                      <th className="py-2.5 px-3 text-center">Estado</th>
+                      <th className="py-2.5 px-3 text-center">Acta Oficial</th>
                     </tr>
-                  ) : (
-                    chequesEnTransito.map(chk => (
-                      <tr key={chk.id} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-slate-900">{chk.checkNumber}</td>
-                        <td className="py-2.5 px-3 text-slate-700">{chk.bankName}</td>
-                        <td className="py-2.5 px-3 text-slate-500">{chk.issueDate}</td>
-                        <td className="py-2.5 px-3 font-sans font-bold text-slate-800">{chk.beneficiary}</td>
-                        <td className="py-2.5 px-3 text-slate-600 font-sans truncate max-w-xs">{chk.concept}</td>
-                        <td className="py-2.5 px-3 text-right font-black text-rose-600">
-                          {formatCurrency(chk.amount, settings.currencySymbol)}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {bankReconciliations.map(rec => (
+                      <tr key={rec.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{rec.periodMonth}</td>
+                        <td className="py-2.5 px-3 font-sans font-medium text-slate-800">
+                          {rec.bankName} - Cta. {rec.accountNumber}
                         </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span className="px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 border border-amber-200 text-amber-800">
-                            {chk.status === 'ENTREGADO' ? 'ENTREGADO' : 'EMITIDO'}
+                        <td className="py-2.5 px-3 text-right font-bold text-slate-700">
+                          {formatCurrency(rec.statementClosingBalance, settings.currencySymbol)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-slate-700">
+                          {formatCurrency(rec.bookBalance, settings.currencySymbol)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-black">
+                          <span className={Math.abs(rec.difference) < 0.01 ? 'text-emerald-600' : 'text-amber-600'}>
+                            {formatCurrency(rec.difference, settings.currencySymbol)}
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                            rec.status === 'CONCILIADO' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'
+                          }`}>
+                            {rec.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-sans">
                           <button
-                            onClick={() => handleMarkCleared(chk)}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 mx-auto cursor-pointer shadow-sm transition"
-                            title="Marcar como debitado del extracto bancario y conciliar"
+                            type="button"
+                            onClick={() => handleOpenCertificateModal(rec)}
+                            className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition cursor-pointer"
                           >
-                            <Check className="w-3 h-3" />
-                            <span>Conciliar en Banco</span>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Ver Acta</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------
+          SUBTAB 5: COMPROBANTE_INGRESO
+         --------------------------------------------------------------------- */}
+      {subTab === 'COMPROBANTE_INGRESO' && (() => {
+        // Combinar vouchers estructurados con asientos manuales tipo INGRESO si existiesen
+        const incomeVouchers = accountingVouchers.filter(v => v.type === 'INGRESO');
+        const legacyIncomeEntries: AccountingVoucher[] = journalEntries
+          .filter(e => e.type === 'INGRESO' && !incomeVouchers.some(v => v.journalEntryId === e.id || v.voucherNumber === e.entryNumber))
+          .map(e => ({
+            id: e.id,
+            voucherNumber: e.entryNumber,
+            type: 'INGRESO' as const,
+            date: e.date,
+            beneficiaryOrPayer: 'CLIENTES VARIOS',
+            identification: '9999999999999',
+            paymentMethod: 'TRANSFERENCIA' as const,
+            concept: e.concept,
+            amount: e.totalDebit,
+            items: e.items,
+            totalDebit: e.totalDebit,
+            totalCredit: e.totalCredit,
+            status: 'ASENTADO' as const,
+            journalEntryId: e.id,
+            user: 'Contabilidad'
+          }));
+
+        const allIncomes = [...incomeVouchers, ...legacyIncomeEntries];
+        const filteredIncomes = allIncomes.filter(v => {
+          const matchSearch = !voucherSearchTerm ||
+            v.voucherNumber.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            v.beneficiaryOrPayer.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            v.concept.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            (v.referenceNumber && v.referenceNumber.toLowerCase().includes(voucherSearchTerm.toLowerCase()));
+          const matchMethod = voucherPaymentFilter === 'ALL' || v.paymentMethod === voucherPaymentFilter;
+          return matchSearch && matchMethod;
+        });
+
+        const totalRecaudado = allIncomes.reduce((acc, v) => acc + (v.amount || 0), 0);
+        const totalBancos = allIncomes.filter(v => v.paymentMethod === 'TRANSFERENCIA' || v.paymentMethod === 'TARJETA').reduce((acc, v) => acc + (v.amount || 0), 0);
+        const totalEfectivo = allIncomes.filter(v => v.paymentMethod === 'EFECTIVO').reduce((acc, v) => acc + (v.amount || 0), 0);
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-teal-600" />
+                  <span>Comprobantes Contables de Ingreso (C.I.)</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Recaudación y cobranzas bajo partida doble con afectación directa a bancos, caja y libro mayor.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleOpenNewVoucher('INGRESO')}
+                className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nuevo Comprobante de Ingreso</span>
+              </button>
+            </div>
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Recaudado (Ingresos)</div>
+                <div className="text-xl font-black text-emerald-600 mt-1">
+                  {formatCurrency(totalRecaudado, settings.currencySymbol)}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Recaudación en Bancos</div>
+                <div className="text-xl font-black text-sky-600 mt-1">
+                  {formatCurrency(totalBancos, settings.currencySymbol)}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Caja General / Efectivo</div>
+                <div className="text-xl font-black text-amber-600 mt-1">
+                  {formatCurrency(totalEfectivo, settings.currencySymbol)}
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-50 border border-slate-200 p-3 rounded-2xl text-xs">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar por Nº comprobante, pagador, concepto o referencia..."
+                  value={voucherSearchTerm}
+                  onChange={(e) => setVoucherSearchTerm(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-slate-800 font-medium placeholder-slate-400 outline-none"
+                />
+              </div>
+
+              <div className="w-full sm:w-56">
+                <Select
+                  value={voucherPaymentFilter}
+                  onChange={(e) => setVoucherPaymentFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                >
+                  <option value="ALL">💳 Todos los Medios</option>
+                  <option value="TRANSFERENCIA">🏦 Transferencia Bancaria</option>
+                  <option value="EFECTIVO">💵 Efectivo / Caja</option>
+                  <option value="CHEQUE">📝 Cheque</option>
+                  <option value="TARJETA">💳 Tarjeta Débito/Crédito</option>
+                </Select>
+              </div>
+            </div>
+
+            {/* Tabla de Comprobantes de Ingreso */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">N° Comprobante</th>
+                    <th className="py-3 px-4">Fecha</th>
+                    <th className="py-3 px-4">Recaudado De</th>
+                    <th className="py-3 px-4">Medio de Cobro</th>
+                    <th className="py-3 px-4">Concepto</th>
+                    <th className="py-3 px-4 text-right">Monto ($)</th>
+                    <th className="py-3 px-4 text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
+                  {filteredIncomes.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-sans text-xs">
+                        No hay comprobantes de ingreso que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredIncomes.map((ci) => (
+                      <tr key={ci.id} className="hover:bg-slate-50">
+                        <td className="py-3 px-4 font-black text-indigo-600">{ci.voucherNumber}</td>
+                        <td className="py-3 px-4 text-slate-500">{ci.date}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-sans font-bold text-slate-900">{ci.beneficiaryOrPayer}</div>
+                          {ci.identification && <div className="text-[10px] text-slate-400">ID: {ci.identification}</div>}
+                        </td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            ci.paymentMethod === 'EFECTIVO' 
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200' 
+                              : ci.paymentMethod === 'TRANSFERENCIA' 
+                              ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                              : 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                          }`}>
+                            {ci.paymentMethod}
+                          </span>
+                          {ci.referenceNumber && <div className="text-[10px] text-slate-400 font-mono mt-0.5">Ref: {ci.referenceNumber}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-sans max-w-xs truncate">{ci.concept}</td>
+                        <td className="py-3 px-4 text-right font-black text-emerald-600 text-sm">
+                          {formatCurrency(ci.amount, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-center font-sans">
+                          <button
+                            onClick={() => setSelectedVoucherForPrint(ci as AccountingVoucher)}
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                            title="Ver e Imprimir Comprobante Oficial con Firmas"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir</span>
                           </button>
                         </td>
                       </tr>
@@ -2389,116 +3829,190 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
               </table>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ---------------------------------------------------------------------
-          SUBTAB 5: COMPROBANTE_INGRESO
-         --------------------------------------------------------------------- */}
-      {subTab === 'COMPROBANTE_INGRESO' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-teal-500" />
-                <span>Comprobantes Contables de Ingreso</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Emisión de comprobantes de caja/bancos por recaudación de cobros y ventas.
-              </p>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">N° Comprobante</th>
-                  <th className="py-3 px-4">Fecha</th>
-                  <th className="py-3 px-4">Recibido De</th>
-                  <th className="py-3 px-4">Concepto</th>
-                  <th className="py-3 px-4 text-right">Monto ($)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
-                {journalEntries.filter(e => e.type === 'INGRESO').length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400 font-sans text-xs">
-                      No hay comprobantes de ingreso registrados.
-                    </td>
-                  </tr>
-                ) : (
-                  journalEntries.filter(e => e.type === 'INGRESO').map((ci) => (
-                    <tr key={ci.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-4 font-black text-slate-900">{ci.entryNumber}</td>
-                      <td className="py-3 px-4 text-slate-500">{ci.date}</td>
-                      <td className="py-3 px-4 font-bold text-slate-800">CLIENTES VARIOS</td>
-                      <td className="py-3 px-4 text-slate-600 font-sans">{ci.concept}</td>
-                      <td className="py-3 px-4 text-right font-black text-emerald-600 text-sm">
-                        {formatCurrency(ci.totalDebit, settings.currencySymbol)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 6: COMPROBANTE_EGRESO
          --------------------------------------------------------------------- */}
-      {subTab === 'COMPROBANTE_EGRESO' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <FileX className="w-5 h-5 text-red-500" />
-                <span>Comprobantes Contables de Egreso</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Emisión de comprobantes para soporte de egresos de caja y pagos bancarios.
-              </p>
-            </div>
-          </div>
+      {subTab === 'COMPROBANTE_EGRESO' && (() => {
+        // Combinar vouchers estructurados con asientos manuales tipo EGRESO si existiesen
+        const expenseVouchers = accountingVouchers.filter(v => v.type === 'EGRESO');
+        const legacyExpenseEntries: AccountingVoucher[] = journalEntries
+          .filter(e => e.type === 'EGRESO' && !expenseVouchers.some(v => v.journalEntryId === e.id || v.voucherNumber === e.entryNumber))
+          .map(e => ({
+            id: e.id,
+            voucherNumber: e.entryNumber,
+            type: 'EGRESO' as const,
+            date: e.date,
+            beneficiaryOrPayer: 'PROVEEDORES VARIOS',
+            identification: '9999999999999',
+            paymentMethod: 'TRANSFERENCIA' as const,
+            concept: e.concept,
+            amount: e.totalCredit,
+            items: e.items,
+            totalDebit: e.totalDebit,
+            totalCredit: e.totalCredit,
+            status: 'ASENTADO' as const,
+            journalEntryId: e.id,
+            user: 'Contabilidad'
+          }));
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">N° Comprobante</th>
-                  <th className="py-3 px-4">Fecha</th>
-                  <th className="py-3 px-4">Pagado A</th>
-                  <th className="py-3 px-4">Forma de Pago</th>
-                  <th className="py-3 px-4 text-right">Monto ($)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
-                {journalEntries.filter(e => e.type === 'EGRESO').length === 0 ? (
+        const allExpenses = [...expenseVouchers, ...legacyExpenseEntries];
+        const filteredExpenses = allExpenses.filter(v => {
+          const matchSearch = !voucherSearchTerm ||
+            v.voucherNumber.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            v.beneficiaryOrPayer.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            v.concept.toLowerCase().includes(voucherSearchTerm.toLowerCase()) ||
+            (v.referenceNumber && v.referenceNumber.toLowerCase().includes(voucherSearchTerm.toLowerCase()));
+          const matchMethod = voucherPaymentFilter === 'ALL' || v.paymentMethod === voucherPaymentFilter;
+          return matchSearch && matchMethod;
+        });
+
+        const totalPagado = allExpenses.reduce((acc, v) => acc + (v.amount || 0), 0);
+        const totalBancos = allExpenses.filter(v => v.paymentMethod === 'TRANSFERENCIA').reduce((acc, v) => acc + (v.amount || 0), 0);
+        const totalCheques = allExpenses.filter(v => v.paymentMethod === 'CHEQUE').reduce((acc, v) => acc + (v.amount || 0), 0);
+        const totalEfectivo = allExpenses.filter(v => v.paymentMethod === 'EFECTIVO').reduce((acc, v) => acc + (v.amount || 0), 0);
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                  <FileX className="w-5 h-5 text-rose-600" />
+                  <span>Comprobantes Contables de Egreso (C.E.)</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Extinción de pasivos, pago de nómina y desembolsos operativos con rastro exacto para conciliación bancaria.
+                </p>
+              </div>
+
+              <button
+                onClick={() => handleOpenNewVoucher('EGRESO')}
+                className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nuevo Comprobante de Egreso</span>
+              </button>
+            </div>
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Egresado / Pagado</div>
+                <div className="text-xl font-black text-rose-600 mt-1">
+                  {formatCurrency(totalPagado, settings.currencySymbol)}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Desembolsos Bancarios / Cheques</div>
+                <div className="text-xl font-black text-indigo-600 mt-1">
+                  {formatCurrency(totalBancos + totalCheques, settings.currencySymbol)}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Efectivo / Caja Chica</div>
+                <div className="text-xl font-black text-amber-600 mt-1">
+                  {formatCurrency(totalEfectivo, settings.currencySymbol)}
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-50 border border-slate-200 p-3 rounded-2xl text-xs">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar por Nº comprobante, beneficiario, concepto o cheque/referencia..."
+                  value={voucherSearchTerm}
+                  onChange={(e) => setVoucherSearchTerm(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-slate-800 font-medium placeholder-slate-400 outline-none"
+                />
+              </div>
+
+              <div className="w-full sm:w-56">
+                <Select
+                  value={voucherPaymentFilter}
+                  onChange={(e) => setVoucherPaymentFilter(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                >
+                  <option value="ALL">💳 Todos los Medios</option>
+                  <option value="TRANSFERENCIA">🏦 Transferencia Bancaria</option>
+                  <option value="CHEQUE">📝 Cheque de Empresa</option>
+                  <option value="EFECTIVO">💵 Efectivo / Caja</option>
+                  <option value="TARJETA">💳 Tarjeta Corporativa</option>
+                </Select>
+              </div>
+            </div>
+
+            {/* Tabla de Comprobantes de Egreso */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400 font-sans text-xs">
-                      No hay comprobantes de egreso registrados.
-                    </td>
+                    <th className="py-3 px-4">N° Comprobante</th>
+                    <th className="py-3 px-4">Fecha</th>
+                    <th className="py-3 px-4">Pagado A (Beneficiario)</th>
+                    <th className="py-3 px-4">Forma de Pago</th>
+                    <th className="py-3 px-4">Concepto / Justificación</th>
+                    <th className="py-3 px-4 text-right">Monto ($)</th>
+                    <th className="py-3 px-4 text-center">Acciones</th>
                   </tr>
-                ) : (
-                  journalEntries.filter(e => e.type === 'EGRESO').map((ce) => (
-                    <tr key={ce.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-4 font-black text-slate-900">{ce.entryNumber}</td>
-                      <td className="py-3 px-4 text-slate-500">{ce.date}</td>
-                      <td className="py-3 px-4 font-bold text-slate-800">PROVEEDORES VARIOS</td>
-                      <td className="py-3 px-4 text-slate-600 font-sans">{ce.concept}</td>
-                      <td className="py-3 px-4 text-right font-black text-rose-600 text-sm">
-                        {formatCurrency(ce.totalCredit, settings.currencySymbol)}
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
+                  {filteredExpenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400 font-sans text-xs">
+                        No hay comprobantes de egreso registrados.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredExpenses.map((ce) => (
+                      <tr key={ce.id} className="hover:bg-slate-50">
+                        <td className="py-3 px-4 font-black text-rose-600">{ce.voucherNumber}</td>
+                        <td className="py-3 px-4 text-slate-500">{ce.date}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-sans font-bold text-slate-900">{ce.beneficiaryOrPayer}</div>
+                          {ce.identification && <div className="text-[10px] text-slate-400">RUC/CI: {ce.identification}</div>}
+                        </td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            ce.paymentMethod === 'CHEQUE' 
+                              ? 'bg-purple-50 text-purple-800 border border-purple-200' 
+                              : ce.paymentMethod === 'TRANSFERENCIA' 
+                              ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                              : 'bg-amber-50 text-amber-800 border border-amber-200'
+                          }`}>
+                            {ce.paymentMethod}
+                          </span>
+                          {ce.referenceNumber && <div className="text-[10px] text-slate-400 font-mono mt-0.5">Ref/Chq: {ce.referenceNumber}</div>}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-sans max-w-xs truncate">{ce.concept}</td>
+                        <td className="py-3 px-4 text-right font-black text-rose-600 text-sm">
+                          {formatCurrency(ce.amount, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-center font-sans">
+                          <button
+                            onClick={() => setSelectedVoucherForPrint(ce as AccountingVoucher)}
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                            title="Ver e Imprimir Comprobante Oficial con Firmas"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 7: ASIENTOS (Libro Diario)
@@ -6023,6 +7537,818 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                 type="button"
                 onClick={() => setSelectedReconciliationDetail(null)}
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EMISION DE NUEVO COMPROBANTE DE INGRESO / EGRESO */}
+      {isVoucherModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl animate-fadeIn max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-black text-slate-950 text-base flex items-center gap-2">
+                {voucherModalType === 'INGRESO' ? (
+                  <>
+                    <FileText className="w-5 h-5 text-teal-600" />
+                    <span>Emitir Comprobante Contable de Ingreso (C.I.)</span>
+                  </>
+                ) : (
+                  <>
+                    <FileX className="w-5 h-5 text-rose-600" />
+                    <span>Emitir Comprobante Contable de Egreso (C.E.)</span>
+                  </>
+                )}
+              </h3>
+              <button onClick={() => setIsVoucherModalOpen(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveVoucher} className="space-y-4 text-xs">
+              {/* Fila 1: Fecha y Beneficiario/Pagador */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Fecha Emisión *</label>
+                  <input
+                    type="date"
+                    required
+                    value={newVoucher.date}
+                    onChange={(e) => setNewVoucher({ ...newVoucher, date: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                    {voucherModalType === 'INGRESO' ? 'Recaudado De (Cliente / Pagador) *' : 'Pagado A (Beneficiario / Proveedor) *'}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder={voucherModalType === 'INGRESO' ? "ej: Juan Carlos Morales" : "ej: Corporación Ferretera del Austro"}
+                      value={newVoucher.beneficiaryOrPayer}
+                      onChange={(e) => setNewVoucher({ ...newVoucher, beneficiaryOrPayer: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                    />
+                    {voucherModalType === 'INGRESO' && customers.length > 0 && (
+                      <Select
+                        value=""
+                        onChange={(e) => {
+                          const c = customers.find(cust => cust.id === e.target.value);
+                          if (c) {
+                            setNewVoucher({
+                              ...newVoucher,
+                              beneficiaryOrPayer: c.name || `${c.firstName || ''} ${c.lastName || ''}`,
+                              identification: c.taxId || c.identification || ''
+                            });
+                          }
+                        }}
+                        className="w-36 bg-slate-100 border border-slate-200 rounded-xl px-2 py-2 text-[10px] font-bold text-slate-700"
+                      >
+                        <option value="">Clientes...</option>
+                        {customers.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name || `${c.firstName || ''} ${c.lastName || ''}`}</option>
+                        ))}
+                      </Select>
+                    )}
+                    {voucherModalType === 'EGRESO' && suppliers.length > 0 && (
+                      <Select
+                        value=""
+                        onChange={(e) => {
+                          const s = suppliers.find(sup => sup.id === e.target.value);
+                          if (s) {
+                            setNewVoucher({
+                              ...newVoucher,
+                              beneficiaryOrPayer: s.businessName || s.name,
+                              identification: s.taxId || s.identification || ''
+                            });
+                          }
+                        }}
+                        className="w-36 bg-slate-100 border border-slate-200 rounded-xl px-2 py-2 text-[10px] font-bold text-slate-700"
+                      >
+                        <option value="">Proveedores...</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>{s.businessName || s.name}</option>
+                        ))}
+                      </Select>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fila 2: Identificación y Medio de Pago */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">RUC / Cédula de Identidad</label>
+                  <input
+                    type="text"
+                    placeholder="1790012345001"
+                    value={newVoucher.identification}
+                    onChange={(e) => setNewVoucher({ ...newVoucher, identification: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Forma de Pago / Cobro *</label>
+                  <Select
+                    value={newVoucher.paymentMethod}
+                    onChange={(e) => setNewVoucher({ ...newVoucher, paymentMethod: e.target.value as any })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                  >
+                    <option value="TRANSFERENCIA">Transferencia Bancaria</option>
+                    <option value="EFECTIVO">Efectivo (Caja General)</option>
+                    <option value="CHEQUE">Cheque</option>
+                    <option value="TARJETA">Tarjeta de Débito / Crédito</option>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Monto Total ($) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={newVoucher.amount || ''}
+                    onChange={(e) => setNewVoucher({ ...newVoucher, amount: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-black font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Fila 3: Cuentas Bancarias y Referencias si no es Efectivo */}
+              {newVoucher.paymentMethod !== 'EFECTIVO' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 border border-indigo-100 p-3 rounded-2xl">
+                  <div>
+                    <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">
+                      {voucherModalType === 'INGRESO' ? 'Cuenta Bancaria de Destino (Depósito)' : 'Cuenta Bancaria de Origen (Débito)'}
+                    </label>
+                    <Select
+                      value={newVoucher.bankAccountId}
+                      onChange={(e) => setNewVoucher({ ...newVoucher, bankAccountId: e.target.value })}
+                      className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                    >
+                      <option value="">-- Seleccionar Cuenta de Banco --</option>
+                      {bankAccounts.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.bankName} - Cta. {b.accountNumber} ({formatCurrency(b.currentBalance || 0, settings.currencySymbol)})
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">
+                      {newVoucher.paymentMethod === 'CHEQUE' ? 'Número de Cheque *' : 'Número de Transferencia / Comprobante Bancario'}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={newVoucher.paymentMethod === 'CHEQUE' ? "ej: CHQ-001452" : "ej: TRANSF-98741235"}
+                      value={newVoucher.referenceNumber}
+                      onChange={(e) => setNewVoucher({ ...newVoucher, referenceNumber: e.target.value })}
+                      className="w-full bg-white border border-indigo-200 rounded-xl px-3 py-2 text-slate-900 font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Fila 4: Cuenta Contrapartida NIIF */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                  {voucherModalType === 'INGRESO' 
+                    ? 'Cuenta de Contrapartida NIIF (Haber: Causa del Ingreso) *' 
+                    : 'Cuenta de Contrapartida NIIF (Debe: Causa del Gasto / Pasivo) *'}
+                </label>
+                <Select
+                  value={newVoucher.counterAccountCode}
+                  onChange={(e) => setNewVoucher({ ...newVoucher, counterAccountCode: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold"
+                >
+                  {voucherModalType === 'INGRESO' ? (
+                    <>
+                      <option value="1.1.02.01.01">1.1.02.01.01 - Clientes Locales (Cobro de Cartera)</option>
+                      <option value="4.1.01.01">4.1.01.01 - Ventas de Mercaderías Contado</option>
+                      <option value="2.1.05.01">2.1.05.01 - Anticipos de Clientes</option>
+                      <option value="3.1.01.01">3.1.01.01 - Aportes de Capital / Socios</option>
+                      <option value="4.2.01.01">4.2.01.01 - Otros Ingresos No Operacionales</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="2.1.01.01.01">2.1.01.01.01 - Cuentas por Pagar Proveedores Locales</option>
+                      <option value="2.1.02.01">2.1.02.01 - Sueldos y Salarios por Pagar (Nómina)</option>
+                      <option value="5.2.01.01">5.2.01.01 - Gastos de Suministros y Materiales</option>
+                      <option value="5.2.01.02">5.2.01.02 - Gastos de Arrendamiento</option>
+                      <option value="5.2.01.03">5.2.01.03 - Gastos de Servicios Básicos (Luz, Agua, Internet)</option>
+                      <option value="5.2.01.04">5.2.01.04 - Mantenimiento y Reparaciones</option>
+                      <option value="1.1.04.01">1.1.04.01 - Anticipos a Proveedores</option>
+                    </>
+                  )}
+                  {accountPlan.filter(a => a.acceptsMovement && !['1.1.02.01.01', '2.1.01.01.01'].includes(a.code)).slice(0, 30).map((a) => (
+                    <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                  ))}
+                </Select>
+              </div>
+
+              {/* Fila 5: Concepto / Justificación */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Concepto / Glosa Justificativa *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Detallar el motivo comercial, número de facturas canceladas o justificación del movimiento..."
+                  value={newVoucher.concept}
+                  onChange={(e) => setNewVoucher({ ...newVoucher, concept: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 resize-none font-medium"
+                />
+              </div>
+
+              {/* Preview de Partida Doble en Tiempo Real */}
+              <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-2 font-mono text-xs">
+                <div className="flex justify-between items-center text-slate-400 text-[10px] uppercase tracking-wider pb-1 border-b border-slate-800">
+                  <span>Asiento Contable NIIF (Partida Doble Automática)</span>
+                  <span className="text-emerald-400 font-bold">Cuadrado: Total Debe === Total Haber</span>
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  {voucherModalType === 'INGRESO' ? (
+                    <>
+                      <div className="flex justify-between items-center text-slate-300">
+                        <span>
+                          <strong className="text-teal-400 font-bold">[DEBE]</strong> {newVoucher.paymentMethod === 'EFECTIVO' ? '1.1.01.01 Caja General' : '1.1.01.02 Bancos'}
+                        </span>
+                        <strong className="text-emerald-400">{formatCurrency(newVoucher.amount || 0, settings.currencySymbol)}</strong>
+                      </div>
+                      <div className="flex justify-between items-center text-slate-300 pl-4">
+                        <span>
+                          <strong className="text-indigo-400 font-bold">[HABER]</strong> {newVoucher.counterAccountCode || '1.1.02.01.01 Clientes Locales'}
+                        </span>
+                        <strong className="text-sky-400">{formatCurrency(newVoucher.amount || 0, settings.currencySymbol)}</strong>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center text-slate-300">
+                        <span>
+                          <strong className="text-teal-400 font-bold">[DEBE]</strong> {newVoucher.counterAccountCode || '2.1.01.01.01 Proveedores Locales'}
+                        </span>
+                        <strong className="text-emerald-400">{formatCurrency(newVoucher.amount || 0, settings.currencySymbol)}</strong>
+                      </div>
+                      <div className="flex justify-between items-center text-slate-300 pl-4">
+                        <span>
+                          <strong className="text-rose-400 font-bold">[HABER]</strong> {newVoucher.paymentMethod === 'EFECTIVO' ? '1.1.01.01 Caja General' : '1.1.01.02 Bancos'}
+                        </span>
+                        <strong className="text-sky-400">{formatCurrency(newVoucher.amount || 0, settings.currencySymbol)}</strong>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Botones de Acción */}
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsVoucherModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className={`px-5 py-2 text-white font-black rounded-xl shadow-md cursor-pointer transition ${
+                    voucherModalType === 'INGRESO'
+                      ? 'bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700'
+                      : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700'
+                  }`}
+                >
+                  Asentar y Emitir Comprobante
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISUALIZACION E IMPRESION FORMAL DE COMPROBANTE OFICIAL (C.I. / C.E.) */}
+      {selectedVoucherForPrint && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full p-8 space-y-6 shadow-2xl animate-fadeIn max-h-[92vh] overflow-y-auto">
+            {/* Cabecera Institucional del Comprobante */}
+            <div className="border-b-2 border-slate-900 pb-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-black text-xl text-slate-950 tracking-tight">
+                    {settings.legalName || settings.storeName || 'EMPRESA COMERCIAL'}
+                  </h2>
+                  <p className="text-xs text-slate-600 font-mono mt-0.5">
+                    RUC: {settings.taxId || '1790000000001'} | Matriz: {settings.address || 'Quito - Ecuador'}
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className={`inline-block px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${
+                    selectedVoucherForPrint.type === 'INGRESO'
+                      ? 'bg-teal-100 text-teal-800 border border-teal-300'
+                      : 'bg-rose-100 text-rose-800 border border-rose-300'
+                  }`}>
+                    {selectedVoucherForPrint.type === 'INGRESO' ? 'COMPROBANTE DE INGRESO' : 'COMPROBANTE DE EGRESO'}
+                  </span>
+                  <div className="font-mono font-black text-lg text-slate-900 mt-1">
+                    {selectedVoucherForPrint.voucherNumber}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Ficha de Información de la Transacción */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Fecha de Emisión</span>
+                <span className="font-bold text-slate-900">{selectedVoucherForPrint.date}</span>
+              </div>
+              <div className="sm:col-span-2">
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                  {selectedVoucherForPrint.type === 'INGRESO' ? 'Recaudado De (Pagador)' : 'Pagado A (Beneficiario)'}
+                </span>
+                <span className="font-bold text-slate-900 font-sans text-sm block truncate">
+                  {selectedVoucherForPrint.beneficiaryOrPayer}
+                </span>
+                {selectedVoucherForPrint.identification && (
+                  <span className="text-[10px] text-slate-500">RUC/CI: {selectedVoucherForPrint.identification}</span>
+                )}
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Monto Total</span>
+                <span className="font-black text-slate-900 text-base">
+                  {formatCurrency(selectedVoucherForPrint.amount, settings.currencySymbol)}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Forma de Pago</span>
+                <span className="font-bold text-slate-800 font-sans">{selectedVoucherForPrint.paymentMethod}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Banco / Institución</span>
+                <span className="font-bold text-slate-800 font-sans">{selectedVoucherForPrint.bankName || 'Caja General'}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">N° Referencia / Cheque</span>
+                <span className="font-bold text-slate-800">{selectedVoucherForPrint.referenceNumber || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 block uppercase font-bold">Estado Contable</span>
+                <span className="font-bold text-emerald-600">ASENTADO (DIARIO)</span>
+              </div>
+            </div>
+
+            {/* Concepto / Glosa */}
+            <div className="bg-white border border-slate-200 p-3 rounded-xl text-xs space-y-1">
+              <span className="text-[10px] text-slate-400 uppercase font-bold block">Concepto / Justificación de la Operación</span>
+              <p className="text-slate-800 font-sans font-medium leading-relaxed">
+                {selectedVoucherForPrint.concept}
+              </p>
+            </div>
+
+            {/* Tabla de Partida Doble Formal */}
+            <div>
+              <span className="text-[10px] text-slate-500 uppercase font-black tracking-wider block mb-1.5">
+                Desglose Contable de Partida Doble (NIIF)
+              </span>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-slate-950 text-white uppercase text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3">Código Cuenta</th>
+                      <th className="py-2.5 px-3">Descripción de la Cuenta</th>
+                      <th className="py-2.5 px-3 text-right">Debe ($)</th>
+                      <th className="py-2.5 px-3 text-right">Haber ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                    {selectedVoucherForPrint.items.map((it, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 font-bold text-indigo-600">{it.accountCode}</td>
+                        <td className="py-2 px-3 font-sans font-bold text-slate-900">{it.accountName}</td>
+                        <td className="py-2 px-3 text-right font-black text-slate-900">
+                          {it.debit > 0 ? formatCurrency(it.debit, settings.currencySymbol) : '-'}
+                        </td>
+                        <td className="py-2 px-3 text-right font-black text-slate-900">
+                          {it.credit > 0 ? formatCurrency(it.credit, settings.currencySymbol) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t-2 border-slate-900 font-black text-slate-950 text-xs">
+                    <tr>
+                      <td colSpan={2} className="py-2.5 px-3 uppercase text-right">Totales Cuadrados:</td>
+                      <td className="py-2.5 px-3 text-right text-emerald-600">
+                        {formatCurrency(selectedVoucherForPrint.totalDebit, settings.currencySymbol)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-emerald-600">
+                        {formatCurrency(selectedVoucherForPrint.totalCredit, settings.currencySymbol)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Recuadros Oficiales de Firmas */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6 text-center text-xs font-mono">
+              <div className="border-t border-slate-400 pt-2">
+                <div className="font-bold text-slate-900">{selectedVoucherForPrint.user || 'Elaborado Por'}</div>
+                <div className="text-[10px] text-slate-400">Elaborador / Digitador</div>
+              </div>
+
+              <div className="border-t border-slate-400 pt-2">
+                <div className="font-bold text-slate-900">{selectedVoucherForPrint.reviewedBy || 'Contabilidad'}</div>
+                <div className="text-[10px] text-slate-400">Revisado Contabilidad</div>
+              </div>
+
+              <div className="border-t border-slate-400 pt-2">
+                <div className="font-bold text-slate-900">{selectedVoucherForPrint.approvedBy || 'Gerencia'}</div>
+                <div className="text-[10px] text-slate-400">Aprobado Gerencia</div>
+              </div>
+
+              <div className="border-t border-slate-400 pt-2">
+                <div className="font-bold text-slate-900">Firma Beneficiario / Pagador</div>
+                <div className="text-[10px] text-slate-400">Recibí Conforme / C.I.</div>
+              </div>
+            </div>
+
+            {/* Acciones del Modal */}
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-md transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Comprobante Oficial</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedVoucherForPrint(null)}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer transition"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL: IMPORTAR EXTRACTO BANCARIO DIGITAL
+         ===================================================================== */}
+      {isImportStatementModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl p-6 space-y-5 shadow-2xl my-8">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-950">
+                    Importar Extracto Bancario Digital
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Copie y pegue filas desde su banca virtual o archivo CSV / Excel.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsImportStatementModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleProcessImportedStatement} className="space-y-4">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Formato por cada línea (separado por tabulación o coma):</span>
+                </div>
+                <code className="block bg-white p-2 rounded border border-slate-200 text-[11px] font-mono text-slate-700">
+                  Fecha (YYYY-MM-DD), N° Referencia, Descripción, Tipo (DEBITO o CREDITO), Monto
+                </code>
+                <p className="text-[10px] text-slate-400">
+                  Ejemplo: 2026-09-12, DEP-00812, Deposito Venta, CREDITO, 450.00
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Líneas del extracto bancario:</label>
+                <textarea
+                  rows={8}
+                  value={rawStatementText}
+                  onChange={(e) => setRawStatementText(e.target.value)}
+                  placeholder={`2026-09-04\tTRF-9941\tCobro Factura Clientes\tCREDITO\t1200.00\n2026-09-15\tCHQ-1044\tPago Cheque Proveedor\tDEBITO\t350.00\n2026-09-28\tND-001\tComision Transferencia\tDEBITO\t0.45`}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-emerald-500 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex justify-between items-center pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLoadSampleStatement();
+                    setIsImportStatementModalOpen(false);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cargar Ejemplo
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsImportStatementModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm"
+                  >
+                    Procesar e Importar
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL: GENERAR ASIENTO DE AJUSTE CONTABLE
+         ===================================================================== */}
+      {isAdjustmentModalOpen && activeAdjustmentLine && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg p-6 space-y-5 shadow-2xl my-8">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl">
+                  <Calculator className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-950">
+                    Generar Asiento Contable de Ajuste
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Regularización automática en Libro Diario por operación bancaria no registrada.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAdjustmentModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAdjustmentEntry} className="space-y-4 text-xs font-sans">
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 font-mono">
+                <div className="text-[10px] font-black uppercase text-slate-400">Detalle de la Partida del Extracto:</div>
+                <div className="grid grid-cols-2 gap-2 text-slate-800">
+                  <div><strong>Fecha:</strong> {activeAdjustmentLine.date}</div>
+                  <div><strong>Referencia:</strong> {activeAdjustmentLine.reference}</div>
+                  <div className="col-span-2"><strong>Descripción:</strong> {activeAdjustmentLine.description}</div>
+                  <div><strong>Tipo:</strong> <span className="font-bold text-rose-600">{activeAdjustmentLine.type}</span></div>
+                  <div><strong>Monto:</strong> <span className="font-black text-slate-950">{formatCurrency(activeAdjustmentLine.amount, settings.currencySymbol)}</span></div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">
+                  {activeAdjustmentLine.type === 'DEBITO' ? 'Cuenta de Gasto / Contrapartida:' : 'Cuenta de Ingreso / Contrapartida:'}
+                </label>
+                <Select
+                  value={adjustmentExpenseAccount}
+                  onChange={(e) => setAdjustmentExpenseAccount(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-medium text-slate-900"
+                >
+                  {accountPlan
+                    .filter(a => activeAdjustmentLine.type === 'DEBITO' ? a.type === 'GASTO' : a.type === 'INGRESO')
+                    .map(a => (
+                      <option key={a.code} value={a.code}>
+                        {a.code} - {a.name}
+                      </option>
+                    ))}
+                </Select>
+              </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl font-mono text-[11px] space-y-1">
+                <div className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Previsualización de Asiento en Partida Doble:</span>
+                </div>
+                {activeAdjustmentLine.type === 'DEBITO' ? (
+                  <>
+                    <div className="flex justify-between text-slate-700">
+                      <span>Debe: {adjustmentExpenseAccount} - Gastos Bancarios</span>
+                      <span className="font-bold">{formatCurrency(activeAdjustmentLine.amount, settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-700">
+                      <span>Haber: 1.1.01.02.01 - {selectedReconBank?.bankName || 'Bancos'}</span>
+                      <span className="font-bold">{formatCurrency(activeAdjustmentLine.amount, settings.currencySymbol)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-slate-700">
+                      <span>Debe: 1.1.01.02.01 - {selectedReconBank?.bankName || 'Bancos'}</span>
+                      <span className="font-bold">{formatCurrency(activeAdjustmentLine.amount, settings.currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-700">
+                      <span>Haber: {adjustmentExpenseAccount} - Ingresos Financieros</span>
+                      <span className="font-bold">{formatCurrency(activeAdjustmentLine.amount, settings.currencySymbol)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAdjustmentModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-sm"
+                >
+                  Generar y Asentar en Libro Diario
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL: ACTA OFICIAL DE CONCILIACIÓN BANCARIA Y LIQUIDACIÓN
+         ===================================================================== */}
+      {isReportModalOpen && reportReconciliationData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-8 space-y-6 shadow-2xl my-8 text-slate-900 font-sans print:p-0 print:border-none print:shadow-none">
+            {/* Header Oficial Institucional */}
+            <div className="border-b-2 border-slate-950 pb-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl font-black tracking-tight text-slate-950 uppercase">
+                    {settings.storeName || 'FERRETERÍA DAYNET'}
+                  </h1>
+                  <div className="text-xs text-slate-600 font-mono mt-0.5 space-x-3">
+                    <span>RUC: {settings.taxId || '0999999999001'}</span>
+                    <span>•</span>
+                    <span>{settings.address || 'Guayaquil, Ecuador'}</span>
+                  </div>
+                </div>
+                <div className="text-right sm:text-right">
+                  <div className="inline-block px-3 py-1 bg-slate-900 text-white text-xs font-black rounded-lg uppercase tracking-wider">
+                    Acta de Conciliación Bancaria
+                  </div>
+                  <div className="text-xs font-mono text-slate-500 mt-1">
+                    Periodo Fiscal: <strong className="text-slate-950">{reportReconciliationData.periodMonth}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Datos de la Entidad Bancaria */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-200 p-4 rounded-2xl text-xs font-mono">
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase font-bold">Institución Financiera:</div>
+                <div className="text-sm font-black text-slate-900 mt-0.5">{reportReconciliationData.bankName}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase font-bold">N° de Cuenta:</div>
+                <div className="text-sm font-black text-slate-900 mt-0.5">{reportReconciliationData.accountNumber}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase font-bold">Fecha de Liquidación:</div>
+                <div className="text-sm font-bold text-slate-800 mt-0.5">{reportReconciliationData.closingDate || new Date().toISOString().split('T')[0]}</div>
+              </div>
+            </div>
+
+            {/* Cuadro Matemático de Conciliación y Liquidación */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-mono">
+              {/* Columna 1: Banco */}
+              <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-slate-50/50">
+                <div className="font-black text-slate-900 border-b pb-2 uppercase text-[11px] text-emerald-800">
+                  1. Liquidación según Extracto Bancario
+                </div>
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between py-1 border-b border-slate-200">
+                    <span>Saldo según Estado de Cuenta del Banco:</span>
+                    <span className="font-black">{formatCurrency(reportReconciliationData.statementClosingBalance, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 text-emerald-700">
+                    <span>(+) Depósitos y Cobros en Tránsito:</span>
+                    <span className="font-bold">+{formatCurrency(totalDepositosEnTransito, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 text-rose-700">
+                    <span>(-) Cheques Girados y no Cobrados:</span>
+                    <span className="font-bold">-{formatCurrency(totalChequesGiradosEnTransito, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 font-black text-sm bg-emerald-50 border border-emerald-200 px-3 rounded-xl text-emerald-950">
+                    <span>(=) Saldo Conciliado de Banco:</span>
+                    <span>{formatCurrency(reportReconciliationData.reconciledBankBalance, settings.currencySymbol)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Columna 2: Libros */}
+              <div className="border border-slate-200 rounded-2xl p-4 space-y-2 bg-slate-50/50">
+                <div className="font-black text-slate-900 border-b pb-2 uppercase text-[11px] text-sky-800">
+                  2. Liquidación según Libro Auxiliar
+                </div>
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex justify-between py-1 border-b border-slate-200">
+                    <span>Saldo según Libro Mayor de Bancos:</span>
+                    <span className="font-black">{formatCurrency(reportReconciliationData.bookBalance, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 text-emerald-700">
+                    <span>(+) Notas de Crédito / Rendimientos:</span>
+                    <span className="font-bold">+{formatCurrency(totalNotasCreditoNoRegistradas, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200 text-rose-700">
+                    <span>(-) Notas de Débito / Comisiones:</span>
+                    <span className="font-bold">-{formatCurrency(totalNotasDebitoNoRegistradas, settings.currencySymbol)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 font-black text-sm bg-sky-50 border border-sky-200 px-3 rounded-xl text-sky-950">
+                    <span>(=) Saldo Conciliado de Libros:</span>
+                    <span>{formatCurrency(reportReconciliationData.reconciledBookBalance, settings.currencySymbol)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Dictamen de Cuadre */}
+            <div className={`p-4 rounded-2xl border text-center font-mono text-xs ${
+              Math.abs(reportReconciliationData.difference) < 0.01
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}>
+              <div className="font-black text-sm">
+                DIFERENCIA DE CONCILIACIÓN: {formatCurrency(reportReconciliationData.difference, settings.currencySymbol)}
+              </div>
+              <div className="text-[11px] mt-1 font-sans">
+                {Math.abs(reportReconciliationData.difference) < 0.01
+                  ? 'CERTIFICACIÓN: Los saldos contables y bancarios se encuentran conciliados matemáticamente con absoluta transparencia bajo normativa NIIF.'
+                  : 'OBSERVACIÓN: Existen partidas transitorias o notas de débito pendientes de regularizar.'}
+              </div>
+            </div>
+
+            {/* Firmas de Auditoría y Cuadre */}
+            <div className="grid grid-cols-3 gap-6 pt-10 text-center text-xs font-mono">
+              <div className="border-t-2 border-slate-950 pt-3">
+                <div className="font-black text-slate-950">TESORERÍA</div>
+                <div className="text-[10px] text-slate-500">Elaborador / Custodio</div>
+              </div>
+              <div className="border-t-2 border-slate-950 pt-3">
+                <div className="font-black text-slate-950">CONTADOR GENERAL</div>
+                <div className="text-[10px] text-slate-500">Revisión y Mayorización</div>
+              </div>
+              <div className="border-t-2 border-slate-950 pt-3">
+                <div className="font-black text-slate-950">AUDITORÍA / GERENCIA</div>
+                <div className="text-[10px] text-slate-500">Aprobación Final</div>
+              </div>
+            </div>
+
+            {/* Acciones del Modal */}
+            <div className="flex justify-between items-center pt-4 border-t border-slate-200 print:hidden">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-md transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Acta Oficial Certificada</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(false)}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs cursor-pointer transition"
               >
                 Cerrar
               </button>

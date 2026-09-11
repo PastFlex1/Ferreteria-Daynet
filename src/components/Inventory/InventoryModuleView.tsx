@@ -43,9 +43,14 @@ import {
   AlertCircle,
   Eye,
   MapPin,
-  User
+  User,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
-import { InventorySubTab, Product, ProductCategory, Promotion, StoreSettings } from '../../types';
+import { InventorySubTab, Product, ProductCategory, Promotion, PromotionItem, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { InventoryManager } from './InventoryManager';
 import { BarcodeLabelsManager } from './BarcodeLabelsManager';
@@ -335,17 +340,199 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
 
   // 1. Promociones State (persisted in Firestore so POS can read them)
   const [promotions, setPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
-  const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
-  const [newPromo, setNewPromo] = useState<Partial<Promotion>>({
-    code: '',
-    name: '',
-    discountPercent: 10,
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: '2026-12-31',
-    status: 'ACTIVA',
-    minQuantity: 1,
-    appliedCategory: 'Herramientas Manuales'
-  });
+  const [isCreatingPromo, setIsCreatingPromo] = useState(false);
+  const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
+  const [promoName, setPromoName] = useState('Campaña Promocional');
+  const [promoCode, setPromoCode] = useState('');
+  const [promoStartDate, setPromoStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [promoEndDate, setPromoEndDate] = useState('2026-12-31');
+  const [massDiscount, setMassDiscount] = useState<number>(0);
+  const [promoSearchQuery, setPromoSearchQuery] = useState('');
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
+  const [isPromoSettingsOpen, setIsPromoSettingsOpen] = useState(false);
+  const [promoItems, setPromoItems] = useState<PromotionItem[]>([]);
+  const [promoCurrentPage, setPromoCurrentPage] = useState(1);
+  const promoPageSize = 10;
+
+  const handleOpenCreatePromo = (promoToEdit?: Promotion) => {
+    if (promoToEdit) {
+      setEditingPromoId(promoToEdit.id);
+      setPromoName(promoToEdit.name || 'Campaña Promocional');
+      setPromoCode(promoToEdit.code || '');
+      setPromoStartDate(promoToEdit.startDate || new Date().toISOString().split('T')[0]);
+      setPromoEndDate(promoToEdit.endDate || '2026-12-31');
+      setMassDiscount(promoToEdit.discountPercent || 0);
+      setPromoItems(promoToEdit.items || []);
+    } else {
+      setEditingPromoId(null);
+      const generatedCode = `PROMO-${Math.floor(1000 + Math.random() * 9000)}`;
+      setPromoCode(generatedCode);
+      setPromoName('Campaña Promocional');
+      const today = new Date().toISOString().split('T')[0];
+      setPromoStartDate(today);
+      setPromoEndDate('2026-12-31');
+      setMassDiscount(0);
+      setPromoItems([]);
+    }
+    setPromoSearchQuery('');
+    setIsSearchDropdownOpen(false);
+    setIsPromoSettingsOpen(false);
+    setPromoCurrentPage(1);
+    setIsCreatingPromo(true);
+  };
+
+  const handleApplyMassDiscount = () => {
+    const val = Math.max(0, Math.min(100, massDiscount));
+    setPromoItems((prev) =>
+      prev.map((item) => {
+        const discountAmount = Number((item.currentPrice * (val / 100)).toFixed(4));
+        const finalPrice = Number(Math.max(0, item.currentPrice - discountAmount).toFixed(4));
+        return {
+          ...item,
+          discountPercent: val,
+          discountAmount,
+          finalPrice,
+        };
+      })
+    );
+  };
+
+  const handleAddProductToPromo = (product: Product) => {
+    if (promoItems.some((item) => item.productId === product.id)) {
+      setPromoSearchQuery('');
+      setIsSearchDropdownOpen(false);
+      return;
+    }
+    const currentPrice = Number((product.price || 0).toFixed(4));
+    const discountPercent = massDiscount > 0 ? massDiscount : 10;
+    const discountAmount = Number((currentPrice * (discountPercent / 100)).toFixed(4));
+    const finalPrice = Number(Math.max(0, currentPrice - discountAmount).toFixed(4));
+
+    const newItem: PromotionItem = {
+      productId: product.id,
+      productName: product.name.toUpperCase(),
+      sku: product.sku,
+      barcode: product.barcode || product.sku,
+      currentPrice,
+      discountPercent,
+      discountAmount,
+      finalPrice,
+    };
+
+    setPromoItems((prev) => [newItem, ...prev]);
+    setPromoSearchQuery('');
+    setIsSearchDropdownOpen(false);
+  };
+
+  const handleUpdateItemDiscount = (indexInItems: number, delta: number) => {
+    setPromoItems((prev) => {
+      const updated = [...prev];
+      const target = updated[indexInItems];
+      if (!target) return prev;
+      const newPercent = Math.max(0, Math.min(100, (target.discountPercent || 0) + delta));
+      const discountAmount = Number((target.currentPrice * (newPercent / 100)).toFixed(4));
+      const finalPrice = Number(Math.max(0, target.currentPrice - discountAmount).toFixed(4));
+      updated[indexInItems] = {
+        ...target,
+        discountPercent: newPercent,
+        discountAmount,
+        finalPrice,
+      };
+      return updated;
+    });
+  };
+
+  const handleSetItemDiscountDirect = (indexInItems: number, newPercentVal: number) => {
+    setPromoItems((prev) => {
+      const updated = [...prev];
+      const target = updated[indexInItems];
+      if (!target) return prev;
+      const newPercent = Math.max(0, Math.min(100, isNaN(newPercentVal) ? 0 : newPercentVal));
+      const discountAmount = Number((target.currentPrice * (newPercent / 100)).toFixed(4));
+      const finalPrice = Number(Math.max(0, target.currentPrice - discountAmount).toFixed(4));
+      updated[indexInItems] = {
+        ...target,
+        discountPercent: newPercent,
+        discountAmount,
+        finalPrice,
+      };
+      return updated;
+    });
+  };
+
+  const handleRemovePromoItem = (indexInItems: number) => {
+    setPromoItems((prev) => prev.filter((_, idx) => idx !== indexInItems));
+  };
+
+  const handleLoadDemoPromoItems = () => {
+    const demoItems: PromotionItem[] = [
+      {
+        productId: 'demo-1',
+        productName: 'BORRADOR GRANDE PZ 20',
+        sku: '7703064446502',
+        barcode: '7703064446502',
+        currentPrice: 2.8156,
+        discountPercent: 10,
+        discountAmount: 0.2816,
+        finalPrice: 2.5340,
+      },
+      {
+        productId: 'demo-2',
+        productName: 'PINTURA MI NOTA LARGA X 12',
+        sku: '7707323871147',
+        barcode: '7707323871147',
+        currentPrice: 10.6080,
+        discountPercent: 10,
+        discountAmount: 1.0608,
+        finalPrice: 9.5472,
+      },
+      {
+        productId: 'demo-3',
+        productName: 'CERVEZA PILSENER 355ML',
+        sku: '7861002700010',
+        barcode: '7861002700010',
+        currentPrice: 1.2500,
+        discountPercent: 10,
+        discountAmount: 0.1250,
+        finalPrice: 1.1250,
+      },
+    ];
+    setPromoItems(demoItems);
+    setIsPromoSettingsOpen(false);
+  };
+
+  const handleSavePromoRecord = () => {
+    if (promoItems.length === 0) {
+      alert('Debe agregar al menos un producto a la promoción.');
+      return;
+    }
+    const promoId = editingPromoId || `promo-${Date.now()}`;
+    const code = promoCode.trim() || `PROMO-${Date.now().toString().slice(-4)}`;
+    const name = promoName.trim() || `Campaña ${promoItems.length} Productos`;
+    const avgDiscount = Math.round(
+      promoItems.reduce((acc, curr) => acc + curr.discountPercent, 0) / promoItems.length
+    );
+
+    const savedPromo: Promotion = {
+      id: promoId,
+      code,
+      name,
+      discountPercent: avgDiscount,
+      startDate: promoStartDate,
+      endDate: promoEndDate,
+      status: 'ACTIVA',
+      minQuantity: 1,
+      appliedCategory: 'TODOS',
+      items: promoItems,
+    };
+
+    if (editingPromoId) {
+      setPromotions((prev) => prev.map((p) => (p.id === editingPromoId ? savedPromo : p)));
+    } else {
+      setPromotions((prev) => [savedPromo, ...prev]);
+    }
+    setIsCreatingPromo(false);
+  };
 
   // 2. Unidades de Medida State removed in favor of global props
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
@@ -1833,272 +2020,537 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           SUBTAB 2: PROMOCIONES
          --------------------------------------------------------------------- */}
       {subTab === 'PROMOCIONES' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Tag className="w-5 h-5 text-pink-500" />
-                <span>Gestor de Ofertas & Promociones</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Configura campañas de descuento por porcentaje, combos o volúmenes de compra.
-              </p>
-            </div>
+        <div className="space-y-6">
+          {isCreatingPromo ? (
+            /* + CREACIÓN DE UNA PROMOCIÓN VIEW (MATCHING THE SCREENSHOT) */
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6 font-sans">
+              {/* Header Title */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <span className="text-blue-600 text-2xl leading-none font-bold">+</span>
+                  <span>{editingPromoId ? 'Editar Promoción' : 'Creación de una Promoción'}</span>
+                </h2>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs font-bold text-slate-500">
+                    Código: <span className="font-mono text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{promoCode}</span>
+                  </div>
+                </div>
+              </div>
 
-            <button
-              onClick={() => setIsPromoModalOpen(true)}
-              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nueva Promoción</span>
-            </button>
-          </div>
+              {/* Row 1: Fecha de inicio y finalización | Descuento masivo */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                {/* Left: Fecha de inicio y finalización */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Fecha de inicio y finalización:
+                  </label>
+                  <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 shadow-inner">
+                    <input
+                      type="date"
+                      value={promoStartDate}
+                      onChange={(e) => setPromoStartDate(e.target.value)}
+                      className="bg-transparent border-none outline-none font-mono text-slate-800 cursor-pointer"
+                    />
+                    <span className="mx-2 text-slate-400 font-bold">-</span>
+                    <input
+                      type="date"
+                      value={promoEndDate}
+                      onChange={(e) => setPromoEndDate(e.target.value)}
+                      className="bg-transparent border-none outline-none font-mono text-slate-800 cursor-pointer"
+                    />
+                    <Calendar className="w-4 h-4 text-slate-400 ml-auto" />
+                  </div>
+                </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Código / Nombre</th>
-                  <th className="py-3 px-4">Aplica A (Producto / Alcance)</th>
-                  <th className="py-3 px-4 text-center">Descuento</th>
-                  <th className="py-3 px-4 text-center">Min. Cantidad</th>
-                  <th className="py-3 px-4 text-center">Vigencia</th>
-                  <th className="py-3 px-4 text-center">Estado</th>
-                  <th className="py-3 px-4 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {promotions.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50 transition">
-                    <td className="py-3 px-4 font-black text-slate-900">
-                      <span className="font-mono text-orange-600 text-[11px] block">{p.code}</span>
-                      {p.name}
-                    </td>
-                    <td className="py-3 px-4 font-bold text-slate-700">
-                      {p.productName ? (
-                        <span className="inline-flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-200">
-                          📦 {p.productName}
-                        </span>
-                      ) : p.appliedCategory && p.appliedCategory !== 'TODOS' ? (
-                        <span className="inline-flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
-                          📁 Categoría: {p.appliedCategory}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                          🌐 Todos los Productos
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-center font-mono font-black text-emerald-600 text-sm">
-                      {p.discountPercent}% OFF
-                    </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-slate-800">{p.minQuantity} u.</td>
-                    <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-600">
-                      {p.startDate} al {p.endDate}
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
-                          p.status === 'ACTIVA'
-                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                            : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}
-                      >
-                        {p.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-center">
+                {/* Right: Descuento masivo */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Descuento masivo:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex items-stretch border border-slate-300 rounded-lg overflow-hidden bg-white shadow-sm">
                       <button
-                        onClick={() => setPromotions(promotions.filter((item) => item.id !== p.id))}
-                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
-                        title="Eliminar Promoción"
+                        type="button"
+                        onClick={() => setMassDiscount((prev) => Math.max(0, prev - 1))}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border-r border-slate-300 transition text-sm cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        -
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Promo Modal */}
-          {isPromoModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
-              <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl my-auto">
-                <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
-                  <Tag className="w-5 h-5 text-orange-500" />
-                  <span>Crear Nueva Campaña Promocional</span>
-                </h3>
-
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="block font-black text-slate-800 mb-1">Producto Específico (Opcional)</label>
-                    <Select
-                      value={newPromo.productId || ''}
-                      onChange={(e) => {
-                        const pid = e.target.value;
-                        if (pid) {
-                          const selectedProd = products.find((p) => p.id === pid);
-                          if (selectedProd) {
-                            setNewPromo({
-                              ...newPromo,
-                              productId: selectedProd.id,
-                              productName: selectedProd.name,
-                              appliedCategory: selectedProd.category,
-                            });
-                          }
-                        } else {
-                          setNewPromo({
-                            ...newPromo,
-                            productId: '',
-                            productName: '',
-                          });
-                        }
-                      }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                    >
-                      <option value="">-- Aplicar por Categoría o General --</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          📦 {p.name} ({p.sku})
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-
-                  {!newPromo.productId && (
-                    <div>
-                      <label className="block font-black text-slate-800 mb-1">Categoría Aplicada</label>
-                      <Select
-                        value={newPromo.appliedCategory || 'TODOS'}
-                        onChange={(e) => setNewPromo({ ...newPromo, appliedCategory: e.target.value })}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                      >
-                        <option value="TODOS">🌐 Todas las Categorías</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.name}>
-                            📁 {c.name}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block font-black text-slate-800 mb-1">Código Promocional *</label>
-                    <input
-                      type="text"
-                      value={newPromo.code}
-                      onChange={(e) => setNewPromo({ ...newPromo, code: e.target.value })}
-                      placeholder="ej: PROMO-HERRAMIENTAS10"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-black text-slate-800 mb-1">Nombre de la Oferta *</label>
-                    <input
-                      type="text"
-                      value={newPromo.name}
-                      onChange={(e) => setNewPromo({ ...newPromo, name: e.target.value })}
-                      placeholder="ej: 15% OFF en Martillos Stanley"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-black text-slate-800 mb-1">% Descuento *</label>
+                      <div className="flex items-center px-2.5 bg-slate-50 text-slate-500 font-bold text-xs border-r border-slate-200">
+                        %
+                      </div>
                       <input
                         type="number"
-                        step="any"
                         min="0"
                         max="100"
-                        value={newPromo.discountPercent}
-                        onChange={(e) => setNewPromo({ ...newPromo, discountPercent: parseFloat(e.target.value) || 0 })}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                        value={massDiscount}
+                        onChange={(e) => setMassDiscount(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
+                        className="w-16 px-2 py-1.5 text-center font-mono font-bold text-slate-800 text-xs outline-none bg-white"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setMassDiscount((prev) => Math.min(100, prev + 1))}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border-l border-slate-300 transition text-sm cursor-pointer"
+                      >
+                        +
+                      </button>
                     </div>
-                    <div>
-                      <label className="block font-black text-slate-800 mb-1">Mínimo Unidades *</label>
-                      <input
-                        type="number"
-                        step="any"
-                        min="1"
-                        value={newPromo.minQuantity}
-                        onChange={(e) => setNewPromo({ ...newPromo, minQuantity: parseFloat(e.target.value) || 1 })}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block font-black text-slate-800 mb-1">Fecha Inicio</label>
-                      <CustomDatePicker
-                        value={newPromo.startDate || new Date().toISOString().split('T')[0]}
-                        onChange={(val) => setNewPromo({ ...newPromo, startDate: val })}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-black text-slate-800 mb-1">Fecha Fin</label>
-                      <CustomDatePicker
-                        value={newPromo.endDate || '2026-12-31'}
-                        onChange={(val) => setNewPromo({ ...newPromo, endDate: val })}
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end space-x-2 pt-3 border-t border-slate-200">
                     <button
-                      onClick={() => setIsPromoModalOpen(false)}
-                      className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl"
+                      type="button"
+                      onClick={handleApplyMassDiscount}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer"
                     >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (newPromo.code && newPromo.name) {
-                          setPromotions([
-                            ...promotions,
-                            {
-                              id: `promo-${Date.now()}`,
-                              code: newPromo.code,
-                              name: newPromo.name,
-                              discountPercent: newPromo.discountPercent || 10,
-                              startDate: newPromo.startDate || new Date().toISOString().split('T')[0],
-                              endDate: newPromo.endDate || '2026-12-31',
-                              status: 'ACTIVA',
-                              minQuantity: newPromo.minQuantity || 1,
-                              appliedCategory: newPromo.appliedCategory || 'TODOS',
-                              productId: newPromo.productId || undefined,
-                              productName: newPromo.productName || undefined,
-                            }
-                          ]);
-                          setIsPromoModalOpen(false);
-                          setNewPromo({
-                            code: '',
-                            name: '',
-                            discountPercent: 10,
-                            startDate: new Date().toISOString().split('T')[0],
-                            endDate: '2026-12-31',
-                            status: 'ACTIVA',
-                            minQuantity: 1,
-                            appliedCategory: 'TODOS',
-                            productId: '',
-                            productName: ''
-                          });
-                        }
-                      }}
-                      className="px-5 py-2 bg-orange-500 text-white font-black rounded-xl shadow-md cursor-pointer"
-                    >
-                      Guardar Promoción
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Aplicar</span>
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Row 2: Buscador de productos + Config Options */}
+              <div className="space-y-1.5 relative">
+                <label className="block text-xs font-bold text-slate-700">
+                  Buscador de productos:
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={promoSearchQuery}
+                      onChange={(e) => {
+                        setPromoSearchQuery(e.target.value);
+                        setIsSearchDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsSearchDropdownOpen(true)}
+                      placeholder="Ingrese un nombre o código de producto"
+                      className="w-full pl-3 pr-10 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
+                    />
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+
+                    {/* Live Autocomplete Dropdown */}
+                    {isSearchDropdownOpen && promoSearchQuery.trim().length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-64 overflow-y-auto divide-y divide-slate-100">
+                        {products
+                          .filter(
+                            (p) =>
+                              (p.name && p.name.toLowerCase().includes(promoSearchQuery.toLowerCase())) ||
+                              (p.sku && p.sku.toLowerCase().includes(promoSearchQuery.toLowerCase())) ||
+                              (p.barcode && p.barcode.toLowerCase().includes(promoSearchQuery.toLowerCase()))
+                          )
+                          .slice(0, 15)
+                          .map((prod) => (
+                            <button
+                              key={prod.id}
+                              type="button"
+                              onClick={() => handleAddProductToPromo(prod)}
+                              className="w-full text-left px-3 py-2.5 hover:bg-blue-50/80 transition flex items-center justify-between text-xs cursor-pointer group"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 group-hover:border-blue-300">
+                                  {prod.barcode || prod.sku}
+                                </span>
+                                <span className="font-bold text-slate-800 group-hover:text-blue-600">
+                                  {prod.name}
+                                </span>
+                              </div>
+                              <span className="font-mono font-bold text-emerald-600">
+                                ${prod.price?.toFixed(4) || '0.0000'}
+                              </span>
+                            </button>
+                          ))}
+                        {products.filter(
+                          (p) =>
+                            (p.name && p.name.toLowerCase().includes(promoSearchQuery.toLowerCase())) ||
+                            (p.sku && p.sku.toLowerCase().includes(promoSearchQuery.toLowerCase())) ||
+                            (p.barcode && p.barcode.toLowerCase().includes(promoSearchQuery.toLowerCase()))
+                        ).length === 0 && (
+                          <div className="px-4 py-3 text-xs text-slate-500 text-center">
+                            No se encontraron productos con "{promoSearchQuery}"
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Settings Gear Popover Button */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsPromoSettingsOpen(!isPromoSettingsOpen)}
+                      className="p-2 border border-slate-300 rounded-lg bg-white hover:bg-slate-50 text-slate-600 shadow-sm transition cursor-pointer"
+                      title="Opciones de Productos"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+
+                    {isPromoSettingsOpen && (
+                      <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 divide-y divide-slate-100 text-xs">
+                        <button
+                          type="button"
+                          onClick={handleLoadDemoPromoItems}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 font-bold flex items-center gap-2 cursor-pointer"
+                        >
+                          <span>✨</span>
+                          <span>Cargar productos demo</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            products.slice(0, 50).forEach((p) => handleAddProductToPromo(p));
+                            setIsPromoSettingsOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 font-bold flex items-center gap-2 cursor-pointer"
+                        >
+                          <span>📦</span>
+                          <span>Agregar inventario activo</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPromoItems([]);
+                            setIsPromoSettingsOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-rose-50 text-rose-600 font-bold flex items-center gap-2 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Limpiar lista</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Table matching screenshot */}
+              <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-[#24303f] text-white uppercase text-[11px] font-black tracking-wider">
+                      <tr>
+                        <th className="py-2.5 px-3 text-center w-16">ELIMINAR</th>
+                        <th className="py-2.5 px-4 w-40">CÓDIGO</th>
+                        <th className="py-2.5 px-4">PRODUCTO</th>
+                        <th className="py-2.5 px-4 w-32">P. / ACTUAL</th>
+                        <th className="py-2.5 px-4 text-center w-48">DESCUENTO</th>
+                        <th className="py-2.5 px-4 w-32">T. / DSCTO</th>
+                        <th className="py-2.5 px-4 w-32">P. / FINAL</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {promoItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-400">
+                            <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                            <p className="font-bold text-slate-600">No hay productos agregados a la promoción</p>
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Utilice el buscador arriba o cargue los productos de demostración.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={handleLoadDemoPromoItems}
+                              className="mt-3 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold rounded-lg border border-blue-200 transition cursor-pointer text-xs"
+                            >
+                              Cargar productos demo
+                            </button>
+                          </td>
+                        </tr>
+                      ) : (
+                        promoItems
+                          .slice((promoCurrentPage - 1) * promoPageSize, promoCurrentPage * promoPageSize)
+                          .map((item, localIdx) => {
+                            const actualIdx = (promoCurrentPage - 1) * promoPageSize + localIdx;
+                            return (
+                              <tr key={item.productId || actualIdx} className="hover:bg-slate-50/80 transition">
+                                {/* ELIMINAR */}
+                                <td className="py-2.5 px-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePromoItem(actualIdx)}
+                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-md transition cursor-pointer inline-flex items-center justify-center"
+                                    title="Eliminar producto"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+
+                                {/* CÓDIGO */}
+                                <td className="py-2.5 px-4 font-mono text-slate-700 font-semibold text-[11px]">
+                                  {item.barcode || item.sku}
+                                </td>
+
+                                {/* PRODUCTO */}
+                                <td className="py-2.5 px-4 font-bold text-slate-900 uppercase">
+                                  {item.productName}
+                                </td>
+
+                                {/* P. / ACTUAL */}
+                                <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
+                                  ${item.currentPrice.toFixed(4)}
+                                </td>
+
+                                {/* DESCUENTO (STEPPER) */}
+                                <td className="py-2.5 px-4 text-center">
+                                  <div className="inline-flex items-center gap-1.5 justify-center">
+                                    <div className="inline-flex items-stretch border border-slate-300 rounded overflow-hidden bg-white shadow-xs">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateItemDiscount(actualIdx, -1)}
+                                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border-r border-slate-300 transition text-xs cursor-pointer"
+                                      >
+                                        -
+                                      </button>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={item.discountPercent}
+                                        onChange={(e) =>
+                                          handleSetItemDiscountDirect(actualIdx, parseFloat(e.target.value) || 0)
+                                        }
+                                        className="w-12 px-1.5 py-1 text-center font-mono font-bold text-slate-800 text-xs outline-none bg-white"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateItemDiscount(actualIdx, 1)}
+                                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border-l border-slate-300 transition text-xs cursor-pointer"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                    <span className="text-slate-600 font-bold text-xs">%</span>
+                                  </div>
+                                </td>
+
+                                {/* T. / DSCTO */}
+                                <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
+                                  ${item.discountAmount.toFixed(4)}
+                                </td>
+
+                                {/* P. / FINAL */}
+                                <td className="py-2.5 px-4 font-mono font-bold text-blue-700">
+                                  ${item.finalPrice.toFixed(4)}
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Footer: Mostrando registros + Paginación */}
+                <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 font-medium">
+                  <div>
+                    {promoItems.length > 0 ? (
+                      <span>
+                        Mostrando {(promoCurrentPage - 1) * promoPageSize + 1} a{' '}
+                        {Math.min(promoCurrentPage * promoPageSize, promoItems.length)} de {promoItems.length} registros
+                      </span>
+                    ) : (
+                      <span>Mostrando 0 a 0 de 0 registros</span>
+                    )}
+                  </div>
+
+                  {/* Pagination Controls */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={promoCurrentPage <= 1}
+                      onClick={() => setPromoCurrentPage(1)}
+                      className="p-1 rounded border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                      title="Primera página"
+                    >
+                      <ChevronsLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={promoCurrentPage <= 1}
+                      onClick={() => setPromoCurrentPage((prev) => Math.max(1, prev - 1))}
+                      className="p-1 rounded border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                      title="Página anterior"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    {Array.from(
+                      { length: Math.ceil(promoItems.length / promoPageSize) || 1 },
+                      (_, i) => i + 1
+                    ).map((pg) => (
+                      <button
+                        key={pg}
+                        type="button"
+                        onClick={() => setPromoCurrentPage(pg)}
+                        className={`px-2.5 py-1 rounded border text-xs font-bold transition cursor-pointer ${
+                          pg === promoCurrentPage
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'border-slate-300 bg-white hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {pg}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={promoCurrentPage >= (Math.ceil(promoItems.length / promoPageSize) || 1)}
+                      onClick={() =>
+                        setPromoCurrentPage((prev) =>
+                          Math.min(Math.ceil(promoItems.length / promoPageSize) || 1, prev + 1)
+                        )
+                      }
+                      className="p-1 rounded border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                      title="Página siguiente"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={promoCurrentPage >= (Math.ceil(promoItems.length / promoPageSize) || 1)}
+                      onClick={() => setPromoCurrentPage(Math.ceil(promoItems.length / promoPageSize) || 1)}
+                      className="p-1 rounded border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                      title="Última página"
+                    >
+                      <ChevronsRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 4: Bottom Action Buttons */}
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={handleSavePromoRecord}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Guardar registro</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingPromo(false)}
+                  className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition flex items-center gap-2 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                  <span>Cancelar</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* DASHBOARD / LIST OF PROMOTIONS */
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
+                    <Tag className="w-5 h-5 text-pink-500" />
+                    <span>Gestor de Ofertas & Promociones</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Configura campañas de descuento por porcentaje, combos o volúmenes de compra con vigencia programada.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => handleOpenCreatePromo()}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Nueva Promoción</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-950 text-white font-black uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Código / Nombre</th>
+                      <th className="py-3 px-4">Alcance / Productos</th>
+                      <th className="py-3 px-4 text-center">Descuento</th>
+                      <th className="py-3 px-4 text-center">Vigencia</th>
+                      <th className="py-3 px-4 text-center">Estado</th>
+                      <th className="py-3 px-4 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {promotions.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-slate-400">
+                          <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                          <p className="font-bold text-slate-600">No hay promociones registradas</p>
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Haz clic en "+ Nueva Promoción" para crear una campaña de descuentos.
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      promotions.map((p) => (
+                        <tr key={p.id} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4 font-black text-slate-900">
+                            <span className="font-mono text-blue-600 text-[11px] block">{p.code}</span>
+                            {p.name}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-700">
+                            {p.items && p.items.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                                📦 {p.items.length} producto{p.items.length > 1 ? 's' : ''} en campaña
+                              </span>
+                            ) : p.productName ? (
+                              <span className="inline-flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg border border-orange-200">
+                                📦 {p.productName}
+                              </span>
+                            ) : p.appliedCategory && p.appliedCategory !== 'TODOS' ? (
+                              <span className="inline-flex items-center gap-1 text-purple-600 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200">
+                                📁 Categoría: {p.appliedCategory}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                                🌐 Todos los Productos
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-black text-emerald-600 text-sm">
+                            {p.discountPercent}% OFF
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-600">
+                            {p.startDate} al {p.endDate}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                                p.status === 'ACTIVA'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                  : 'bg-rose-50 border-rose-200 text-rose-700'
+                              }`}
+                            >
+                              {p.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenCreatePromo(p)}
+                                className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition cursor-pointer"
+                                title="Editar Promoción"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPromotions(promotions.filter((item) => item.id !== p.id))}
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
+                                title="Eliminar Promoción"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

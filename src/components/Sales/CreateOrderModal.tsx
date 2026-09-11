@@ -586,10 +586,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                               step="any"
                               min="0.0001"
                               placeholder="1"
-                              value={item.qty === 0 ? '' : item.qty}
-                              onChange={(e) =>
-                                handleUpdateQty(item.productId, e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)
-                              }
+                              value={item.qty === 0 ? '0' : item.qty}
+                              onChange={(e) => {
+                                let val = e.target.value.replace(',', '.');
+                                if (val.startsWith('.')) val = '0' + val;
+                                handleUpdateQty(item.productId, val === '' ? 0 : parseFloat(val) || 0);
+                              }}
                               className="w-16 px-2 py-1 bg-slate-50 border border-slate-300 rounded-lg text-center font-bold text-xs"
                             />
                           </td>

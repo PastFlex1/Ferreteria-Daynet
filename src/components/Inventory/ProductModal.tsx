@@ -63,6 +63,18 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [taxRate, setTaxRate] = useState(defaultTaxRate.toString());
   const [priceScales, setPriceScales] = useState<PriceScale[]>([]);
 
+  // Helper to ensure decimal inputs never strip leading 0, e.g. typing .15 becomes 0.15
+  const normalizeDecimalInput = (val: string): string => {
+    if (!val) return '';
+    let clean = val.replace(/,/g, '.');
+    if (clean.startsWith('.')) {
+      clean = '0' + clean;
+    } else if (clean.startsWith('-.')) {
+      clean = '-0.' + clean.slice(2);
+    }
+    return clean;
+  };
+
   useEffect(() => {
     if (productToEdit) {
       setSku(productToEdit.sku);
@@ -71,15 +83,28 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setCategory(productToEdit.category);
       setDescription(productToEdit.description || '');
       setUnit(productToEdit.unit);
-      setPrice(productToEdit.price !== undefined && productToEdit.price !== null ? productToEdit.price.toFixed(2) : '');
-      setCostPrice(productToEdit.costPrice.toString());
-      setStock(productToEdit.stock.toString());
-      setMinStock(productToEdit.minStock.toString());
+
+      const pVal = productToEdit.price !== undefined && productToEdit.price !== null ? productToEdit.price : 0;
+      const pStr = pVal.toString();
+      setPrice(pStr.startsWith('.') ? '0' + pStr : (pVal > 0 && pVal < 1 ? pVal.toFixed(2) : pVal.toFixed(2)));
+
+      const cpVal = productToEdit.costPrice !== undefined && productToEdit.costPrice !== null ? productToEdit.costPrice : 0;
+      const cpStr = cpVal.toString();
+      setCostPrice(cpStr.startsWith('.') ? '0' + cpStr : cpStr);
+
+      const sVal = productToEdit.stock !== undefined && productToEdit.stock !== null ? productToEdit.stock : 0;
+      const sStr = sVal.toString();
+      setStock(sStr.startsWith('.') ? '0' + sStr : sStr);
+
+      const msVal = productToEdit.minStock !== undefined && productToEdit.minStock !== null ? productToEdit.minStock : 0;
+      const msStr = msVal.toString();
+      setMinStock(msStr.startsWith('.') ? '0' + msStr : msStr);
+
       setLocation(productToEdit.location || '');
       setAllowFractional(productToEdit.allowFractional);
       const currentTax = productToEdit.taxRate ?? defaultTaxRate;
       setTaxRate(currentTax.toString());
-      setPriceWithTax((productToEdit.price * (1 + currentTax / 100)).toFixed(2));
+      setPriceWithTax((pVal * (1 + currentTax / 100)).toFixed(2));
       setPriceScales(productToEdit.priceScales || []);
     } else {
       // Reset defaults
@@ -110,24 +135,26 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   };
 
   const handlePriceChange = (val: string) => {
-    setPrice(val);
-    if (!val || val.trim() === '') {
+    const clean = normalizeDecimalInput(val);
+    setPrice(clean);
+    if (!clean || clean.trim() === '') {
       setPriceWithTax('');
       return;
     }
-    const p = parseFloat(val) || 0;
+    const p = parseFloat(clean) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
     setPriceWithTax((p * (1 + finalT / 100)).toFixed(2));
   };
 
   const handlePriceWithTaxChange = (val: string) => {
-    setPriceWithTax(val);
-    if (!val || val.trim() === '') {
+    const clean = normalizeDecimalInput(val);
+    setPriceWithTax(clean);
+    if (!clean || clean.trim() === '') {
       setPrice('');
       return;
     }
-    const pWithTax = parseFloat(val) || 0;
+    const pWithTax = parseFloat(clean) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
     setPrice((pWithTax / (1 + finalT / 100)).toFixed(2));
@@ -157,6 +184,45 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
   };
 
+  const handleCostPriceChange = (val: string) => {
+    const clean = normalizeDecimalInput(val);
+    setCostPrice(clean);
+  };
+
+  const handleCostPriceBlur = () => {
+    if (costPrice && !isNaN(parseFloat(costPrice))) {
+      const p = parseFloat(costPrice);
+      const str = p.toString();
+      setCostPrice(str.startsWith('.') ? '0' + str : str);
+    }
+  };
+
+  const handleStockChange = (val: string) => {
+    const clean = normalizeDecimalInput(val);
+    setStock(clean);
+  };
+
+  const handleStockBlur = () => {
+    if (stock && !isNaN(parseFloat(stock))) {
+      const s = parseFloat(stock);
+      const str = s.toString();
+      setStock(str.startsWith('.') ? '0' + str : str);
+    }
+  };
+
+  const handleMinStockChange = (val: string) => {
+    const clean = normalizeDecimalInput(val);
+    setMinStock(clean);
+  };
+
+  const handleMinStockBlur = () => {
+    if (minStock && !isNaN(parseFloat(minStock))) {
+      const ms = parseFloat(minStock);
+      const str = ms.toString();
+      setMinStock(str.startsWith('.') ? '0' + str : str);
+    }
+  };
+
   const handleAddScale = () => {
     const defaultMinQty = priceScales.length > 0 ? (priceScales[priceScales.length - 1].minQty * 2) : 6;
     const basePrice = parseFloat(price) || 0;
@@ -172,9 +238,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   };
 
   const handleUpdateScale = (id: string, field: keyof PriceScale, value: string | number | undefined) => {
+    let finalVal: any = value;
+    if (typeof value === 'string') {
+      finalVal = normalizeDecimalInput(value);
+    }
     setPriceScales(scales => scales.map(s => {
       if (s.id !== id) return s;
-      return { ...s, [field]: value };
+      return { ...s, [field]: finalVal };
     }));
   };
 
@@ -208,7 +278,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       location: location.trim() || undefined,
       taxRate: !isNaN(parseFloat(taxRate)) ? parseFloat(taxRate) : defaultTaxRate,
       allowFractional,
-      priceScales: priceScales.filter(s => s.minQty > 0 && s.price > 0),
+      priceScales: priceScales
+        .filter(s => parseFloat(s.minQty?.toString() || '0') > 0 && parseFloat(s.price?.toString() || '0') > 0)
+        .map(s => ({
+          ...s,
+          minQty: parseFloat(s.minQty.toString()) || 1,
+          maxQty: s.maxQty ? (parseFloat(s.maxQty.toString()) || undefined) : undefined,
+          price: parseFloat(s.price.toString()) || 0,
+        })),
     };
 
     onSaveProduct(savedProduct);
@@ -404,7 +481,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 min="0"
                 placeholder="0.00"
                 value={costPrice}
-                onChange={(e) => setCostPrice(e.target.value)}
+                onChange={(e) => handleCostPriceChange(e.target.value)}
+                onBlur={handleCostPriceBlur}
                 className="w-full px-3 py-2 bg-white border border-slate-200 text-slate-800 font-mono rounded-xl text-xs focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -476,7 +554,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 step="any"
                 placeholder="0"
                 value={stock}
-                onChange={(e) => setStock(e.target.value)}
+                onChange={(e) => handleStockChange(e.target.value)}
+                onBlur={handleStockBlur}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-emerald-700 font-mono font-bold rounded-xl text-xs focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -490,7 +569,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 step="any"
                 placeholder="0"
                 value={minStock}
-                onChange={(e) => setMinStock(e.target.value)}
+                onChange={(e) => handleMinStockChange(e.target.value)}
+                onBlur={handleMinStockBlur}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-orange-600 font-mono font-bold rounded-xl text-xs focus:ring-2 focus:ring-orange-500"
               />
             </div>
@@ -577,8 +657,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           step="any"
                           min="0.0001"
                           placeholder="1"
-                          value={scale.minQty === 0 ? '' : scale.minQty}
-                          onChange={(e) => handleUpdateScale(scale.id, 'minQty', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                          value={scale.minQty !== undefined && scale.minQty !== null ? scale.minQty : ''}
+                          onChange={(e) => handleUpdateScale(scale.id, 'minQty', e.target.value)}
                           className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
@@ -606,8 +686,17 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           step="0.01"
                           min="0"
                           placeholder="0.00"
-                          value={scale.price === 0 ? '' : scale.price}
-                          onChange={(e) => handleUpdateScale(scale.id, 'price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
+                          value={scale.price !== undefined && scale.price !== null ? scale.price : ''}
+                          onChange={(e) => handleUpdateScale(scale.id, 'price', e.target.value)}
+                          onBlur={() => {
+                            if (scale.price !== '' && scale.price !== undefined) {
+                              const p = parseFloat(scale.price.toString());
+                              if (!isNaN(p)) {
+                                const str = p < 1 ? p.toFixed(2) : p.toString();
+                                handleUpdateScale(scale.id, 'price', str.startsWith('.') ? '0' + str : str);
+                              }
+                            }
+                          }}
                           className="w-full px-2.5 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-800 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>

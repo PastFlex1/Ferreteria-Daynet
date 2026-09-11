@@ -262,9 +262,10 @@ export const Cart: React.FC<CartProps> = ({
                     type="number"
                     step="any"
                     min="0.0001"
-                    value={item.quantity === 0 ? '' : item.quantity}
+                    value={item.quantity === 0 ? '0' : item.quantity}
                     onChange={(e) => {
-                      const val = e.target.value;
+                      let val = e.target.value.replace(',', '.');
+                      if (val.startsWith('.')) val = '0' + val;
                       if (val === '') {
                         onUpdateQuantity(item.product.id, 0);
                       } else {

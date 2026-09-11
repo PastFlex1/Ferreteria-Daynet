@@ -298,27 +298,55 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   // Promotion calculation helper
   const getActivePromoForProduct = (product: Product, qty: number): Promotion | null => {
     const today = new Date().toISOString().split('T')[0];
-    const active = promotions.filter(p => {
-      if (p.status !== 'ACTIVA') return false;
-      if (p.startDate && p.startDate > today) return false;
-      if (p.endDate && p.endDate < today) return false;
-      if (qty < (p.minQuantity || 1)) return false;
+    const applicablePromos: Promotion[] = [];
 
-      // Match product ID if specified
+    promotions.forEach(p => {
+      if (p.status !== 'ACTIVA') return;
+      if (p.startDate && p.startDate > today) return;
+      if (p.endDate && p.endDate < today) return;
+      if (qty < (p.minQuantity || 1)) return;
+
+      // 1. Si la promoción tiene lista detallada de productos (items)
+      if (p.items && p.items.length > 0) {
+        const itemMatch = p.items.find(it => 
+          it.productId === product.id || 
+          (product.barcode && it.barcode === product.barcode) ||
+          (product.sku && it.sku === product.sku)
+        );
+        if (itemMatch) {
+          applicablePromos.push({
+            ...p,
+            discountPercent: itemMatch.discountPercent,
+            name: p.name || `${itemMatch.discountPercent}% OFF`
+          });
+          return;
+        }
+      }
+
+      // 2. Coincidencia por producto específico
       if (p.productId) {
-        return p.productId === product.id;
+        if (p.productId === product.id) {
+          applicablePromos.push(p);
+        }
+        return;
       }
 
-      // Match category if specified (and not 'TODOS')
+      // 3. Coincidencia por categoría
       if (p.appliedCategory && p.appliedCategory !== 'TODOS') {
-        return p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase();
+        if (p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase()) {
+          applicablePromos.push(p);
+        }
+        return;
       }
 
-      return true; // Applies to all products
+      // 4. Promoción general
+      if (!p.items || p.items.length === 0) {
+        applicablePromos.push(p);
+      }
     });
 
-    if (active.length === 0) return null;
-    return active.reduce((best, p) => p.discountPercent > best.discountPercent ? p : best);
+    if (applicablePromos.length === 0) return null;
+    return applicablePromos.reduce((best, p) => p.discountPercent > best.discountPercent ? p : best);
   };
 
   // Helper for Price Scales

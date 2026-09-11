@@ -32,9 +32,15 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
   };
 
   const handleUpdatePriceScale = (id: string, field: keyof PriceScale, value: string | number) => {
+    let finalVal = value;
+    if (typeof value === 'string') {
+      let clean = value.replace(/,/g, '.');
+      if (clean.startsWith('.')) clean = '0' + clean;
+      finalVal = clean;
+    }
     setPriceScales(scales => scales.map(s => {
       if (s.id !== id) return s;
-      return { ...s, [field]: value };
+      return { ...s, [field]: finalVal };
     }));
   };
 
