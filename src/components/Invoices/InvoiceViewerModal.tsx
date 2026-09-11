@@ -858,6 +858,10 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 <p>FECHA: {formatFullDate(activeInvoice.createdAt)}</p>
                 <p>CLIENTE: {activeInvoice.customer.name}</p>
                 <p>DOC: {activeInvoice.customer.docType} {activeInvoice.customer.docNumber}</p>
+                <p>DIRECCIÓN: {activeInvoice.customer.address || 'S/N'}</p>
+                {activeInvoice.customer.phone && (
+                  <p>TEL: {activeInvoice.customer.phone}</p>
+                )}
               </div>
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-2">

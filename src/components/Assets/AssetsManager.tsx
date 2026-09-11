@@ -184,6 +184,7 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
   const [transfers, setTransfers] = useFirestoreSync<AssetTransfer[]>('ferreteria_asset_transfers', []);
 
   const [historyLogs, setHistoryLogs] = useFirestoreSync<AssetHistoryLog[]>('ferreteria_asset_history_logs', []);
+  const [journalEntries, setJournalEntries] = useFirestoreSync<any[]>('ferreteria_journal_entries', []);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -492,6 +493,34 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
       accountingEntryRef: `ASIENTO-BAJA-${ast.code}`
     };
 
+    if (prevBook > 0) {
+      const disposalEntry = {
+        id: `asiento-baja-${Date.now()}`,
+        entryNumber: `ASI-BAJA-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`,
+        date: newDisposal.date || new Date().toISOString().split('T')[0],
+        concept: `Baja / Liquidación patrimonial de activo fijo ${ast.code} - ${ast.name}: ${newDisposal.reason}`,
+        type: 'AJUSTE',
+        status: 'ASENTADO',
+        totalDebit: Math.round(prevBook * 100) / 100,
+        totalCredit: Math.round(prevBook * 100) / 100,
+        items: [
+          {
+            accountCode: '5.2.02.01.01',
+            accountName: 'Pérdida en Retiro y Baja de Propiedad, Planta y Equipo',
+            debit: Math.round(prevBook * 100) / 100,
+            credit: 0
+          },
+          {
+            accountCode: '1.2.01.00.00',
+            accountName: 'Propiedades, Planta y Equipo (Salida de Activo en Libros)',
+            debit: 0,
+            credit: Math.round(prevBook * 100) / 100
+          }
+        ]
+      };
+      setJournalEntries([disposalEntry, ...journalEntries]);
+    }
+
     setAssets(updatedAssets);
     setHistoryLogs([log, ...historyLogs]);
     setIsDisposalModalOpen(false);
@@ -619,9 +648,38 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
       return;
     }
 
+    const totalMonthlyDepreciation = newLogs.reduce((acc, l) => acc + Math.abs(l.financialImpact || 0), 0);
+    if (totalMonthlyDepreciation > 0) {
+      const depJournalEntry = {
+        id: `asiento-dep-${Date.now()}`,
+        entryNumber: `ASI-DEP-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`,
+        date: currentDate,
+        concept: `Corrida Mensual de Depreciación de Propiedad, Planta y Equipo (${newLogs.length} activos procesados)`,
+        type: 'AJUSTE',
+        status: 'ASENTADO',
+        totalDebit: Math.round(totalMonthlyDepreciation * 100) / 100,
+        totalCredit: Math.round(totalMonthlyDepreciation * 100) / 100,
+        items: [
+          {
+            accountCode: '5.2.01.01.01',
+            accountName: 'Gasto Depreciación de Propiedades, Planta y Equipo',
+            debit: Math.round(totalMonthlyDepreciation * 100) / 100,
+            credit: 0
+          },
+          {
+            accountCode: '1.2.02.01.01',
+            accountName: 'Depreciación Acumulada de Propiedades, Planta y Equipo',
+            debit: 0,
+            credit: Math.round(totalMonthlyDepreciation * 100) / 100
+          }
+        ]
+      };
+      setJournalEntries([depJournalEntry, ...journalEntries]);
+    }
+
     setAssets(updatedAssets);
     setHistoryLogs([...newLogs, ...historyLogs]);
-    alert(`Corrida mensual de depreciación ejecutada con éxito. Se procesaron ${newLogs.length} activos fijos y se generó su registro en la bitácora inmutable.`);
+    alert(`Corrida mensual de depreciación ejecutada con éxito. Se procesaron ${newLogs.length} activos fijos por un total de ${formatCurrency(totalMonthlyDepreciation, settings.currencySymbol)} y se disparó automáticamente el asiento contable de partida doble en el Libro Diario.`);
   };
 
   const handleOpenDisposalForAsset = (assetId: string) => {

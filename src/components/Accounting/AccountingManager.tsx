@@ -3178,18 +3178,20 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
               {/* Saldo según Extracto Bancario Oficial */}
               <div className="md:col-span-3 space-y-1.5">
                 <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Saldo según Extracto Banco ($):</span>
+                  <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Saldo según Extracto Banco:</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 font-bold text-xs">
+                    $
+                  </div>
                   <input
                     type="number"
                     step="0.01"
                     value={statementBalanceInput}
                     onChange={(e) => setStatementBalanceInput(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-white border border-emerald-300 ring-1 ring-emerald-200 rounded-xl pl-7 pr-3 py-2 text-xs font-mono font-black text-emerald-950 outline-none focus:border-emerald-500"
+                    className="w-full bg-white border border-slate-200 focus:border-emerald-500 rounded-xl pl-7 pr-3 py-2 text-xs font-mono font-bold text-slate-900 outline-none transition shadow-2xs"
                   />
                 </div>
               </div>

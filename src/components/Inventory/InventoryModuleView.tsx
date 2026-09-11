@@ -4081,24 +4081,24 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+            <div className="flex flex-col gap-2 w-full sm:w-auto shrink-0">
               <button
                 type="button"
                 onClick={handleDownloadTomaFisicaPdf}
-                className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer"
+                className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 border border-slate-800 cursor-pointer"
                 title="Descargar hoja en PDF con recuadros en blanco para imprimir y contar a mano"
               >
                 <Download className="w-4 h-4 text-orange-400 stroke-[2.5]" />
-                <span>Descargar Planilla PDF (Conteo en Blanco)</span>
+                <span className="whitespace-nowrap">Descargar Planilla PDF (Conteo en Blanco)</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleApplyPhysicalAudit}
-                className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-                <span>Aplicar Ajuste Auditoría</span>
+                <span className="whitespace-nowrap">Aplicar Ajuste Auditoría</span>
               </button>
             </div>
           </div>
