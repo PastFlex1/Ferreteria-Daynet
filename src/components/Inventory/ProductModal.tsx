@@ -689,7 +689,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           value={scale.price !== undefined && scale.price !== null ? scale.price : ''}
                           onChange={(e) => handleUpdateScale(scale.id, 'price', e.target.value)}
                           onBlur={() => {
-                            if (scale.price !== '' && scale.price !== undefined) {
+                            if (scale.price !== undefined && scale.price !== null && String(scale.price).trim() !== '') {
                               const p = parseFloat(scale.price.toString());
                               if (!isNaN(p)) {
                                 const str = p < 1 ? p.toFixed(2) : p.toString();
