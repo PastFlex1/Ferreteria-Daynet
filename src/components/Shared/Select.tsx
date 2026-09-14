@@ -24,13 +24,33 @@ export const Select: React.FC<SelectProps> = (props) => {
   const updatePosition = useCallback(() => {
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
+      const dropdownWidth = Math.max(rect.width, 240);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const openUpwards = spaceBelow < 220 && spaceAbove > spaceBelow;
+
+      let calculatedLeft = rect.left;
+      if (calculatedLeft + dropdownWidth > window.innerWidth - 12) {
+        calculatedLeft = Math.max(12, window.innerWidth - dropdownWidth - 12);
+      }
+
       setDropdownPos({
-        top: rect.bottom + 6,
-        left: rect.left,
-        width: rect.width,
+        top: openUpwards ? Math.max(10, rect.top - 230) : rect.bottom + 6,
+        left: Math.max(12, calculatedLeft),
+        width: dropdownWidth,
       });
     }
   }, []);
+
+  const handleToggle = () => {
+    if (disabled) return;
+    if (!isOpen) {
+      updatePosition();
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -72,25 +92,27 @@ export const Select: React.FC<SelectProps> = (props) => {
 
   const options: { value: string; label: React.ReactNode }[] = [];
 
-  React.Children.toArray(children).forEach((child: any) => {
-    if (React.isValidElement(child) && child.type === 'option') {
-      const element = child as React.ReactElement<any>;
-      options.push({
-        value: element.props.value !== undefined ? element.props.value : element.props.children,
-        label: element.props.children,
-      });
-    } else if (child && (child as any).type === React.Fragment && (child as any).props.children) {
-        React.Children.toArray((child as any).props.children).forEach((subChild: any) => {
-             if (React.isValidElement(subChild) && subChild.type === 'option') {
-                  const subElement = subChild as React.ReactElement<any>;
-                  options.push({
-                    value: subElement.props.value !== undefined ? subElement.props.value : subElement.props.children,
-                    label: subElement.props.children,
-                  });
-             }
-        });
+  const extractOption = (element: React.ReactElement<any>) => {
+    const val = element.props.value !== undefined ? String(element.props.value) : String(element.props.children ?? '');
+    options.push({
+      value: val,
+      label: element.props.children,
+    });
+  };
+
+  const processChild = (child: any) => {
+    if (!child || !React.isValidElement(child)) return;
+    const typeStr = typeof child.type === 'string' ? child.type.toLowerCase() : '';
+    if (typeStr === 'option' || child.type === 'option') {
+      extractOption(child as React.ReactElement<any>);
+    } else if (child.type === React.Fragment && (child.props as any)?.children) {
+      React.Children.toArray((child.props as any).children).forEach(processChild);
+    } else if ((child.props as any)?.value !== undefined && (child.props as any)?.children !== undefined) {
+      extractOption(child as React.ReactElement<any>);
     }
-  });
+  };
+
+  React.Children.toArray(children).forEach(processChild);
 
   const selectedOption = options.find((opt) => String(opt.value) === String(value));
   const displayLabel = selectedOption ? selectedOption.label : '-- Seleccionar --';
@@ -142,7 +164,7 @@ export const Select: React.FC<SelectProps> = (props) => {
         top: dropdownPos.top,
         left: dropdownPos.left,
         width: dropdownPos.width,
-        zIndex: 99999,
+        zIndex: 10000005,
       }}
       className={`${
         isDark 
@@ -207,7 +229,7 @@ export const Select: React.FC<SelectProps> = (props) => {
         className={`w-full px-3 py-2 ${baseBgClass} border rounded-xl font-medium text-xs flex items-center justify-between cursor-pointer transition-all ${
           isOpen ? 'ring-2 ring-orange-500 border-orange-500 shadow-2xs' : baseBorderClass
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={handleToggle}
       >
         {/* Hidden select for native form validation */}
         <select

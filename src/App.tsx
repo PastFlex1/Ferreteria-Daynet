@@ -201,6 +201,12 @@ export default function App() {
   // Active Invoice Viewer Modal State
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState<Invoice | null>(null);
   const [isViewerModalOpen, setIsViewerModalOpen] = useState(false);
+  const [preselectedInvoiceForCreditNote, setPreselectedInvoiceForCreditNote] = useState<Invoice | null>(null);
+
+  const handleOpenCreditNoteForInvoice = (inv: Invoice) => {
+    setPreselectedInvoiceForCreditNote(inv);
+    setActiveTabState('NOTA_CREDITO');
+  };
 
   // Sync state to LocalStorage
 
@@ -703,10 +709,17 @@ export default function App() {
             customers={allCustomers}
             products={products}
             settings={settings}
-            onNavigateToTab={(tab) => setActiveTab(tab)}
+            onNavigateToTab={(tab) => {
+              if (tab !== 'NOTA_CREDITO') {
+                setPreselectedInvoiceForCreditNote(null);
+              }
+              setActiveTab(tab);
+            }}
             onOpenViewer={handleOpenInvoiceViewer}
             onInvoiceOrder={handleInvoiceOrder}
             onUpdateInvoice={handleUpdateInvoice}
+            onStockAdjust={handleStockAdjust}
+            preselectedInvoice={preselectedInvoiceForCreditNote}
           />
         )}
 
@@ -904,6 +917,8 @@ export default function App() {
         settings={settings}
         onConvertQuoteToInvoice={handleConvertQuoteToInvoice}
         onUpdateInvoice={handleUpdateInvoice}
+        onStockAdjust={handleStockAdjust}
+        onOpenCreditNote={handleOpenCreditNoteForInvoice}
       />
 
       {/* Logout Confirmation Modal */}

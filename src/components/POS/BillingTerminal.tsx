@@ -677,6 +677,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         unit: item.product.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        costPrice: item.product.costPrice,
         discountPercent: item.discountPercent,
         subtotal: item.subtotal,
         taxRate: typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate,

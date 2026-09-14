@@ -23,7 +23,8 @@ import {
   Edit3,
   Plus,
   X,
-  ShoppingCart
+  ShoppingCart,
+  FileX
 } from 'lucide-react';
 import { Customer, DocumentType, Invoice, InvoiceItem, InvoiceStatus, Product, StoreSettings } from '../../types';
 import { formatCurrency, formatDate, getDocumentTypeName, getPaymentMethodLabel } from '../../utils/formatters';
@@ -149,6 +150,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
       unit: p.unit || 'UND',
       quantity: qty,
       unitPrice: p.price,
+      costPrice: p.costPrice,
       discountPercent: 0,
       subtotal: subtotal,
       taxRate: taxRate,
@@ -394,9 +396,10 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
               ) : (
                 filteredInvoices.map((inv) => {
                   const isFactura = inv.documentType === 'FACTURA';
-                  const isAutorizado = isFactura && (inv.sriStatus === 'AUTORIZADO' || !!inv.sriNumeroAutorizacion);
-                  const isDevuelta = isFactura && (inv.sriStatus === 'NO AUTORIZADO' || (inv.sriStatus as string) === 'DEVUELTA' || (inv.sriStatus as string) === 'ERROR');
-                  const isPendiente = isFactura && !isAutorizado && !isDevuelta;
+                  const isAnulado = inv.paymentStatus === 'ANULADA' || inv.sriStatus === 'ANULADO';
+                  const isAutorizado = isFactura && !isAnulado && (inv.sriStatus === 'AUTORIZADO' || !!inv.sriNumeroAutorizacion);
+                  const isDevuelta = isFactura && !isAnulado && (inv.sriStatus === 'NO AUTORIZADO' || (inv.sriStatus as string) === 'DEVUELTA' || (inv.sriStatus as string) === 'ERROR');
+                  const isPendiente = isFactura && !isAnulado && !isAutorizado && !isDevuelta;
 
                   return (
                     <tr key={inv.id} className="hover:bg-slate-50/80 transition group">
@@ -444,6 +447,14 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                         {!isFactura ? (
                           <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200">
                             N/A
+                          </span>
+                        ) : isAnulado ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 border border-rose-300 text-rose-800"
+                            title="Comprobante Anulado"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                            <span>ANULADO</span>
                           </span>
                         ) : isAutorizado ? (
                           <span
@@ -544,6 +555,17 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                               title="Descargar XML Oficial Autorizado del SRI"
                             >
                               <Download className="w-4 h-4 text-emerald-600" />
+                            </button>
+                          )}
+
+                          {/* Anular / N/C */}
+                          {inv.documentType !== 'COTIZACION' && !isAnulado && (
+                            <button
+                              onClick={() => onOpenViewer(inv)}
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition cursor-pointer"
+                              title="Anular o Emitir Nota de Crédito"
+                            >
+                              <FileX className="w-4 h-4 text-rose-600" />
                             </button>
                           )}
 

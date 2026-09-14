@@ -407,3 +407,261 @@ export function getAuthorizedXmlContent(
   <mensajes/>
 </autorizacion>`;
 }
+
+export interface SRICreditNoteData {
+  rucEmisor: string;
+  razonSocialEmisor: string;
+  nombreComercialEmisor?: string;
+  dirMatriz: string;
+  estab: string;
+  ptoEmi: string;
+  secuencial: string;
+  fechaEmision: string; // Formato DD/MM/YYYY
+  ambiente: '1' | '2';
+  cliente: {
+    razonSocial: string;
+    identificacion: string;
+    direccion?: string;
+    email?: string;
+    telefono?: string;
+  };
+  facturaModificada: {
+    numero: string; // Ej: 001-001-000000124
+    fecha: string; // Formato DD/MM/YYYY
+  };
+  motivo: string;
+  items: Array<{
+    codigo?: string;
+    descripcion: string;
+    cantidad: number;
+    precioUnitario: number;
+    descuento?: number;
+    ivaRate?: string | number;
+  }>;
+  obligadoContabilidad?: string;
+}
+
+/**
+ * Convierte un objeto CreditNoteData a SRICreditNoteData listo para XML.
+ */
+export function convertCreditNoteToSRI(
+  creditNote: any,
+  settings: StoreSettings,
+  invoiceRefDate?: string,
+  establishment: string = '001',
+  emissionPoint: string = '001',
+  ambiente: '1' | '2' = '1'
+): SRICreditNoteData {
+  const now = new Date(creditNote.date || Date.now());
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  const fechaEmision = `${day}/${month}/${year}`;
+
+  const invDateObj = invoiceRefDate ? new Date(invoiceRefDate) : now;
+  const invDay = String(invDateObj.getDate()).padStart(2, '0');
+  const invMonth = String(invDateObj.getMonth() + 1).padStart(2, '0');
+  const invYear = invDateObj.getFullYear();
+  const fechaFactura = `${invDay}/${invMonth}/${invYear}`;
+
+  // Formatear el número de factura modificada a formato estándar 001-001-000000000
+  let rawRef = (creditNote.invoiceRef || '').replace(/[^\d-]/g, '');
+  let numDocModificado = creditNote.invoiceRef || '001-001-000000001';
+  const parts = rawRef.split('-').filter(Boolean);
+  if (parts.length >= 3) {
+    numDocModificado = `${parts[0].padStart(3, '0').slice(-3)}-${parts[1].padStart(3, '0').slice(-3)}-${parts[2].padStart(9, '0').slice(-9)}`;
+  } else if (parts.length === 2) {
+    numDocModificado = `${(establishment || '001').padStart(3, '0')}-${parts[0].padStart(3, '0').slice(-3)}-${parts[1].padStart(9, '0').slice(-9)}`;
+  } else if (parts.length === 1 && parts[0].length > 0) {
+    numDocModificado = `${(establishment || '001').padStart(3, '0')}-${(emissionPoint || '001').padStart(3, '0')}-${parts[0].padStart(9, '0').slice(-9)}`;
+  }
+
+  const items = (creditNote.items || []).map((item: any) => {
+    let ivaRate = 15;
+    if (typeof item.taxRate === 'number') ivaRate = item.taxRate;
+    else if (typeof item.taxPercent === 'number') ivaRate = item.taxPercent;
+    else if (item.taxAmount === 0 && (item.subtotal || item.unitPrice) > 0) ivaRate = 0;
+    else if (typeof settings.defaultTaxRate === 'number') ivaRate = settings.defaultTaxRate;
+
+    const discount = Math.round(((item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100) * 100) / 100;
+
+    return {
+      codigo: item.sku || item.productId || '0101',
+      descripcion: item.productName || item.description || 'Producto devuelto',
+      cantidad: item.quantity || 1,
+      precioUnitario: item.unitPrice || item.price || 0,
+      descuento: discount,
+      ivaRate,
+    };
+  });
+
+  return {
+    rucEmisor: settings.taxId || '1790012345001',
+    razonSocialEmisor: settings.legalName || settings.storeName || 'FERRETERÍA DAYNET',
+    nombreComercialEmisor: settings.storeName || 'FERRETERÍA DAYNET',
+    dirMatriz: settings.address || 'Quito, Ecuador',
+    estab: establishment || '001',
+    ptoEmi: emissionPoint || '001',
+    secuencial: String(creditNote.secNumber || creditNote.id?.split('-')?.[2] || '1').padStart(9, '0'),
+    fechaEmision,
+    ambiente,
+    cliente: {
+      razonSocial: creditNote.customer || 'CONSUMIDOR FINAL',
+      identificacion: creditNote.customerRuc || '9999999999999',
+      direccion: creditNote.customerAddress || 'S/N',
+      email: creditNote.customerEmail || '',
+      telefono: creditNote.customerPhone || '',
+    },
+    facturaModificada: {
+      numero: numDocModificado,
+      fecha: fechaFactura,
+    },
+    motivo: creditNote.reason || 'Anulación total de la factura',
+    items,
+    obligadoContabilidad: settings.accountingRequired ? 'SI' : 'NO',
+  };
+}
+
+/**
+ * Genera el XML oficial de la Nota de Crédito (Tipo 04) para el SRI y calcula su Clave de Acceso.
+ */
+export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; claveAcceso: string } {
+  const parts = data.fechaEmision.split('/');
+  const fechaDigitos = `${parts[0]}${parts[1]}${parts[2]}`;
+  const codDoc = '04'; // NOTA DE CRÉDITO
+  const ruc = data.rucEmisor.padStart(13, '0').slice(0, 13);
+  const ambiente = data.ambiente || '1';
+  const serie = `${data.estab.padStart(3, '0')}${data.ptoEmi.padStart(3, '0')}`;
+  const secuencial = data.secuencial.padStart(9, '0');
+  const codigoNumerico = '12345678';
+  const tipoEmision = '1';
+
+  const base48 = `${fechaDigitos}${codDoc}${ruc}${ambiente}${serie}${secuencial}${codigoNumerico}${tipoEmision}`;
+  const digitoVerificador = modulo11(base48);
+  const claveAcceso = `${base48}${digitoVerificador}`;
+
+  // Agrupación de impuestos
+  const taxGroups: { [key: string]: { base: number; valor: number; codigoPorcentaje: string; tarifa: string } } = {};
+  let totalDescuento = 0;
+
+  (data.items || []).forEach((i) => {
+    const mapping = getIvaMapping(i.ivaRate);
+    const key = `${mapping.codigoPorcentaje}`;
+    const totalLine = safe(i.cantidad) * safe(i.precioUnitario);
+    const discount = safe(i.descuento);
+    totalDescuento += discount;
+    const netLine = Math.max(0, totalLine - discount);
+    const taxVal = Math.round(netLine * mapping.multiplier * 100) / 100;
+
+    if (!taxGroups[key]) {
+      taxGroups[key] = { base: 0, valor: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa };
+    }
+    taxGroups[key].base += netLine;
+    taxGroups[key].valor += taxVal;
+  });
+
+  const subtotalTotal = Object.values(taxGroups).reduce((acc, g) => acc + g.base, 0);
+  const valorIVA = Object.values(taxGroups).reduce((acc, g) => acc + g.valor, 0);
+  const totalModificacion = subtotalTotal + valorIVA;
+
+  let tipoId = '05';
+  const idStr = (data.cliente.identificacion || '').trim();
+  if (idStr === '9999999999999' || data.cliente.razonSocial?.toUpperCase().includes('CONSUMIDOR FINAL')) {
+    tipoId = '07';
+  } else if (idStr.length === 13) {
+    tipoId = '04';
+  } else if (idStr.length === 10) {
+    tipoId = '05';
+  } else {
+    tipoId = '06';
+  }
+
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  xml += `<notaCredito id="comprobante" version="1.1.0">\n\n`;
+
+  xml += `    <infoTributaria>\n`;
+  xml += `        <ambiente>${ambiente}</ambiente>\n`;
+  xml += `        <tipoEmision>1</tipoEmision>\n`;
+  xml += `        <razonSocial>${escapeXml(data.razonSocialEmisor)}</razonSocial>\n`;
+  xml += `        <nombreComercial>${escapeXml(data.nombreComercialEmisor || data.razonSocialEmisor)}</nombreComercial>\n`;
+  xml += `        <ruc>${data.rucEmisor}</ruc>\n`;
+  xml += `        <claveAcceso>${claveAcceso}</claveAcceso>\n`;
+  xml += `        <codDoc>04</codDoc>\n`;
+  xml += `        <estab>${data.estab.padStart(3, '0')}</estab>\n`;
+  xml += `        <ptoEmi>${data.ptoEmi.padStart(3, '0')}</ptoEmi>\n`;
+  xml += `        <secuencial>${data.secuencial.padStart(9, '0')}</secuencial>\n`;
+  xml += `        <dirMatriz>${escapeXml(data.dirMatriz || 'Ecuador')}</dirMatriz>\n`;
+  xml += `    </infoTributaria>\n\n`;
+
+  xml += `    <infoNotaCredito>\n`;
+  xml += `        <fechaEmision>${data.fechaEmision}</fechaEmision>\n`;
+  xml += `        <dirEstablecimiento>${escapeXml(data.dirMatriz || 'Ecuador')}</dirEstablecimiento>\n`;
+  xml += `        <tipoIdentificacionComprador>${tipoId}</tipoIdentificacionComprador>\n`;
+  xml += `        <razonSocialComprador>${escapeXml(data.cliente.razonSocial || 'CONSUMIDOR FINAL')}</razonSocialComprador>\n`;
+  xml += `        <identificacionComprador>${data.cliente.identificacion || '9999999999999'}</identificacionComprador>\n`;
+  xml += `        <obligadoContabilidad>${data.obligadoContabilidad || 'NO'}</obligadoContabilidad>\n`;
+  xml += `        <codDocModificado>01</codDocModificado>\n`;
+  xml += `        <numDocModificado>${data.facturaModificada.numero}</numDocModificado>\n`;
+  xml += `        <fechaEmisionDocSustento>${data.facturaModificada.fecha}</fechaEmisionDocSustento>\n`;
+  xml += `        <totalSinImpuestos>${safe(subtotalTotal).toFixed(2)}</totalSinImpuestos>\n`;
+  xml += `        <valorModificacion>${safe(totalModificacion).toFixed(2)}</valorModificacion>\n`;
+  xml += `        <moneda>DOLAR</moneda>\n\n`;
+
+  xml += `        <totalConImpuestos>\n`;
+  Object.values(taxGroups).forEach((group) => {
+    xml += `            <totalImpuesto>\n`;
+    xml += `                <codigo>2</codigo>\n`;
+    xml += `                <codigoPorcentaje>${group.codigoPorcentaje}</codigoPorcentaje>\n`;
+    xml += `                <baseImponible>${group.base.toFixed(2)}</baseImponible>\n`;
+    xml += `                <valor>${group.valor.toFixed(2)}</valor>\n`;
+    xml += `            </totalImpuesto>\n`;
+  });
+  xml += `        </totalConImpuestos>\n\n`;
+
+  xml += `        <motivo>${escapeXml(data.motivo || 'Anulación total de la factura')}</motivo>\n`;
+  xml += `    </infoNotaCredito>\n\n`;
+
+  xml += `    <detalles>\n`;
+  (data.items || []).forEach((item, index) => {
+    const totalLine = safe(item.cantidad) * safe(item.precioUnitario);
+    const discount = safe(item.descuento);
+    const baseVal = Math.max(0, totalLine - discount);
+    const mapping = getIvaMapping(item.ivaRate);
+    const taxVal = baseVal * mapping.multiplier;
+
+    xml += `        <detalle>\n`;
+    xml += `            <codigoInterno>${escapeXml(item.codigo || (index + 1).toString().padStart(3, '0'))}</codigoInterno>\n`;
+    xml += `            <descripcion>${escapeXml(item.descripcion)}</descripcion>\n`;
+    xml += `            <cantidad>${safe(item.cantidad).toFixed(2)}</cantidad>\n`;
+    xml += `            <precioUnitario>${safe(item.precioUnitario).toFixed(2)}</precioUnitario>\n`;
+    xml += `            <descuento>${discount.toFixed(2)}</descuento>\n`;
+    xml += `            <precioTotalSinImpuesto>${safe(baseVal).toFixed(2)}</precioTotalSinImpuesto>\n\n`;
+    xml += `            <impuestos>\n`;
+    xml += `                <impuesto>\n`;
+    xml += `                    <codigo>2</codigo>\n`;
+    xml += `                    <codigoPorcentaje>${mapping.codigoPorcentaje}</codigoPorcentaje>\n`;
+    xml += `                    <tarifa>${mapping.tarifa}</tarifa>\n`;
+    xml += `                    <baseImponible>${safe(baseVal).toFixed(2)}</baseImponible>\n`;
+    xml += `                    <valor>${safe(taxVal).toFixed(2)}</valor>\n`;
+    xml += `                </impuesto>\n`;
+    xml += `            </impuestos>\n`;
+    xml += `        </detalle>\n`;
+  });
+  xml += `    </detalles>\n\n`;
+
+  const additionalFields: Array<{ name: string; value: string }> = [];
+  if (data.cliente.email) additionalFields.push({ name: 'email', value: data.cliente.email });
+  if (data.cliente.telefono) additionalFields.push({ name: 'telefono', value: data.cliente.telefono });
+
+  if (additionalFields.length > 0) {
+    xml += `    <infoAdicional>\n`;
+    additionalFields.forEach((field) => {
+      xml += `        <campoAdicional nombre="${escapeXml(field.name)}">${escapeXml(field.value)}</campoAdicional>\n`;
+    });
+    xml += `    </infoAdicional>\n\n`;
+  }
+
+  xml += `</notaCredito>`;
+  return { xml, claveAcceso };
+}
+

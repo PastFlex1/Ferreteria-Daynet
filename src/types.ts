@@ -123,6 +123,7 @@ export interface InvoiceItem {
   unit: UnitOfMeasure;
   quantity: number;
   unitPrice: number;
+  costPrice?: number;
   discountPercent: number;
   subtotal: number;
   taxRate?: number; // e.g. 15, 5, 0
@@ -152,12 +153,15 @@ export interface Invoice {
   sellerName: string;
   orderId?: string; // ID / Número de pedido de origen si fue facturado desde un pedido
   // SRI Ecuador Electronic Invoicing fields
-  sriStatus?: 'PENDIENTE' | 'FIRMADO' | 'ENVIADO' | 'AUTORIZADO' | 'NO AUTORIZADO' | 'DEVUELTA' | 'ERROR';
+  sriStatus?: 'PENDIENTE' | 'FIRMADO' | 'ENVIADO' | 'AUTORIZADO' | 'NO AUTORIZADO' | 'DEVUELTA' | 'ERROR' | 'ANULADO';
   sriClaveAcceso?: string;
   sriNumeroAutorizacion?: string;
   sriFechaAutorizacion?: string;
   sriXmlFirmado?: string;
   sriMensaje?: string;
+  creditNoteRef?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
 }
 
 export interface CashRegisterSession {

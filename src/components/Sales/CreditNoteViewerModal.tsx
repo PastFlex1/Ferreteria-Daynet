@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { 
   X, 
   Printer, 
@@ -6,13 +6,20 @@ import {
   CheckCircle2, 
   Building2, 
   FileText, 
-  CreditCard 
+  CreditCard,
+  Send,
+  RefreshCw,
+  ShieldCheck 
 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import { CreditNoteData, Invoice, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
 import { downloadCreditNotePdf, printCreditNoteDocument } from '../../utils/creditNotePdfGenerator';
 import { calculateSriTotals } from '../../utils/sriCalculations';
+import { downloadXML, convertCreditNoteToSRI, generateCreditNoteXML } from '../../services/sriXmlService';
+import { SriBackendService } from '../../services/sriBackendService';
+import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { useModal } from '../../context/ModalContext';
 
 interface CreditNoteViewerModalProps {
   isOpen: boolean;
@@ -20,6 +27,7 @@ interface CreditNoteViewerModalProps {
   creditNote: CreditNoteData | null;
   settings: StoreSettings;
   invoices?: Invoice[];
+  onUpdateCreditNote?: (updated: CreditNoteData) => void;
 }
 
 export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
@@ -28,10 +36,65 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
   creditNote,
   settings,
   invoices = [],
+  onUpdateCreditNote,
 }) => {
   const barcodeRef = useRef<SVGSVGElement>(null);
+  const [isTransmitting, setIsTransmitting] = useState(false);
+  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+  const { showToast, showAlert } = useModal();
 
   const claveAcceso = creditNote?.claveAcceso || creditNote?.numeroAutorizacion || '040920260417900123450011001001000000001123456781';
+
+  const handleTransmitSri = async () => {
+    if (!creditNote) return;
+    setIsTransmitting(true);
+    showToast('Conectando con backend Java (:8080) para firmar y enviar al SRI...', 'info');
+    try {
+      const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
+      const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+      const res = await SriBackendService.emitirNotaCreditoCompleta(
+        creditNote,
+        settings,
+        creditNote.invoiceDate,
+        creditNote.establishment || '001',
+        creditNote.emissionPoint || '001',
+        sriMode === 'PRODUCCION' ? '2' : '1',
+        certBase64,
+        pass
+      );
+
+      if (res.success && res.estado === 'AUTORIZADO') {
+        const updated: CreditNoteData = {
+          ...creditNote,
+          id: res.nuevoId || creditNote.id,
+          secNumber: res.nuevoSecuencial || creditNote.secNumber,
+          claveAcceso: res.claveAcceso || creditNote.claveAcceso,
+          status: 'AUTORIZADO',
+          numeroAutorizacion: res.numeroAutorizacion || res.claveAcceso || creditNote.claveAcceso,
+          fechaAutorizacion: res.fechaAutorizacion || new Date().toISOString(),
+          sriXmlFirmado: res.xmlFirmado,
+        } as any;
+        if (onUpdateCreditNote) onUpdateCreditNote(updated);
+        showToast(`Nota de Crédito ${updated.id} AUTORIZADA exitosamente por el SRI.`, 'success');
+      } else {
+        showToast(res.mensaje || 'Respuesta del SRI recibida', 'warning');
+      }
+    } catch (e: any) {
+      showAlert(`Error transmitiendo al SRI: ${e.message || e}`, 'Error SRI', 'error');
+    } finally {
+      setIsTransmitting(false);
+    }
+  };
+
+  const handleDownloadXml = () => {
+    if (!creditNote) return;
+    const sriData = convertCreditNoteToSRI(creditNote, settings, creditNote.invoiceDate, creditNote.establishment, creditNote.emissionPoint);
+    const { xml } = generateCreditNoteXML(sriData);
+    downloadXML(xml, `nota-credito-${creditNote.id}.xml`);
+    showToast('XML de Nota de Crédito descargado', 'success');
+  };
 
   // Render Barcode
   useEffect(() => {
@@ -101,6 +164,33 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {creditNote.status !== 'AUTORIZADO' && (
+              <button
+                type="button"
+                onClick={handleTransmitSri}
+                disabled={isTransmitting}
+                className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                title="Transmitir al SRI en vivo (Firma XAdES-BES, Recepción y Autorización)"
+              >
+                {isTransmitting ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                <span>{isTransmitting ? 'Transmitiendo...' : 'Transmitir SRI'}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleDownloadXml}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              title="Descargar XML oficial de la Nota de Crédito"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">XML</span>
+            </button>
+
             <button
               type="button"
               onClick={() => printCreditNoteDocument(creditNote, settings, invoices)}

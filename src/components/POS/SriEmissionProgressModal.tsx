@@ -14,9 +14,11 @@ import {
   Key
 } from 'lucide-react';
 import { Invoice, StoreSettings } from '../../types';
-import { SriBackendService } from '../../services/sriBackendService';
+import { SriBackendService, isSecuencialAlreadyRegistered } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { db } from '../../lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface SriEmissionProgressModalProps {
   isOpen: boolean;
@@ -35,6 +37,12 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   onInvoiceUpdated,
   autoTransmit = true,
 }) => {
+  const [activeInvoice, setActiveInvoice] = useState<Invoice | null>(invoice);
+
+  useEffect(() => {
+    setActiveInvoice(invoice);
+  }, [invoice]);
+
   const [sriMode, setSriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
   const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
@@ -141,162 +149,208 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
     setIsProcessing(true);
     setErrorMessage(null);
 
-    // Preparar datos SRI
-    const ambienteVal = sriMode === 'PRODUCCION' ? '2' : '1';
-    const sriData = convertERPInvoiceToSRI(invoice, settings, establishment, emissionPoint, ambienteVal);
-    const { xml: xmlOriginal, claveAcceso: claveCalculada } = generateInvoiceXML(sriData);
-    setClaveAcceso(claveCalculada);
+    let workingInvoice = { ...invoice };
+    let currentSecNum = parseInt(
+      (workingInvoice.fullNumber || '').split('-')[2] || String(workingInvoice.number || '1'),
+      10
+    );
+    let attempts = 0;
+    const MAX_ATTEMPTS = 15;
 
-    try {
-      // ──────────────────────────────────────────────────────────
-      // PASO 1: FIRMA DIGITAL XAdES-BES
-      // ──────────────────────────────────────────────────────────
-      setCurrentStep(1);
-      setStep1Status('LOADING');
-      setStep1Details('Generando estructura XML y firmando con certificado digital en memoria...');
+    while (attempts < MAX_ATTEMPTS) {
+      attempts++;
+      const ambienteVal = sriMode === 'PRODUCCION' ? '2' : '1';
+      const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
+      const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
+      const formattedSec = String(currentSecNum).padStart(9, '0');
 
-      const base64ToSend = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || '';
-      const passwordToSend = signaturePassword ?? (localStorage.getItem('ferreteria_settings_p12_password') || '');
+      workingInvoice.number = currentSecNum;
+      workingInvoice.fullNumber = `${estab}-${ptoEmi}-${formattedSec}`;
+      setActiveInvoice({ ...workingInvoice });
 
-      const fRes = await SriBackendService.firmarXml(xmlOriginal, base64ToSend, passwordToSend);
+      // Preparar datos SRI
+      const sriData = convertERPInvoiceToSRI(workingInvoice, settings, estab, ptoEmi, ambienteVal);
+      const { xml: xmlOriginal, claveAcceso: claveCalculada } = generateInvoiceXML(sriData);
+      setClaveAcceso(claveCalculada);
 
-      if (!fRes.success || !fRes.xmlFirmado) {
-        setStep1Status('ERROR');
-        setStep1Details(fRes.error || 'Error firmando el archivo XML.');
-        throw new Error(fRes.error || 'Fallo en la firma digital.');
-      }
+      try {
+        // ──────────────────────────────────────────────────────────
+        // PASO 1: FIRMA DIGITAL XAdES-BES
+        // ──────────────────────────────────────────────────────────
+        setCurrentStep(1);
+        setStep1Status('LOADING');
+        setStep1Details(`Generando estructura XML (${workingInvoice.fullNumber}) y firmando con certificado digital...`);
 
-      setXmlFirmado(fRes.xmlFirmado);
-      setStep1Status('SUCCESS');
-      setStep1Details('XML firmado exitosamente bajo el estándar XAdES-BES.');
+        const base64ToSend = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || '';
+        const passwordToSend = signaturePassword ?? (localStorage.getItem('ferreteria_settings_p12_password') || '');
 
-      // Pequeña pausa visual para observar la transición
-      await new Promise(r => setTimeout(r, 600));
+        const fRes = await SriBackendService.firmarXml(xmlOriginal, base64ToSend, passwordToSend);
 
-      // ──────────────────────────────────────────────────────────
-      // PASO 2: RECEPCIÓN SRI (SOAP RecepcionComprobantesOffline)
-      // ──────────────────────────────────────────────────────────
-      setCurrentStep(2);
-      setStep2Status('LOADING');
-      setStep2Details(`Enviando comprobante firmado a Web Service de Recepción SRI (${sriMode})...`);
+        if (!fRes.success || !fRes.xmlFirmado) {
+          setStep1Status('ERROR');
+          setStep1Details(fRes.error || 'Error firmando el archivo XML.');
+          throw new Error(fRes.error || 'Fallo en la firma digital.');
+        }
 
-      const rRes = await SriBackendService.recepcionarSri(fRes.xmlFirmado);
-      console.log('📡 [SRI 2. RECEPCIÓN RAW]:', rRes.recepcion || rRes.error);
+        setXmlFirmado(fRes.xmlFirmado);
+        setStep1Status('SUCCESS');
+        setStep1Details(`XML firmado exitosamente bajo el estándar XAdES-BES (${workingInvoice.fullNumber}).`);
 
-      const isRecepcionDevuelta = rRes.recepcion && rRes.recepcion.toUpperCase().includes('DEVUELTA');
-      if (!rRes.success || isRecepcionDevuelta) {
-        // Extraer mensajes de devolución del SRI
-        const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
-        const devMsgs: string[] = [];
-        let dm;
-        const rawContent = rRes.recepcion || '';
-        while ((dm = devMsgRegex.exec(rawContent)) !== null) {
-          const block = dm[1];
+        // Pequeña pausa visual para observar la transición
+        await new Promise((r) => setTimeout(r, 600));
+
+        // ──────────────────────────────────────────────────────────
+        // PASO 2: RECEPCIÓN SRI (SOAP RecepcionComprobantesOffline)
+        // ──────────────────────────────────────────────────────────
+        setCurrentStep(2);
+        setStep2Status('LOADING');
+        setStep2Details(`Enviando comprobante firmado a Web Service de Recepción SRI (${sriMode})...`);
+
+        const rRes = await SriBackendService.recepcionarSri(fRes.xmlFirmado);
+        console.log('📡 [SRI 2. RECEPCIÓN RAW]:', rRes.recepcion || rRes.error);
+
+        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar automáticamente al siguiente
+        if (isSecuencialAlreadyRegistered(rRes.recepcion, rRes.error)) {
+          console.warn(`[SRI] Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente...`);
+          setStep2Details(`Secuencial ${formattedSec} ya registrado/autorizado en el SRI. Avanzando automáticamente al siguiente secuencial...`);
+          currentSecNum++;
+          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
+          try {
+            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
+            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 800));
+          continue; // Reintentar con el siguiente secuencial
+        }
+
+        const isRecepcionDevuelta = rRes.recepcion && rRes.recepcion.toUpperCase().includes('DEVUELTA');
+        if (!rRes.success || isRecepcionDevuelta) {
+          // Extraer mensajes de devolución del SRI
+          const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
+          const devMsgs: string[] = [];
+          let dm;
+          const rawContent = rRes.recepcion || '';
+          while ((dm = devMsgRegex.exec(rawContent)) !== null) {
+            const block = dm[1];
+            const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
+            const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
+            const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
+            const idStr = identM ? `[ERROR ${identM[1]}] ` : '';
+            const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
+            const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
+            if (msgStr) devMsgs.push(`${idStr}${msgStr}${infoStr}`);
+          }
+
+          const errorFinal = devMsgs.length > 0 
+            ? devMsgs.join(' | ') 
+            : (rRes.error || 'El comprobante fue devuelto por el SRI en Recepción.');
+
+          setStep2Status('ERROR');
+          setStep2Details(`SRI DEVUELTA: ${errorFinal}`);
+
+          if (onInvoiceUpdated) {
+            const updatedDevuelta: Invoice = {
+              ...workingInvoice,
+              sriStatus: 'DEVUELTA',
+              sriClaveAcceso: claveCalculada,
+              sriXmlFirmado: fRes.xmlFirmado,
+              sriMensaje: errorFinal,
+            };
+            onInvoiceUpdated(updatedDevuelta);
+          }
+
+          throw new Error(`El SRI devolvió el comprobante en Recepción: ${errorFinal}`);
+        }
+
+        setStep2Status('SUCCESS');
+        setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
+
+        await new Promise((r) => setTimeout(r, 600));
+
+        // ──────────────────────────────────────────────────────────
+        // PASO 3: CONSULTA DE AUTORIZACIÓN SRI (SOAP Autorizacion)
+        // ──────────────────────────────────────────────────────────
+        setCurrentStep(3);
+        setStep3Status('LOADING');
+        setStep3Details(`Consultando estado de autorización para la clave: ${claveCalculada}...`);
+
+        const aRes = await SriBackendService.autorizarSri(claveCalculada);
+        console.log('🏛️ [SRI 3. AUTORIZACIÓN RAW]:', aRes.autorizacion || aRes.error);
+
+        // Si la autorización indica que el secuencial ya estaba registrado
+        if (isSecuencialAlreadyRegistered(aRes.autorizacion, aRes.error) && aRes.autorizacion?.includes('NO AUTORIZADO')) {
+          console.warn(`[SRI Autorización] Secuencial ${formattedSec} ya registrado en SRI. Avanzando al siguiente...`);
+          setStep3Details(`Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente secuencial...`);
+          currentSecNum++;
+          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
+          try {
+            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
+            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 800));
+          continue; // Reintentar con el siguiente secuencial
+        }
+
+        if (!aRes.success) {
+          setStep3Status('ERROR');
+          setStep3Details(aRes.error || 'El comprobante no pudo ser autorizado por el SRI.');
+          throw new Error(aRes.error || 'Fallo en la autorización del SRI.');
+        }
+
+        // Extraer datos de la respuesta oficial del SRI
+        const authXml = aRes.autorizacion || '';
+        const isAutorizado = authXml.toUpperCase().includes('AUTORIZADO') && !authXml.toUpperCase().includes('NO AUTORIZADO');
+        
+        const numMatch = authXml.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
+        const fechaMatch = authXml.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
+        const estadoMatch = authXml.match(/<estado>(.*?)<\/estado>/i);
+        
+        // Extraer todos los mensajes y advertencias devueltos por el SRI
+        const mensajesList: string[] = [];
+        const msgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
+        let m;
+        while ((m = msgRegex.exec(authXml)) !== null) {
+          const block = m[1];
           const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
           const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
           const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
-          const idStr = identM ? `[ERROR ${identM[1]}] ` : '';
+          const tipoM = block.match(/<tipo>(.*?)<\/tipo>/i);
+
+          const idStr = identM ? `[Código ${identM[1]}] ` : '';
           const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
           const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
-          if (msgStr) devMsgs.push(`${idStr}${msgStr}${infoStr}`);
+          const tipoStr = tipoM ? ` (${tipoM[1]})` : '';
+
+          if (msgStr) {
+            mensajesList.push(`${idStr}${msgStr}${infoStr}${tipoStr}`);
+          }
         }
 
-        const errorFinal = devMsgs.length > 0 
-          ? devMsgs.join(' | ') 
-          : (rRes.error || 'El comprobante fue devuelto por el SRI en Recepción.');
+        const numAuth = numMatch ? numMatch[1] : (isAutorizado ? claveCalculada : undefined);
+        const fechaAuth = fechaMatch ? fechaMatch[1] : (isAutorizado ? new Date().toLocaleString() : undefined);
+        const estadoReal = estadoMatch ? estadoMatch[1] : (isAutorizado ? 'AUTORIZADO' : 'NO AUTORIZADO');
+        const mensajeError = mensajesList.length > 0 ? mensajesList.join(' | ') : 'Sin detalle de error específico devuelto por el SRI.';
 
-        setStep2Status('ERROR');
-        setStep2Details(`SRI DEVUELTA: ${errorFinal}`);
+        if (!isAutorizado) {
+          setStep3Status('ERROR');
+          setStep3Details(`SRI: ${estadoReal} — ${mensajeError}`);
 
-        if (onInvoiceUpdated) {
-          const updatedDevuelta: Invoice = {
-            ...invoice,
-            sriStatus: 'DEVUELTA',
-            sriClaveAcceso: claveCalculada,
-            sriXmlFirmado: fRes.xmlFirmado,
-            sriMensaje: errorFinal,
-          };
-          onInvoiceUpdated(updatedDevuelta);
+          if (onInvoiceUpdated) {
+            const updatedDevuelta: Invoice = {
+              ...workingInvoice,
+              sriStatus: 'DEVUELTA',
+              sriClaveAcceso: claveCalculada,
+              sriXmlFirmado: fRes.xmlFirmado,
+              sriMensaje: `${estadoReal}: ${mensajeError}`,
+            };
+            onInvoiceUpdated(updatedDevuelta);
+          }
+
+          throw new Error(`El SRI devolvió: ${estadoReal} — ${mensajeError}`);
         }
 
-        throw new Error(`El SRI devolvió el comprobante en Recepción: ${errorFinal}`);
-      }
-
-      setStep2Status('SUCCESS');
-      setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
-
-      await new Promise(r => setTimeout(r, 600));
-
-      // ──────────────────────────────────────────────────────────
-      // PASO 3: CONSULTA DE AUTORIZACIÓN SRI (SOAP Autorizacion)
-      // ──────────────────────────────────────────────────────────
-      setCurrentStep(3);
-      setStep3Status('LOADING');
-      setStep3Details(`Consultando estado de autorización para la clave: ${claveCalculada}...`);
-
-      const aRes = await SriBackendService.autorizarSri(claveCalculada);
-      console.log('🏛️ [SRI 3. AUTORIZACIÓN RAW]:', aRes.autorizacion || aRes.error);
-
-      if (!aRes.success) {
-        setStep3Status('ERROR');
-        setStep3Details(aRes.error || 'El comprobante no pudo ser autorizado por el SRI.');
-        throw new Error(aRes.error || 'Fallo en la autorización del SRI.');
-      }
-
-      // Extraer datos de la respuesta oficial del SRI
-      const authXml = aRes.autorizacion || '';
-      const isAutorizado = authXml.toUpperCase().includes('AUTORIZADO') && !authXml.toUpperCase().includes('NO AUTORIZADO');
-      
-      const numMatch = authXml.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
-      const fechaMatch = authXml.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
-      const estadoMatch = authXml.match(/<estado>(.*?)<\/estado>/i);
-      
-      // Extraer todos los mensajes y advertencias devueltos por el SRI
-      const mensajesList: string[] = [];
-      const msgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
-      let m;
-      while ((m = msgRegex.exec(authXml)) !== null) {
-        const block = m[1];
-        const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
-        const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
-        const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
-        const tipoM = block.match(/<tipo>(.*?)<\/tipo>/i);
-
-        const idStr = identM ? `[Código ${identM[1]}] ` : '';
-        const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
-        const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
-        const tipoStr = tipoM ? ` (${tipoM[1]})` : '';
-
-        if (msgStr) {
-          mensajesList.push(`${idStr}${msgStr}${infoStr}${tipoStr}`);
-        }
-      }
-
-      const numAuth = numMatch ? numMatch[1] : (isAutorizado ? claveCalculada : undefined);
-      const fechaAuth = fechaMatch ? fechaMatch[1] : (isAutorizado ? new Date().toLocaleString() : undefined);
-      const estadoReal = estadoMatch ? estadoMatch[1] : (isAutorizado ? 'AUTORIZADO' : 'NO AUTORIZADO');
-      const mensajeError = mensajesList.length > 0 ? mensajesList.join(' | ') : 'Sin detalle de error específico devuelto por el SRI.';
-
-      if (!isAutorizado) {
-        setStep3Status('ERROR');
-        setStep3Details(`SRI: ${estadoReal} — ${mensajeError}`);
-
-        if (onInvoiceUpdated) {
-          const updatedDevuelta: Invoice = {
-            ...invoice,
-            sriStatus: 'DEVUELTA',
-            sriClaveAcceso: claveCalculada,
-            sriXmlFirmado: fRes.xmlFirmado,
-            sriMensaje: `${estadoReal}: ${mensajeError}`,
-          };
-          onInvoiceUpdated(updatedDevuelta);
-        }
-
-        throw new Error(`El SRI devolvió: ${estadoReal} — ${mensajeError}`);
-      }
-
-      // Construir el XML oficial de autorización del SRI (Estándar oficial para el cliente y SRI)
-      const xmlAutorizadoOficial = `<?xml version="1.0" encoding="UTF-8"?>
+        // Construir el XML oficial de autorización del SRI (Estándar oficial para el cliente y SRI)
+        const xmlAutorizadoOficial = `<?xml version="1.0" encoding="UTF-8"?>
 <autorizacion>
   <estado>AUTORIZADO</estado>
   <numeroAutorizacion>${numAuth}</numeroAutorizacion>
@@ -306,37 +360,45 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   <mensajes/>
 </autorizacion>`;
 
-      setXmlFirmado(xmlAutorizadoOficial);
+        setXmlFirmado(xmlAutorizadoOficial);
 
-      setAutorizacionData({
-        numeroAutorizacion: numAuth,
-        fechaAutorizacion: fechaAuth,
-        estado: 'AUTORIZADO',
-        mensaje: '¡Comprobante AUTORIZADO legalmente por el SRI!',
-      });
+        setAutorizacionData({
+          numeroAutorizacion: numAuth,
+          fechaAutorizacion: fechaAuth,
+          estado: 'AUTORIZADO',
+          mensaje: '¡Comprobante AUTORIZADO legalmente por el SRI!',
+        });
 
-      setStep3Status('SUCCESS');
-      setStep3Details(`N° Autorización SRI: ${numAuth}`);
-      setCurrentStep(4);
+        setStep3Status('SUCCESS');
+        setStep3Details(`N° Autorización SRI: ${numAuth}`);
+        setCurrentStep(4);
 
-      // Actualizar factura en estado principal
-      if (onInvoiceUpdated) {
-        const updatedInvoice: Invoice = {
-          ...invoice,
-          sriStatus: 'AUTORIZADO',
-          sriClaveAcceso: claveCalculada,
-          sriNumeroAutorizacion: numAuth,
-          sriFechaAutorizacion: fechaAuth,
-          sriXmlFirmado: xmlAutorizadoOficial,
-          sriMensaje: 'AUTORIZADO por el SRI',
-        };
-        onInvoiceUpdated(updatedInvoice);
+        // Si fue autorizado, asegurar que el secuencial de facturas en settings esté avanzado
+        const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
+        try {
+          localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
+          setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+        } catch (_) {}
+
+        // Actualizar factura en estado principal
+        if (onInvoiceUpdated) {
+          const updatedInvoice: Invoice = {
+            ...workingInvoice,
+            sriStatus: 'AUTORIZADO',
+            sriClaveAcceso: claveCalculada,
+            sriNumeroAutorizacion: numAuth,
+            sriFechaAutorizacion: fechaAuth,
+            sriXmlFirmado: xmlAutorizadoOficial,
+            sriMensaje: 'AUTORIZADO por el SRI',
+          };
+          onInvoiceUpdated(updatedInvoice);
+        }
+        break; // Completado con éxito
+      } catch (err: any) {
+        console.error('[SRI Modal Error]', err);
+        setErrorMessage(err.message || 'Error en la transmisión electrónica con el SRI.');
+        break; // Error no recuperable
       }
-    } catch (err: any) {
-      console.error('[SRI Modal Error]', err);
-      setErrorMessage(err.message || 'Error en la transmisión electrónica con el SRI.');
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -375,7 +437,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
                 </button>
               </div>
               <p className="text-xs text-slate-400 font-mono font-medium mt-0.5">
-                Factura {invoice.fullNumber} · Cliente: {invoice.customer.name}
+                Factura {(activeInvoice || invoice).fullNumber} · Cliente: {(activeInvoice || invoice).customer.name}
               </p>
             </div>
           </div>

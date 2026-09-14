@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CreditCard, X, AlertCircle, FileText, User } from 'lucide-react';
-import { Invoice, StoreSettings } from '../../types';
+import { Invoice, StoreSettings, CreditNoteData } from '../../types';
 import { Select } from '../Shared/Select';
 
 interface CreateCreditNoteModalProps {
@@ -11,6 +11,8 @@ interface CreateCreditNoteModalProps {
   establishment: string;
   emissionPoint: string;
   secCreditNote: string;
+  preselectedInvoiceId?: string;
+  existingCreditNotes?: CreditNoteData[];
 }
 
 export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
@@ -21,48 +23,75 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
   establishment,
   emissionPoint,
   secCreditNote,
+  preselectedInvoiceId,
+  existingCreditNotes = [],
 }) => {
-  const [formData, setFormData] = useState({
-    invoiceRef: '',
-    reason: 'Devolución de mercadería',
-    amount: '',
-  });
-
-  // Filtrar estrictamente solo Facturas AUTORIZADAS por el SRI (excluyendo pendientes, devueltas, anuladas y cotizaciones)
+  // Filtrar facturas y comprobantes activos (excluyendo cotizaciones, anuladas y que ya cuenten con Nota de Crédito)
   const facturasOnly = useMemo(() => {
-    return invoices.filter(inv => {
-      // 1. Debe ser documento tipo Factura
-      if (inv.documentType !== 'FACTURA') return false;
+    return invoices.filter((inv) => {
+      // 1. Debe ser un comprobante emitido (no cotización)
+      if (inv.documentType === 'COTIZACION') return false;
 
-      // 2. No debe estar anulada
-      if (inv.paymentStatus === 'ANULADA') return false;
+      // 2. No debe estar anulada previamente
+      if (inv.paymentStatus === 'ANULADA' || inv.sriStatus === 'ANULADO') return false;
 
-      // 3. Excluir explícitamente las devueltas, rechazadas o con error SRI
-      const isDevueltaOrFailed = 
-        inv.sriStatus === 'DEVUELTA' || 
-        inv.sriStatus === 'NO AUTORIZADO' || 
-        inv.sriStatus === 'PENDIENTE' || 
-        inv.sriStatus === 'ERROR';
+      // 3. No debe tener ya una nota de crédito vinculada directamente
+      if (inv.creditNoteRef) return false;
 
-      if (isDevueltaOrFailed) return false;
-
-      // 4. Debe contar con estado AUTORIZADO o número de autorización del SRI
-      const isAuthorized = inv.sriStatus === 'AUTORIZADO' || !!inv.sriNumeroAutorizacion;
-      
-      // En facturas legacy donde sriStatus aún no esté asignado ni devuelto, permitir si no estuvo anulada
-      if (!inv.sriStatus && !inv.sriNumeroAutorizacion) {
-        return true;
+      // 4. No debe existir ya una nota de crédito emitida para esta factura
+      if (
+        existingCreditNotes &&
+        existingCreditNotes.some(
+          (cn) =>
+            cn.invoiceRef === inv.fullNumber ||
+            cn.invoiceId === inv.id ||
+            (inv.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(inv.fullNumber))
+        )
+      ) {
+        return false;
       }
 
-      return isAuthorized;
+      return true;
     });
-  }, [invoices]);
+  }, [invoices, existingCreditNotes]);
+
+  const initialInvoice = useMemo(() => {
+    if (!preselectedInvoiceId) return facturasOnly[0] || null;
+    return (
+      facturasOnly.find(
+        (inv) => inv.id === preselectedInvoiceId || inv.fullNumber === preselectedInvoiceId
+      ) ||
+      facturasOnly[0] ||
+      null
+    );
+  }, [preselectedInvoiceId, facturasOnly]);
+
+  const [formData, setFormData] = useState({
+    invoiceRef: initialInvoice ? initialInvoice.id : '',
+    reason: 'Anulación total de la factura',
+    amount: initialInvoice ? initialInvoice.total.toFixed(2) : '',
+  });
+
+  const [restoreStock, setRestoreStock] = useState(true);
 
   const selectedInvoice = facturasOnly.find(inv => inv.id === formData.invoiceRef || inv.fullNumber === formData.invoiceRef);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoice) return;
+
+    if (
+      existingCreditNotes &&
+      existingCreditNotes.some(
+        (cn) =>
+          cn.invoiceRef === selectedInvoice.fullNumber ||
+          cn.invoiceId === selectedInvoice.id ||
+          (selectedInvoice.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(selectedInvoice.fullNumber))
+      )
+    ) {
+      onClose();
+      return;
+    }
 
     const amountVal = parseFloat(formData.amount) || selectedInvoice.total;
     const ratio = selectedInvoice.total > 0 ? amountVal / selectedInvoice.total : 1;
@@ -114,6 +143,7 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
       claveAcceso,
       numeroAutorizacion: claveAcceso,
       fechaAutorizacion: now.toISOString(),
+      restoreStock,
     });
   };
 
@@ -139,7 +169,7 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
           <div className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-orange-500" /> Factura a Modificar *
+                <FileText className="w-4 h-4 text-orange-500" /> Factura a Modificar / Anular *
               </label>
               <Select
                 required
@@ -156,21 +186,28 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
               >
                 <option value="">
-                  {facturasOnly.length === 0 ? 'No hay facturas autorizadas por el SRI disponibles' : 'Seleccione una factura autorizada por el SRI...'}
+                  {facturasOnly.length === 0 ? 'No hay facturas activas disponibles' : 'Seleccione una factura a anular o modificar...'}
                 </option>
                 {facturasOnly.map(inv => (
                   <option key={inv.id} value={inv.id}>
-                    {inv.fullNumber} - {inv.customer?.name || 'Consumidor Final'} - ${inv.total.toFixed(2)}
+                    {inv.fullNumber} - {inv.customer?.name || 'Consumidor Final'} - ${inv.total.toFixed(2)} {inv.sriStatus === 'AUTORIZADO' ? '✓ [SRI Autorizado]' : `[${inv.sriStatus || 'EMITIDA'}]`}
                   </option>
                 ))}
               </Select>
             </div>
 
             {selectedInvoice && (
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                <p className="font-bold text-slate-800 flex items-center gap-1.5 mb-1">
-                  <User className="w-4 h-4 text-slate-400" /> {selectedInvoice.customer?.name || 'Consumidor Final'}
-                </p>
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <User className="w-4 h-4 text-slate-400" /> {selectedInvoice.customer?.name || 'Consumidor Final'}
+                  </p>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                    selectedInvoice.sriStatus === 'AUTORIZADO' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {selectedInvoice.sriStatus || 'EMITIDA'}
+                  </span>
+                </div>
                 <p className="text-slate-500">Monto Original Factura: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(2)}</span></p>
                 <p className="text-slate-500">Fecha de Emisión: {new Date(selectedInvoice.createdAt).toLocaleDateString()}</p>
               </div>
@@ -181,11 +218,19 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
               <Select
                 required
                 value={formData.reason}
-                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                onChange={(e) => {
+                  const newReason = e.target.value;
+                  const isTotal = newReason === 'Anulación total de la factura';
+                  setFormData({ 
+                    ...formData, 
+                    reason: newReason,
+                    amount: isTotal && selectedInvoice ? selectedInvoice.total.toFixed(2) : formData.amount
+                  });
+                }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
               >
-                <option value="Devolución de mercadería">Devolución de mercadería</option>
                 <option value="Anulación total de la factura">Anulación total de la factura</option>
+                <option value="Devolución de mercadería">Devolución de mercadería</option>
                 <option value="Descuento aplicado post-venta">Descuento aplicado post-venta</option>
                 <option value="Error en la facturación">Error en la facturación</option>
               </Select>
@@ -206,14 +251,30 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
                   max={selectedInvoice ? selectedInvoice.total : undefined}
                 />
               </div>
-              <p className="text-[10px] text-slate-500">El monto no puede superar el total de la factura original.</p>
+              <p className="text-[10px] text-slate-500">El monto no puede superar el total de la factura original (${selectedInvoice?.total.toFixed(2) || '0.00'}).</p>
+            </div>
+
+            {/* Opción de reintegrar stock */}
+            <div className="pt-1">
+              <label className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/70 transition">
+                <input
+                  type="checkbox"
+                  checked={restoreStock}
+                  onChange={(e) => setRestoreStock(e.target.checked)}
+                  className="w-4 h-4 text-orange-600 rounded border-slate-300 focus:ring-orange-500 cursor-pointer"
+                />
+                <div>
+                  <span className="text-xs font-black text-slate-800 block">Reintegrar productos al inventario</span>
+                  <span className="text-[10px] text-slate-500 block">Devuelve las cantidades vendidas al stock actual de la bodega</span>
+                </div>
+              </label>
             </div>
           </div>
 
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
             <p className="text-xs text-orange-800 font-medium leading-relaxed">
-              La Nota de Crédito será autorizada con el SRI y los artículos (si es por devolución) retornarán al inventario.
+              Al emitir la Nota de Crédito por anulación total, la factura original quedará marcada automáticamente como <strong className="font-bold text-rose-700">ANULADA</strong> en el sistema y se generará su RIDE oficial.
             </p>
           </div>
 

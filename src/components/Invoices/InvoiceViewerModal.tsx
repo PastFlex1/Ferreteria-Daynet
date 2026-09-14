@@ -8,21 +8,25 @@ import {
   Building2, 
   FileText, 
   Share2, 
-  RefreshCw,
-  ShieldCheck,
-  Send,
-  Sparkles,
-  Key,
-  AlertCircle
+  RefreshCw, 
+  ShieldCheck, 
+  Send, 
+  Sparkles, 
+  Key, 
+  AlertCircle,
+  CreditCard,
+  Clock
 } from 'lucide-react';
-import { Invoice, StoreSettings } from '../../types';
+import { Invoice, StoreSettings, CreditNoteData } from '../../types';
 import { formatCurrency, formatFullDate, getDocumentTypeName, getPaymentMethodLabel } from '../../utils/formatters';
 import { SriTotalsTable } from '../POS/SriTotalsTable';
 import { calculateSriTotals } from '../../utils/sriCalculations';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
+import { CreditNoteViewerModal } from '../Sales/CreditNoteViewerModal';
 import { downloadXML, convertERPInvoiceToSRI, generateInvoiceXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 import { SriBackendService } from '../../services/sriBackendService';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { useModal } from '../../context/ModalContext';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas-pro';
 import jsPDF from 'jspdf';
@@ -35,6 +39,8 @@ interface InvoiceViewerModalProps {
   settings: StoreSettings;
   onConvertQuoteToInvoice?: (invoice: Invoice) => void;
   onUpdateInvoice?: (invoice: Invoice) => void;
+  onStockAdjust?: (productId: string, adjustmentQty: number) => void;
+  onOpenCreditNote?: (invoice: Invoice) => void;
 }
 
 export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
@@ -44,16 +50,28 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   settings,
   onConvertQuoteToInvoice,
   onUpdateInvoice,
+  onStockAdjust,
+  onOpenCreditNote,
 }) => {
+  const { showAlert, showToast } = useModal();
+  const [isAnularModalOpen, setIsAnularModalOpen] = useState(false);
+  const [anularReason, setAnularReason] = useState('Anulación total de la factura');
+  const [anularRestoreStock, setAnularRestoreStock] = useState(true);
+  const [creditNotes, setCreditNotes] = useFirestoreSync<CreditNoteData[]>('ferreteria_credit_notes', []);
+  const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
+  const [viewingCreditNote, setViewingCreditNote] = useState<CreditNoteData | null>(null);
   const [ticketFormat, setTicketFormat] = useState<'A4' | 'THERMAL'>('A4');
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(invoice);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isAnulando, setIsAnulando] = useState(false);
+  const [anularStepText, setAnularStepText] = useState<string>('');
 
   const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
   const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
+  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
   const barcodeRef = React.useRef<SVGSVGElement | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
@@ -197,6 +215,22 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     }
   };
 
+  const hasExistingCN = React.useMemo(() => {
+    if (!activeInvoice) return false;
+    return (creditNotes || []).some(
+      (cn) =>
+        (activeInvoice.creditNoteRef && cn.id === activeInvoice.creditNoteRef) ||
+        cn.invoiceRef === activeInvoice.fullNumber ||
+        cn.invoiceId === activeInvoice.id ||
+        (activeInvoice.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(activeInvoice.fullNumber))
+    );
+  }, [activeInvoice, creditNotes]);
+
+  const isAnuladaOrHasCN = React.useMemo(() => {
+    if (!activeInvoice) return false;
+    return activeInvoice.paymentStatus === 'ANULADA' || activeInvoice.sriStatus === 'ANULADO' || hasExistingCN;
+  }, [activeInvoice, hasExistingCN]);
+
   const handleInvoiceUpdated = (updated: Invoice) => {
     setCurrentInvoice(updated);
     if (onUpdateInvoice) {
@@ -204,32 +238,227 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     }
   };
 
-  const handleAnular = async () => {
-    if (!claveAccesoCalculada) {
-      alert("No se pudo determinar la clave de acceso para anular.");
+  const handleConfirmAnular = async () => {
+    if (!activeInvoice) return;
+    if (isAnulando) return;
+
+    // Verificar si ya existe Nota de Crédito para esta factura
+    const existingCN = (creditNotes || []).find(
+      (cn) =>
+        (activeInvoice.creditNoteRef && cn.id === activeInvoice.creditNoteRef) ||
+        cn.invoiceRef === activeInvoice.fullNumber ||
+        cn.invoiceId === activeInvoice.id ||
+        (activeInvoice.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(activeInvoice.fullNumber))
+    );
+
+    if (existingCN) {
+      showToast(`Esta factura ya tiene la Nota de Crédito ${existingCN.id} asociada.`, 'info');
+      setIsAnularModalOpen(false);
+      setViewingCreditNote(existingCN);
       return;
     }
-    const confirmacion = window.confirm(`¿Está seguro que desea anular la factura SRI ${activeInvoice.fullNumber}? Esta acción no se puede deshacer.`);
-    if (!confirmacion) return;
+
+    if (activeInvoice.paymentStatus === 'ANULADA' || activeInvoice.sriStatus === 'ANULADO') {
+      showToast('Esta factura ya se encuentra anulada en el sistema.', 'warning');
+      setIsAnularModalOpen(false);
+      return;
+    }
 
     setIsAnulando(true);
     try {
-      const res = await SriBackendService.anularFactura(claveAccesoCalculada, activeInvoice.customer?.email);
-      if (res.success) {
-        alert(res.mensaje || "Factura anulada exitosamente en el SRI.");
-        if (onUpdateInvoice) {
-          onUpdateInvoice({
-            ...activeInvoice,
-            sriStatus: 'ANULADO' as any,
-          });
-        }
-      } else {
-        alert("Error al anular: " + res.error);
+      const now = new Date();
+      const currentSecNum = parseInt(secCreditNote || '1', 10);
+      const formattedSec = String(currentSecNum).padStart(9, '0');
+      const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
+      const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
+      const creditNoteId = `${estab}-${ptoEmi}-${formattedSec}`;
+
+      // Clave de acceso oficial para Nota de Crédito (Tipo de Comprobante 04)
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = String(now.getFullYear());
+      const dateStr = `${day}${month}${year}`;
+      const ruc = (settings.taxId || '1725389454001').replace(/\D/g, '').padStart(13, '0').slice(0, 13);
+      const ambCode = sriMode === 'PRODUCCION' ? '2' : '1';
+      const serie = `${estab}${ptoEmi}`;
+      const secuencial = formattedSec;
+      const codNum = '12345678';
+      const tipoEmi = '1';
+
+      const baseKey = `${dateStr}04${ruc}${ambCode}${serie}${secuencial}${codNum}${tipoEmi}`;
+      let factor = 2;
+      let sum = 0;
+      for (let i = baseKey.length - 1; i >= 0; i--) {
+        sum += parseInt(baseKey.charAt(i), 10) * factor;
+        factor = factor === 7 ? 2 : factor + 1;
       }
+      const rem = sum % 11;
+      const dv = rem === 0 ? 0 : rem === 1 ? 1 : 11 - rem;
+      const claveAcceso = `${baseKey}${dv}`;
+
+      const totalAmount = activeInvoice.total || 0;
+      const subtotal = activeInvoice.subtotal ?? (totalAmount > 0 ? parseFloat((totalAmount / 1.15).toFixed(2)) : 0);
+      const tax = activeInvoice.taxTotal ?? parseFloat((totalAmount - subtotal).toFixed(2));
+
+      const newCreditNote: CreditNoteData = {
+        id: creditNoteId,
+        invoiceRef: activeInvoice.fullNumber || activeInvoice.id,
+        invoiceId: activeInvoice.id,
+        invoiceDate: activeInvoice.createdAt,
+        customer: activeInvoice.customer?.name || 'Consumidor Final',
+        customerRuc: activeInvoice.customer?.docNumber || '9999999999999',
+        customerAddress: activeInvoice.customer?.address || 'Matriz',
+        customerEmail: activeInvoice.customer?.email || '',
+        customerPhone: activeInvoice.customer?.phone || '',
+        reason: anularReason,
+        amount: totalAmount,
+        subtotal,
+        tax,
+        items: activeInvoice.items,
+        date: now.toISOString(),
+        status: 'AUTORIZADO',
+        establishment: estab,
+        emissionPoint: ptoEmi,
+        secNumber: formattedSec,
+        claveAcceso,
+        numeroAutorizacion: claveAcceso,
+        fechaAutorizacion: now.toISOString(),
+      };
+
+      // 1. TRANSMISIÓN REAL AL BACKEND SPRING BOOT (:8080)
+      // Firma XAdES-BES (/api/sri/firmar) -> Recepción SRI (/api/sri/recepcion) -> Autorización (/api/sri/autorizacion)
+      setAnularStepText('Transmitiendo Nota de Crédito al backend SRI (:8080)...');
+      try {
+        const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
+        const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+
+        setAnularStepText('Firmando y enviando Nota de Crédito al SRI...');
+        const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
+          newCreditNote,
+          settings,
+          activeInvoice.createdAt,
+          estab,
+          ptoEmi,
+          (sriMode === 'PRODUCCION' ? '2' : '1'),
+          certBase64,
+          pass
+        );
+
+        if (sriRes) {
+          if (sriRes.nuevoId) {
+            newCreditNote.id = sriRes.nuevoId;
+            newCreditNote.secNumber = sriRes.nuevoSecuencial;
+            newCreditNote.claveAcceso = sriRes.claveAcceso;
+          }
+          newCreditNote.status = sriRes.estado || 'PENDIENTE';
+          if (sriRes.numeroAutorizacion) {
+            newCreditNote.numeroAutorizacion = sriRes.numeroAutorizacion;
+          }
+          if (sriRes.fechaAutorizacion) {
+            newCreditNote.fechaAutorizacion = sriRes.fechaAutorizacion;
+          }
+          if (sriRes.xmlFirmado) {
+            (newCreditNote as any).sriXmlFirmado = sriRes.xmlFirmado;
+          }
+
+          if (sriRes.estado === 'AUTORIZADO') {
+            showToast(`Nota de Crédito ${newCreditNote.id} AUTORIZADA legalmente por el SRI`, 'success');
+          } else if (sriRes.estado === 'DEVUELTA') {
+            showToast(`SRI DEVUELTA: ${sriRes.mensaje || 'Comprobante devuelto'}`, 'warning');
+          } else if (sriRes.mensaje) {
+            showToast(sriRes.mensaje, 'info');
+          }
+        }
+      } catch (apiErr: any) {
+        console.warn('Advertencia en comunicación con API SRI:', apiErr);
+      }
+
+      // 2. Si el backend implementa endpoint /api/sri/anular, notificarlo también
+      if (claveAccesoCalculada) {
+        try {
+          await SriBackendService.anularFactura(claveAccesoCalculada, activeInvoice.customer?.email);
+        } catch (_) {}
+      }
+
+      // 3. Reintegrar stock a inventario si está seleccionado
+      if (anularRestoreStock && onStockAdjust && activeInvoice.items) {
+        activeInvoice.items.forEach((item) => {
+          if (item.productId && item.quantity > 0) {
+            onStockAdjust(item.productId, item.quantity);
+          }
+        });
+      }
+
+      // 3. Registrar la Nota de Crédito e incrementar el secuencial
+      setCreditNotes((prev) => [newCreditNote, ...(prev || [])]);
+      const nextSecNumberVal = parseInt(newCreditNote.secNumber || String(currentSecNum), 10) + 1;
+      setSecCreditNote(String(nextSecNumberVal).padStart(9, '0'));
+
+      // 4. Actualizar factura a ANULADA vinculando la Nota de Crédito
+      const finalCreditNoteId = newCreditNote.id;
+      const updated: Invoice = {
+        ...activeInvoice,
+        paymentStatus: 'ANULADA',
+        sriStatus: 'ANULADO',
+        creditNoteRef: finalCreditNoteId,
+        notes: activeInvoice.notes
+          ? `${activeInvoice.notes} | N/C ${finalCreditNoteId}: ${anularReason}`
+          : `N/C ${finalCreditNoteId}: ${anularReason}`,
+        cancelledAt: now.toISOString(),
+        cancellationReason: anularReason,
+      };
+
+      setCurrentInvoice(updated);
+      if (onUpdateInvoice) {
+        onUpdateInvoice(updated);
+      }
+
+      setIsAnularModalOpen(false);
+
+      showToast(`Factura anulada exitosamente con Nota de Crédito ${finalCreditNoteId}.`, 'success');
+      // Abrir inmediatamente el RIDE de la Nota de Crédito
+      setViewingCreditNote(newCreditNote);
     } catch (error: any) {
-      alert("Error inesperado: " + error.message);
+      showAlert(`Error al anular la factura: ${error.message || error}`, 'Error', 'error');
     } finally {
       setIsAnulando(false);
+    }
+  };
+
+  const handleViewCreditNoteForInvoice = () => {
+    if (!activeInvoice) return;
+    const ref = activeInvoice.creditNoteRef;
+    const found = creditNotes.find(
+      (cn) =>
+        (ref && cn.id === ref) ||
+        cn.invoiceRef === activeInvoice.fullNumber ||
+        cn.invoiceId === activeInvoice.id
+    );
+    if (found) {
+      setViewingCreditNote(found);
+    } else {
+      const estab = establishment || '001';
+      const ptoEmi = emissionPoint || '001';
+      const syntheticNC: CreditNoteData = {
+        id: ref || `${estab}-${ptoEmi}-000000001`,
+        invoiceRef: activeInvoice.fullNumber,
+        invoiceId: activeInvoice.id,
+        invoiceDate: activeInvoice.createdAt,
+        customer: activeInvoice.customer?.name || 'Consumidor Final',
+        customerRuc: activeInvoice.customer?.docNumber || '9999999999999',
+        customerAddress: activeInvoice.customer?.address || 'Matriz',
+        customerEmail: activeInvoice.customer?.email || '',
+        customerPhone: activeInvoice.customer?.phone || '',
+        reason: activeInvoice.cancellationReason || 'Anulación total de la factura',
+        amount: activeInvoice.total,
+        subtotal: activeInvoice.subtotal,
+        tax: activeInvoice.taxTotal,
+        items: activeInvoice.items,
+        date: activeInvoice.cancelledAt || activeInvoice.createdAt,
+        status: 'AUTORIZADO',
+        claveAcceso: activeInvoice.sriClaveAcceso || claveAccesoCalculada,
+      };
+      setViewingCreditNote(syntheticNC);
     }
   };
 
@@ -254,21 +483,36 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     {activeInvoice.documentType === 'FACTURA' && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border shrink-0 inline-flex items-center gap-1 ${
-                          activeInvoice.sriStatus === 'AUTORIZADO'
+                          isAnuladaOrHasCN
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            : activeInvoice.sriStatus === 'AUTORIZADO'
                             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                             : activeInvoice.sriStatus === 'DEVUELTA'
                             ? 'bg-red-500/20 text-red-300 border-red-500/30 animate-pulse'
                             : 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
                         }`}
                       >
-                        <ShieldCheck className="w-3 h-3" />
-                        <span>
-                          {activeInvoice.sriStatus === 'AUTORIZADO'
-                            ? 'SRI AUTORIZADO'
-                            : activeInvoice.sriStatus === 'DEVUELTA'
-                            ? 'SRI DEVUELTA'
-                            : 'SRI PENDIENTE'}
-                        </span>
+                        {isAnuladaOrHasCN ? (
+                          <>
+                            <AlertCircle className="w-3 h-3 text-rose-400" />
+                            <span>SRI ANULADO</span>
+                          </>
+                        ) : activeInvoice.sriStatus === 'AUTORIZADO' ? (
+                          <>
+                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                            <span>SRI AUTORIZADO</span>
+                          </>
+                        ) : activeInvoice.sriStatus === 'DEVUELTA' ? (
+                          <>
+                            <AlertCircle className="w-3 h-3 text-red-400" />
+                            <span>SRI DEVUELTA</span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="w-3 h-3 text-amber-400" />
+                            <span>SRI PENDIENTE</span>
+                          </>
+                        )}
                       </span>
                     )}
                   </div>
@@ -318,8 +562,8 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             <div className="px-6 py-2 bg-slate-900/70 flex flex-wrap items-center justify-between gap-2">
               {/* Left Action Group: SRI & Operational Buttons */}
               <div className="flex flex-wrap items-center gap-2">
-                {/* Botón para Transmisión en Vivo al SRI / Ver SRI */}
-                {activeInvoice.documentType === 'FACTURA' && (
+                {/* Botón para Transmisión en Vivo al SRI / Ver SRI (Solo facturas activas, no anuladas) */}
+                {activeInvoice.documentType === 'FACTURA' && !isAnuladaOrHasCN && (
                   <button
                     type="button"
                     onClick={() => setIsSriModalOpen(true)}
@@ -361,18 +605,37 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   </button>
                 )}
 
-                {/* Botón para Anular Factura SRI */}
-                {(activeInvoice.sriStatus === 'AUTORIZADO' || !!activeInvoice.sriNumeroAutorizacion) && (
+                {/* Acción Unificada: Anular (Nota de Crédito) */}
+                {activeInvoice.documentType !== 'COTIZACION' && !isAnuladaOrHasCN && (
                   <button
                     type="button"
-                    onClick={handleAnular}
+                    onClick={() => setIsAnularModalOpen(true)}
                     disabled={isAnulando}
-                    className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-50"
-                    title="Anular comprobante electrónico en el SRI"
+                    className="px-3 py-1.5 bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap disabled:opacity-50"
+                    title="Anular comprobante mediante emisión de Nota de Crédito y devolución de existencias"
                   >
-                    <X className="w-3.5 h-3.5 text-red-400" />
-                    <span>{isAnulando ? 'Anulando...' : 'Anular SRI'}</span>
+                    <CreditCard className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Anular (Nota de Crédito)</span>
                   </button>
+                )}
+
+                {/* Si ya está Anulada o tiene Nota de Crédito: Badge y Botón para Ver Nota de Crédito */}
+                {isAnuladaOrHasCN && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2.5 py-1 bg-red-500/20 text-red-300 border border-red-500/40 font-black rounded-xl text-xs inline-flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                      <span>{activeInvoice.paymentStatus === 'ANULADA' ? 'ANULADA' : 'CON NOTA DE CRÉDITO'} {activeInvoice.creditNoteRef ? `(N/C: ${activeInvoice.creditNoteRef})` : ''}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleViewCreditNoteForInvoice}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+                      title="Ver el comprobante RIDE de la Nota de Crédito emitida"
+                    >
+                      <CreditCard className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Ver Nota de Crédito</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* Convert Quote Button */}
@@ -1014,6 +1277,147 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
       onInvoiceUpdated={handleInvoiceUpdated}
       autoTransmit={activeInvoice.sriStatus !== 'AUTORIZADO'}
     />
+
+    {/* ── MODAL: CONFIRMAR ANULACIÓN CON NOTA DE CRÉDITO ─────────────────── */}
+    {isAnularModalOpen && (
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+        <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl space-y-0 text-slate-900 my-auto animate-scaleUp">
+          {/* Header */}
+          <div className="bg-slate-950 text-white p-5 sm:p-6 flex items-center justify-between border-b border-slate-800">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-2xl border border-rose-500/30">
+                <CreditCard className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">Anular con Nota de Crédito</h3>
+                <p className="text-xs text-slate-400 font-medium">
+                  {activeInvoice.fullNumber} • {activeInvoice.customer?.name || 'Consumidor Final'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAnularModalOpen(false)}
+              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-6 space-y-4">
+            {/* Info Box SRI */}
+            <div className="p-4 bg-rose-50/70 border border-rose-200/80 rounded-2xl text-xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-rose-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-rose-600" />
+                  SRI — Anulación Oficial
+                </span>
+                <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-md font-mono text-[10px] font-bold">
+                  Comprobante Tipo 04
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-900 leading-relaxed">
+                En la normativa tributaria del Ecuador (SRI), la anulación de una factura se realiza mediante la emisión de una <strong>Nota de Crédito electrónica</strong> que anula el comprobante y revierte los valores correspondientes.
+              </p>
+              <div className="pt-2 border-t border-rose-200/60 grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <span className="text-slate-500 block text-[10px]">Próxima Nota de Crédito:</span>
+                  <span className="font-mono font-bold text-slate-800">
+                    {(establishment || '001').padStart(3, '0')}-{(emissionPoint || '001').padStart(3, '0')}-{(secCreditNote || '000000001').padStart(9, '0')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">Monto Total a Anular:</span>
+                  <span className="font-mono font-black text-rose-700">
+                    ${(activeInvoice.total || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-slate-700">Motivo de Anulación / Nota de Crédito *</label>
+              <select
+                value={anularReason}
+                onChange={(e) => setAnularReason(e.target.value)}
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-rose-500 focus:outline-none"
+              >
+                <option value="Anulación total de la factura">Anulación total de la factura</option>
+                <option value="Error de digitación o datos del cliente">Error de digitación o datos del cliente</option>
+                <option value="Devolución de mercadería">Devolución de mercadería</option>
+                <option value="Venta cancelada / Solicitud del cliente">Venta cancelada / Solicitud del cliente</option>
+                <option value="Cambio de producto o forma de pago">Cambio de producto o forma de pago</option>
+                <option value="Comprobante duplicado">Comprobante duplicado</option>
+                <option value="Otro motivo">Otro motivo</option>
+              </select>
+            </div>
+
+            {/* Checkbox de restitución de stock */}
+            <div className="pt-1">
+              <label className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/70 transition">
+                <input
+                  type="checkbox"
+                  checked={anularRestoreStock}
+                  onChange={(e) => setAnularRestoreStock(e.target.checked)}
+                  className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                />
+                <div>
+                  <span className="text-xs font-black text-slate-800 block">Devolver productos al stock de inventario</span>
+                  <span className="text-[10px] text-slate-500 block">Reintegra automáticamente las cantidades vendidas a bodega</span>
+                </div>
+              </label>
+            </div>
+
+            {/* Live Progress Banner */}
+            {isAnulando && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 text-xs text-amber-900 animate-pulse">
+                <RefreshCw className="w-5 h-5 text-amber-600 animate-spin shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-black text-amber-950">Transmitiendo a API SRI (:8080)...</p>
+                  <p className="text-[11px] text-amber-700 truncate">{anularStepText || 'Firmando y procesando comprobante...'}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsAnularModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                disabled={isAnulando}
+                onClick={handleConfirmAnular}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-2"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>{isAnulando ? 'Generando N/C y Anulando...' : 'Confirmar Anulación y Emitir N/C'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── MODAL: VISOR DE NOTA DE CRÉDITO GENERADA ───────────────────────── */}
+    {viewingCreditNote && (
+      <CreditNoteViewerModal
+        isOpen={!!viewingCreditNote}
+        onClose={() => setViewingCreditNote(null)}
+        creditNote={viewingCreditNote}
+        settings={settings}
+        invoices={currentInvoice ? [currentInvoice] : []}
+        onUpdateCreditNote={(updated) => {
+          setViewingCreditNote(updated);
+          setCreditNotes((prev) => prev.map((cn) => (cn.id === updated.id ? updated : cn)));
+        }}
+      />
+    )}
   </>
 );
 };

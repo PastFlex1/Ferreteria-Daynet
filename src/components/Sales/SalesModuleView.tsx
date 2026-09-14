@@ -30,7 +30,8 @@ import {
   Check,
   RefreshCw,
   Eye,
-  Pencil
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import { Customer, Invoice, Product, SalesSubTab, StoreSettings, CreditNoteData } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
@@ -43,6 +44,8 @@ import { CreditNoteViewerModal } from './CreditNoteViewerModal';
 import { printCreditNoteDocument, downloadCreditNotePdf } from '../../utils/creditNotePdfGenerator';
 import { CreateMedicalPrescriptionModal } from './CreateMedicalPrescriptionModal';
 import { CreateRetentionModal } from './CreateRetentionModal';
+import { RetentionManagementView } from '../Retention/RetentionManagementView';
+import { SriBackendService } from '../../services/sriBackendService';
 import { CommissionsAndGoalsManager } from './CommissionsAndGoalsManager';
 import { defaultSellers } from '../../data/initialData';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
@@ -60,6 +63,8 @@ interface SalesModuleViewProps {
   onOpenViewer?: (invoice: Invoice) => void;
   onInvoiceOrder?: (order: Order) => void;
   onUpdateInvoice?: (invoice: Invoice) => void;
+  onStockAdjust?: (productId: string, adjustmentQty: number) => void;
+  preselectedInvoice?: Invoice | null;
 }
 
 export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
@@ -72,8 +77,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   onOpenViewer,
   onInvoiceOrder,
   onUpdateInvoice,
+  onStockAdjust,
+  preselectedInvoice,
 }) => {
-  const { showAlert, showToast } = useModal();
+  const { showAlert, showToast, showConfirm } = useModal();
   const [searchTerm, setSearchTerm] = useState('');
 
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
@@ -151,11 +158,19 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
   const [secRetention, setSecRetention] = useFirestoreSync<string>('ferreteria_settings_sec_retention', '000000001');
 
-  const [creditNotes, setCreditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
+  const [creditNotes, setCreditNotes] = useFirestoreSync<CreditNoteData[]>('ferreteria_credit_notes', []);
   const [selectedCreditNoteForView, setSelectedCreditNoteForView] = useState<CreditNoteData | null>(null);
   const [isCreditNoteViewerOpen, setIsCreditNoteViewerOpen] = useState(false);
+
+  // Automatically open modal when preselected invoice is passed
+  useEffect(() => {
+    if (preselectedInvoice && subTab === 'NOTA_CREDITO') {
+      setIsCreditNoteModalOpen(true);
+    }
+  }, [preselectedInvoice, subTab]);
+
   const [retenciones, setRetenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
-  const [recetas, setRecetas] = useFirestoreSync<any[]>('ferreteria_recetas', []);
+  const [recetas, setRecetas] = useFirestoreSync<any[]>('ferreteria_recetas_medicas', []);
   const [isCreditNoteModalOpen, setIsCreditNoteModalOpen] = useState(false);
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState(false);
@@ -166,16 +181,146 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [selectedInvoiceForSri, setSelectedInvoiceForSri] = useState<Invoice | null>(null);
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
 
-  const handleSaveCreditNote = (data: any) => {
-    setCreditNotes((prev) => [data, ...prev]);
-    const nextNum = (parseInt(secCreditNote, 10) + 1).toString().padStart(9, '0');
-    setSecCreditNote(nextNum);
+  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+
+  const handleSaveCreditNote = async (data: any) => {
+    // Evitar generación de duplicados si ya existe Nota de Crédito para esta factura
+    const alreadyExists = creditNotes.some(
+      (cn) =>
+        cn.id === data.id ||
+        (data.invoiceRef && cn.invoiceRef === data.invoiceRef) ||
+        (data.invoiceId && cn.invoiceId === data.invoiceId) ||
+        (data.invoiceRef && cn.invoiceRef && cn.invoiceRef.endsWith(data.invoiceRef))
+    );
+    if (alreadyExists) {
+      showAlert(
+        `Ya existe una Nota de Crédito registrada para la factura ${data.invoiceRef || data.invoiceId}. No se generarán comprobantes duplicados.`,
+        'Comprobante Existente',
+        'warning'
+      );
+      setIsCreditNoteModalOpen(false);
+      return;
+    }
+
     setIsCreditNoteModalOpen(false);
 
-    // Abrir automáticamente el RIDE RIDE Oficial de la Nota de Crédito
-    setSelectedCreditNoteForView(data);
+    // 1. Localizar la factura referenciada
+    const targetInvoice = invoices.find(
+      (inv) => inv.id === data.invoiceId || inv.fullNumber === data.invoiceRef
+    );
+
+    // 2. TRANSMISIÓN EN VIVO AL BACKEND SRI (:8080)
+    let updatedData = { ...data };
+    showToast('Transmitiendo Nota de Crédito a API local (:8080)...', 'info');
+    try {
+      const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
+      const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+      const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
+        data,
+        settings,
+        targetInvoice?.createdAt,
+        establishment,
+        emissionPoint,
+        sriMode === 'PRODUCCION' ? '2' : '1',
+        certBase64,
+        pass
+      );
+
+      if (sriRes) {
+        if (sriRes.nuevoId) {
+          updatedData.id = sriRes.nuevoId;
+          updatedData.secNumber = sriRes.nuevoSecuencial;
+          updatedData.claveAcceso = sriRes.claveAcceso;
+        }
+        updatedData.status = sriRes.estado || 'PENDIENTE';
+        if (sriRes.numeroAutorizacion) updatedData.numeroAutorizacion = sriRes.numeroAutorizacion;
+        if (sriRes.fechaAutorizacion) updatedData.fechaAutorizacion = sriRes.fechaAutorizacion;
+        if (sriRes.xmlFirmado) updatedData.sriXmlFirmado = sriRes.xmlFirmado;
+
+        if (sriRes.estado === 'AUTORIZADO') {
+          showToast(`Nota de Crédito ${updatedData.id} AUTORIZADA por el SRI`, 'success');
+        } else if (sriRes.mensaje) {
+          showToast(sriRes.mensaje, 'info');
+        }
+      }
+    } catch (apiErr: any) {
+      console.warn('Advertencia en transmisión de N/C:', apiErr);
+    }
+
+    setCreditNotes((prev) => [updatedData, ...prev]);
+    const nextNum = (parseInt(updatedData.secNumber || secCreditNote, 10) + 1).toString().padStart(9, '0');
+    setSecCreditNote(nextNum);
+
+    // 3. Actualizar la factura referenciada
+    if (targetInvoice && onUpdateInvoice) {
+      const isFullAnulacion =
+        data.reason === 'Anulación total de la factura' ||
+        Math.abs(data.amount - targetInvoice.total) < 0.05;
+
+      const updatedInvoice: Invoice = {
+        ...targetInvoice,
+        paymentStatus: isFullAnulacion ? 'ANULADA' : targetInvoice.paymentStatus,
+        sriStatus: isFullAnulacion ? 'ANULADO' : targetInvoice.sriStatus,
+        creditNoteRef: updatedData.id,
+        cancelledAt: isFullAnulacion ? new Date().toISOString() : targetInvoice.cancelledAt,
+        cancellationReason: isFullAnulacion ? data.reason : targetInvoice.cancellationReason,
+        notes: targetInvoice.notes
+          ? `${targetInvoice.notes} | N/C ${updatedData.id} (${data.reason})`
+          : `N/C ${updatedData.id} (${data.reason})`,
+      };
+      onUpdateInvoice(updatedInvoice);
+    }
+
+    // 4. Reintegrar stock al inventario
+    if (data.restoreStock !== false && onStockAdjust) {
+      const itemsToRestore = data.items || targetInvoice?.items || [];
+      itemsToRestore.forEach((item: any) => {
+        if (item.productId && item.quantity > 0) {
+          onStockAdjust(item.productId, item.quantity);
+        }
+      });
+    }
+
+    // 5. Abrir automáticamente el RIDE Oficial de la Nota de Crédito
+    setSelectedCreditNoteForView(updatedData);
     setIsCreditNoteViewerOpen(true);
-    showToast('Nota de Crédito generada y autorizada exitosamente.', 'success');
+  };
+
+  const handleDeleteCreditNote = (nc: CreditNoteData) => {
+    showConfirm(
+      `¿Está seguro de eliminar la Nota de Crédito ${nc.id} (Factura afectada: ${nc.invoiceRef})? Si fue emitida por error o está duplicada, se removerá permanentemente del listado.`,
+      () => {
+        const remaining = creditNotes.filter((item) => item.id !== nc.id);
+        setCreditNotes(remaining);
+
+        // Si la factura referenciaba esta NC eliminada, actualizar su referencia
+        const targetInvoice = invoices.find(
+          (inv) => inv.id === nc.invoiceId || inv.fullNumber === nc.invoiceRef
+        );
+        if (targetInvoice && onUpdateInvoice) {
+          const anotherNC = remaining.find(
+            (item) => item.invoiceId === targetInvoice.id || item.invoiceRef === targetInvoice.fullNumber
+          );
+          if (anotherNC) {
+            onUpdateInvoice({
+              ...targetInvoice,
+              creditNoteRef: anotherNC.id,
+            });
+          } else if (targetInvoice.creditNoteRef === nc.id) {
+            onUpdateInvoice({
+              ...targetInvoice,
+              creditNoteRef: undefined,
+            });
+          }
+        }
+
+        showToast(`Nota de Crédito ${nc.id} eliminada exitosamente.`, 'success');
+      },
+      'Eliminar Nota de Crédito',
+      'Sí, eliminar',
+      'Cancelar'
+    );
   };
 
   const handleSaveRetention = (data: any) => {
@@ -628,6 +773,16 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                           >
                             <Download className="w-4 h-4" />
                           </button>
+
+                          {/* 4. Eliminar / Limpiar duplicado */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCreditNote(nc)}
+                            className="p-2 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition cursor-pointer"
+                            title="Eliminar Nota de Crédito duplicada o errónea"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -646,6 +801,8 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
           establishment={establishment}
           emissionPoint={emissionPoint}
           secCreditNote={secCreditNote}
+          preselectedInvoiceId={preselectedInvoice?.id}
+          existingCreditNotes={creditNotes}
         />
       )}
 
@@ -659,6 +816,10 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
           creditNote={selectedCreditNoteForView}
           settings={settings}
           invoices={invoices}
+          onUpdateCreditNote={(updated) => {
+            setSelectedCreditNoteForView(updated);
+            setCreditNotes((prev) => prev.map((cn) => (cn.id === updated.id ? updated : cn)));
+          }}
         />
       )}
       </div>
@@ -843,76 +1004,13 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
 
   if (subTab === 'RETENCION') {
     return (
-      <div className="space-y-6">
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center space-x-3.5">
-            <div className="p-3 bg-slate-900 text-orange-400 rounded-2xl border border-slate-800">
-              <Percent className="w-6 h-6 stroke-[2.5]" />
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-slate-950">Comprobantes de Retención</h2>
-              <p className="text-xs text-slate-500 font-medium">Retenciones de IVA e Impuesto a la Renta emitidas y recibidas de agentes de retención.</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setIsRetentionModalOpen(true)}
-            className="px-4 py-2.5 bg-slate-950 text-white font-black text-xs rounded-xl shadow-md flex items-center space-x-2 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Registrar Comprobante de Retención</span>
-          </button>
-        </div>
-
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950 text-white uppercase font-black tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">N° Retención</th>
-                  <th className="py-3 px-4">Factura Asociada</th>
-                  <th className="py-3 px-4">Cliente / Agente</th>
-                  <th className="py-3 px-4">Ret. Renta</th>
-                  <th className="py-3 px-4">Ret. IVA</th>
-                  <th className="py-3 px-4 text-right">Monto Retenido</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white font-medium">
-                {retenciones.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500 font-medium">
-                      No hay retenciones registradas.
-                    </td>
-                  </tr>
-                ) : (
-                  retenciones.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50">
-                      <td className="py-3 px-4 font-mono font-bold text-slate-950">{r.id}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-orange-600">{r.invoiceRef}</td>
-                      <td className="py-3 px-4 font-bold text-slate-900">{r.customer}</td>
-                      <td className="py-3 px-4">{r.retentionRir}</td>
-                      <td className="py-3 px-4">{r.retentionIva}</td>
-                      <td className="py-3 px-4 text-right font-mono font-black text-slate-900">
-                        {formatCurrency(r.totalRetenido, settings.currencySymbol)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      {isRetentionModalOpen && (
-        <CreateRetentionModal
-          onClose={() => setIsRetentionModalOpen(false)}
-          onSave={handleSaveRetention}
-          invoices={invoices}
-          settings={settings}
-          establishment={establishment}
-          emissionPoint={emissionPoint}
-          secRetention={secRetention}
-        />
-      )}
-      </div>
+      <RetentionManagementView
+        settings={settings}
+        establishment={establishment}
+        emissionPoint={emissionPoint}
+        secRetention={secRetention}
+        onUpdateSecuencial={(nextSec) => setSecRetention(nextSec.padStart(9, '0'))}
+      />
     );
   }
 
