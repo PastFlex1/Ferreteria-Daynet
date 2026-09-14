@@ -67,21 +67,59 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
     };
   }, [activeUser, isSuperAdmin]);
 
+  // Mapa de equivalencias entre accesos de navegación y acciones de módulo
+  const PERMISSION_ALIASES: Record<string, string[]> = {
+    'nav.reportes.ventas': ['reports.view_sales'],
+    'nav.reportes.rentabilidad': ['reports.view_profits'],
+    'nav.reportes.inventario': ['reports.view_inventory_valuation'],
+    'nav.reportes.comisiones': ['reports.view_commissions'],
+    'nav.rrhh.empleados': ['hr.manage_employees'],
+    'nav.rrhh.roles': ['hr.calculate_payroll'],
+    'nav.compras.ordenes': ['purchases.create_order'],
+    'nav.compras.facturas': ['purchases.receive_bill'],
+    'nav.proveedores.directorio': ['suppliers.create'],
+    'nav.proveedores.cuentas_pagar': ['suppliers.pay_debt'],
+    'nav.finanzas.bancos': ['finance.manage_banks'],
+    'nav.contabilidad.asientos': ['accounting.journal_entries'],
+    'nav.contabilidad.ats': ['accounting.ats_export'],
+    'nav.configuracion.empresa': ['settings.company_info'],
+    'nav.configuracion.usuarios': ['settings.users_manage'],
+    'nav.configuracion.firma': ['settings.sri_signature'],
+  };
+
   const can = (permissionId: string): boolean => {
     if (!activeUser) return true;
     if (isSuperAdmin) return true;
 
-    // Si el permiso está explícitamente configurado (true o false)
+    // 1. Si el permiso está explícitamente configurado (true o false)
     if (typeof userPermissions[permissionId] === 'boolean') {
       return userPermissions[permissionId];
     }
 
-    // Si no está configurado, verificar si tiene acceso al módulo padre
+    // 2. Verificar aliases / acciones equivalentes
+    const aliases = PERMISSION_ALIASES[permissionId];
+    if (aliases) {
+      for (const alias of aliases) {
+        if (typeof userPermissions[alias] === 'boolean') {
+          return userPermissions[alias];
+        }
+      }
+    }
+
+    // 3. Si se consulta un módulo padre (ej: 'nav.ventas'), verificar si tiene AL MENOS un permiso hijo activo
+    const hasChildActive = Object.keys(userPermissions).some(
+      (k) => k.startsWith(`${permissionId}.`) && userPermissions[k] === true
+    );
+    if (hasChildActive) {
+      return true;
+    }
+
+    // 4. Si no está configurado, verificar si tiene acceso al módulo padre (solo si el padre está explícitamente en true)
     const parts = permissionId.split('.');
     if (parts.length > 1) {
       const parentModuleKey = parts.slice(0, -1).join('.');
-      if (typeof userPermissions[parentModuleKey] === 'boolean') {
-        return userPermissions[parentModuleKey];
+      if (userPermissions[parentModuleKey] === true) {
+        return true;
       }
     }
 

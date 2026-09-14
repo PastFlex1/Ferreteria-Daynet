@@ -99,14 +99,25 @@ export const Header: React.FC<HeaderProps> = ({
   sidebarCollapsed,
   setSidebarCollapsed,
 }) => {
-  const { can, isSuperAdmin } = usePermissions();
+  const { can, isSuperAdmin, userPermissions } = usePermissions();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const isTabAllowed = (tabId: string, modulePerm?: string): boolean => {
     if (isSuperAdmin) return true;
     const direct = TAB_TO_PERMISSION_MAP[tabId];
-    if (direct && can(direct)) return true;
-    if (modulePerm && can(modulePerm)) return true;
+    if (direct) {
+      // Respetar estrictamente la configuración explícita asignada al trabajador
+      if (typeof userPermissions[direct] === 'boolean') {
+        return userPermissions[direct];
+      }
+      if (can(direct)) {
+        return true;
+      }
+    }
+    // Si no hay configuración directa, permitir si tiene acceso general al módulo
+    if (modulePerm && can(modulePerm)) {
+      return true;
+    }
     return false;
   };
 
@@ -262,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'CONFIGURACION', label: 'Configuración', icon: <Settings className="w-4 h-4" />,  items: settingsSubTabs.filter(i => isTabAllowed(i.id, 'nav.configuracion')),   accentClass: 'text-slate-400', modulePerm: 'nav.configuracion' },
   ];
 
-  const modules = rawModules.filter(m => isSuperAdmin || (m.items.length > 0 && can(m.modulePerm)));
+  const modules = rawModules.filter(m => isSuperAdmin || m.items.length > 0);
 
 
   // Determine which module is active based on current tab

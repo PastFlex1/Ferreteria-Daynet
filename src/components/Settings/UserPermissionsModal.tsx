@@ -39,15 +39,21 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Inicializar estado local de permisos
+  // Inicializar estado local de permisos con valores booleanos explícitos para cada permiso del sistema
   const [permissions, setPermissions] = useState<PermissionMap>(() => {
-    // Si el usuario ya tiene permisos guardados, usarlos
-    if (user.permissions && Object.keys(user.permissions).length > 0) {
-      return { ...user.permissions };
-    }
-    // Si no, cargar la plantilla correspondiente a su rol actual
-    const preset = ROLE_PRESETS[user.role]?.permissions || {};
-    return { ...preset };
+    const basePreset = ROLE_PRESETS[user.role]?.permissions || {};
+    const existing = user.permissions || {};
+    const initialMap: PermissionMap = {};
+    ALL_PERMISSIONS.forEach(p => {
+      if (typeof existing[p.id] === 'boolean') {
+        initialMap[p.id] = existing[p.id];
+      } else if (typeof basePreset[p.id] === 'boolean') {
+        initialMap[p.id] = basePreset[p.id];
+      } else {
+        initialMap[p.id] = false;
+      }
+    });
+    return initialMap;
   });
 
   const [selectedRole, setSelectedRole] = useState<string>(user.role || 'Cajero');
@@ -96,19 +102,40 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
     return map;
   }, [filteredPermissions]);
 
-  // Manejo de toggle individual
+  // Manejo de toggle individual con auto-activación de módulo padre
   const handleTogglePermission = (permissionId: string) => {
-    setPermissions((prev) => ({
-      ...prev,
-      [permissionId]: !prev[permissionId],
-    }));
+    setPermissions((prev) => {
+      const nextVal = !prev[permissionId];
+      const next = {
+        ...prev,
+        [permissionId]: nextVal,
+      };
+
+      // Si activamos una subsección (ej: nav.ventas.caja, nav.reportes.ventas),
+      // asegurar que el módulo contenedor esté habilitado para que se muestre en el menú
+      if (nextVal && permissionId.startsWith('nav.')) {
+        const parts = permissionId.split('.');
+        if (parts.length > 2) {
+          const parentNav = parts.slice(0, 2).join('.');
+          if (ALL_PERMISSIONS.some(p => p.id === parentNav)) {
+            next[parentNav] = true;
+          }
+        }
+      }
+
+      return next;
+    });
   };
 
   // Cargar una plantilla de rol predeterminada
   const handleApplyPreset = (presetKey: string) => {
     const preset = ROLE_PRESETS[presetKey];
     if (preset) {
-      setPermissions({ ...preset.permissions });
+      const newMap: PermissionMap = {};
+      ALL_PERMISSIONS.forEach(p => {
+        newMap[p.id] = !!preset.permissions[p.id];
+      });
+      setPermissions(newMap);
       setSelectedRole(presetKey);
     }
   };
@@ -142,7 +169,12 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
   };
 
   const handleSave = () => {
-    onSave(user.id, permissions, selectedRole);
+    // Asegurar que todos los permisos de ALL_PERMISSIONS estén definidos explícitamente como booleanos
+    const finalPermissions: PermissionMap = {};
+    ALL_PERMISSIONS.forEach(p => {
+      finalPermissions[p.id] = !!permissions[p.id];
+    });
+    onSave(user.id, finalPermissions, selectedRole);
     onClose();
   };
 

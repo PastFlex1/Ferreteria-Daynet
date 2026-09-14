@@ -74,24 +74,39 @@ const AuthorizedTabContent: React.FC<{
   setActiveTab: (tab: TabType) => void;
   children: React.ReactNode;
 }> = ({ activeTab, setActiveTab, children }) => {
-  const { can, isSuperAdmin } = usePermissions();
-  const requiredPermission = TAB_TO_PERMISSION_MAP[activeTab];
+  const { can, isSuperAdmin, userPermissions } = usePermissions();
+
+  const isTabPermitted = (tab: string): boolean => {
+    if (isSuperAdmin) return true;
+    const perm = TAB_TO_PERMISSION_MAP[tab];
+    if (!perm) return true;
+    if (typeof userPermissions[perm] === 'boolean') {
+      return userPermissions[perm];
+    }
+    return can(perm);
+  };
+
+  const isCurrentAllowed = isTabPermitted(activeTab);
 
   useEffect(() => {
     if (isSuperAdmin) return;
-    if (requiredPermission && !can(requiredPermission)) {
+    if (!isCurrentAllowed) {
       // Si el trabajador no tiene permiso para este tab, buscar el primer tab permitido
-      const firstAllowed = DEFAULT_TAB_PRIORITY.find(tab => {
-        const perm = TAB_TO_PERMISSION_MAP[tab];
-        return perm ? can(perm) : false;
-      });
+      const candidateTabs = [
+        ...DEFAULT_TAB_PRIORITY,
+        'CATEGORIAS', 'PROMOCIONES', 'UNIDADES_MEDIDAS', 'AJUSTE_STOCK',
+        'PROVEEDORES', 'ORDENES_COMPRA', 'BANCOS', 'CAJA_CHICA',
+        'CONTABILIDAD_RESUMEN', 'ASIENTOS', 'ACTIVOS_LISTA',
+        'EMPLEADOS', 'REP_VENTAS', 'CFG_EMPRESA'
+      ];
+      const firstAllowed = candidateTabs.find(tab => isTabPermitted(tab));
       if (firstAllowed && firstAllowed !== activeTab) {
         setActiveTab(firstAllowed as TabType);
       }
     }
-  }, [activeTab, isSuperAdmin, requiredPermission, can, setActiveTab]);
+  }, [activeTab, isSuperAdmin, isCurrentAllowed, userPermissions, setActiveTab]);
 
-  if (!isSuperAdmin && requiredPermission && !can(requiredPermission)) {
+  if (!isSuperAdmin && !isCurrentAllowed) {
     return (
       <div className="py-24 px-6 text-center max-w-lg mx-auto space-y-4 animate-in fade-in duration-200">
         <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center mx-auto shadow-inner">
@@ -951,6 +966,10 @@ export default function App() {
             settings={settings} 
             onSaveSettings={setSettings} 
             onClearAllData={handleClearAllData}
+            usersList={usersList}
+            setUsersList={setUsersList}
+            currentUser={currentUser}
+            setCurrentUser={setCurrentUser}
           />
         )}
             </AuthorizedTabContent>

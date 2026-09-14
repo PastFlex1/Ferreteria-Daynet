@@ -265,7 +265,7 @@ export function mongoBridgePlugin(): Plugin {
             
             const result: Record<string, any> = {};
             for (const d of docs) {
-              result[d._id as string] = d.data;
+              result[String(d._id)] = d.data;
             }
 
             return sendJson(res, 200, {

@@ -62,12 +62,17 @@ import { UserPermissionsModal } from './UserPermissionsModal';
 
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
 import { MongoConnectorCard } from './MongoConnectorCard';
+import { ROLE_PRESETS, ALL_PERMISSIONS } from '../../types/permissions';
 
 interface SettingsManagerProps {
   subTab: SettingsSubTab | 'SETTINGS';
   settings: StoreSettings;
   onSaveSettings: (newSettings: StoreSettings) => void;
   onClearAllData?: () => void;
+  usersList?: any[];
+  setUsersList?: (users: any[] | ((prev: any[]) => any[])) => void;
+  currentUser?: any;
+  setCurrentUser?: (user: any) => void;
 }
 
 export const SettingsManager: React.FC<SettingsManagerProps> = ({
@@ -75,6 +80,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   settings,
   onSaveSettings,
   onClearAllData,
+  usersList: propUsersList,
+  setUsersList: propSetUsersList,
+  currentUser,
+  setCurrentUser,
 }) => {
   const { showAlert, showConfirm, showToast } = useModal();
   const [formData, setFormData] = useState<StoreSettings>({ ...settings });
@@ -134,7 +143,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   });
 
   // Users Management State
-  const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [internalUsersList, setInternalUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const usersList = propUsersList || internalUsersList;
+  const setUsersList = propSetUsersList || setInternalUsersList;
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
@@ -629,6 +640,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       );
       showToast('Usuario actualizado correctamente', 'success');
     } else {
+      const initialRolePermissions = ROLE_PRESETS[newUser.role]?.permissions || {};
+      const newMap: Record<string, boolean> = {};
+      ALL_PERMISSIONS.forEach(p => {
+        newMap[p.id] = !!initialRolePermissions[p.id];
+      });
+
       setUsersList([
         ...usersList,
         {
@@ -638,7 +655,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           username: newUser.username,
           role: newUser.role,
           status: 'Activo',
-          password: newUser.password
+          password: newUser.password,
+          permissions: newMap
         }
       ]);
       showToast('Usuario creado correctamente', 'success');
@@ -691,13 +709,29 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   };
 
   const handleSavePermissions = (userId: string, updatedPermissions: Record<string, boolean>, newRole?: string) => {
-    setUsersList(prev =>
-      prev.map(u =>
+    setUsersList((prev: any[]) =>
+      prev.map((u: any) =>
         u.id === userId
           ? { ...u, permissions: updatedPermissions, ...(newRole ? { role: newRole } : {}) }
           : u
       )
     );
+
+    // Si el usuario editado es el usuario en sesión activa, actualizar sesión de inmediato
+    if (currentUser && (currentUser.id === userId || currentUser.username === userForPermissions?.username)) {
+      const updatedCurr = { 
+        ...currentUser, 
+        permissions: updatedPermissions, 
+        ...(newRole ? { role: newRole } : {}) 
+      };
+      if (setCurrentUser) {
+        setCurrentUser(updatedCurr);
+      }
+      try {
+        sessionStorage.setItem('ferreteria_current_user', JSON.stringify(updatedCurr));
+      } catch (e) {}
+    }
+
     showToast('Permisos de trabajador guardados y actualizados correctamente', 'success');
   };
 
