@@ -20,6 +20,8 @@ import { defaultPaymentMethods } from '../../data/initialData';
 import { formatCurrency, getDocumentTypeName } from '../../utils/formatters';
 import { SriTotalsTable } from './SriTotalsTable';
 import { calculateSriTotals } from '../../utils/sriCalculations';
+import { usePermissions } from '../../context/PermissionsContext';
+
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -58,10 +60,17 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   paymentMethods,
   onCompleteSale,
 }) => {
+  const { can } = usePermissions();
+
   // Normalize and filter active payment methods
   const availableMethods = useMemo(() => {
     const rawList = paymentMethods && paymentMethods.length > 0 ? paymentMethods : defaultPaymentMethods;
-    const activeList = rawList.filter((pm) => pm.active !== false);
+    const activeList = rawList.filter((pm) => {
+      if (pm.active === false) return false;
+      const isCredit = pm.code === 'CRED' || pm.code === 'CREDITO' || pm.name?.toUpperCase().includes('CLIENTE') || pm.methodKey === 'CREDITO_CLIENTE';
+      if (isCredit && !can('pos.allow_credit_sale')) return false;
+      return true;
+    });
 
     if (activeList.length === 0) {
       return [{
@@ -71,6 +80,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         label: 'Efectivo',
         icon: <DollarSign className="w-4 h-4" />,
         isDefault: true,
+
       }];
     }
 
@@ -264,10 +274,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </div>
 
             {/* Contractor Credit Method Button if customer has credit limit and not already in grid */}
-            {customer.creditLimit > 0 && !availableMethods.some(m => m.key === 'CREDITO_CLIENTE') && (
+            {can('pos.allow_credit_sale') && customer.creditLimit > 0 && !availableMethods.some(m => m.key === 'CREDITO_CLIENTE') && (
               <button
                 type="button"
                 onClick={() => setPaymentMethod('CREDITO_CLIENTE')}
+
                 className={`w-full mt-2.5 p-3.5 rounded-xl border text-xs font-bold transition flex items-center justify-between cursor-pointer ${
                   paymentMethod === 'CREDITO_CLIENTE'
                     ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white border-orange-500 shadow-sm'

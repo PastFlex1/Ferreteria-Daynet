@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { mongoSync } from '../services/mongoSyncService';
 
 export function useFirestoreSync<T>(docId: string, initialValue: T) {
   const [data, setData] = useState<T>(initialValue);
@@ -49,6 +50,10 @@ export function useFirestoreSync<T>(docId: string, initialValue: T) {
       try {
         localStorage.setItem(docId, typeof nextData === 'string' ? nextData : JSON.stringify(nextData));
       } catch (e) {}
+
+      // Replicar automáticamente a MongoDB Local (Compass)
+      mongoSync.saveDoc(docId, nextData).catch(() => {});
+
       return nextData;
     });
   };

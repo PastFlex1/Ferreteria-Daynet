@@ -6,6 +6,8 @@ import { exportToModernExcel } from '../../utils/excelExport';
 import { ProductModal } from './ProductModal';
 import { BulkProductImporterModal } from './BulkProductImporterModal';
 import { Select } from '../Shared/Select';
+import { usePermissions } from '../../context/PermissionsContext';
+
 
 interface InventoryManagerProps {
   products: Product[];
@@ -26,7 +28,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   onStockAdjust,
   units,
 }) => {
+  const { can } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
+
   const [selectedCategory, setSelectedCategory] = useState<string>('TODAS');
   const [stockFilter, setStockFilter] = useState<'TODOS' | 'LOW_STOCK' | 'OUT_OF_STOCK'>('TODOS');
   
@@ -148,17 +152,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/50 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
-          <div>
-            <span className="text-xs text-slate-500 font-extrabold uppercase tracking-wider block">Valor Inversión (Costo)</span>
-            <span className="text-xl font-black text-orange-600 font-mono mt-0.5 block">
-              {formatCurrency(totalInventoryValue, settings.currencySymbol)}
-            </span>
+        {can('inventory.view_cost_price') && (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/50 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
+            <div>
+              <span className="text-xs text-slate-500 font-extrabold uppercase tracking-wider block">Valor Inversión (Costo)</span>
+              <span className="text-xl font-black text-orange-600 font-mono mt-0.5 block">
+                {formatCurrency(totalInventoryValue, settings.currencySymbol)}
+              </span>
+            </div>
+            <div className="p-3 bg-orange-50 text-orange-600 rounded-xl border border-orange-200">
+              <TrendingUp className="w-6 h-6" />
+            </div>
           </div>
-          <div className="p-3 bg-orange-50 text-orange-600 rounded-xl border border-orange-200">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-        </div>
+        )}
+
 
         <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/50 rounded-2xl p-4 flex items-center justify-between shadow-2xs">
           <div>
@@ -228,31 +235,38 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               <span>Stock Bajo ({lowStockCount})</span>
             </button>
 
-            <button
-              onClick={handleExportCSV}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 text-orange-600" />
-              <span>Exportar Excel</span>
-            </button>
+            {can('inventory.export_excel') && (
+              <button
+                onClick={handleExportCSV}
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-orange-600" />
+                <span>Exportar Excel</span>
+              </button>
+            )}
 
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              className="px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
-            >
-              <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
-              <span>Importar Excel / CSV</span>
-            </button>
+            {can('inventory.import_excel') && (
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <UploadCloud className="w-3.5 h-3.5 text-sky-600" />
+                <span>Importar Excel / CSV</span>
+              </button>
+            )}
 
-            <button
-              onClick={handleCreateClick}
-              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 shadow-md shadow-orange-500/20 cursor-pointer"
-            >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>Nuevo Producto</span>
-            </button>
+            {can('inventory.create_product') && (
+              <button
+                onClick={handleCreateClick}
+                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white text-xs font-black rounded-xl transition inline-flex items-center gap-1.5 shadow-md shadow-orange-500/20 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>Nuevo Producto</span>
+              </button>
+            )}
           </div>
         </div>
+
 
         {/* Inventory Table */}
         <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -263,11 +277,12 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <th className="py-3 px-4">Producto</th>
                 <th className="py-3 px-4">Categoría</th>
                 <th className="py-3 px-4 text-center">Unidad</th>
-                <th className="py-3 px-4 text-right">Costo</th>
+                {can('inventory.view_cost_price') && <th className="py-3 px-4 text-right">Costo</th>}
                 <th className="py-3 px-4 text-right">P. Venta (Sin IVA)</th>
                 <th className="py-3 px-4 text-right">P. Venta (Con IVA)</th>
-                <th className="py-3 px-4 text-center">Margen</th>
+                {can('inventory.view_cost_price') && <th className="py-3 px-4 text-center">Margen</th>}
                 <th className="py-3 px-4 text-center">Stock</th>
+
                 <th className="py-3 px-4 text-center">Ubicación</th>
                 <th className="py-3 px-4 text-center">Acciones</th>
               </tr>
@@ -316,20 +331,24 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           {p.unit}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right font-mono text-slate-500">
-                        {formatCostCurrency(p.costPrice, settings.currencySymbol)}
-                      </td>
+                      {can('inventory.view_cost_price') && (
+                        <td className="py-3 px-4 text-right font-mono text-slate-500">
+                          {formatCostCurrency(p.costPrice, settings.currencySymbol)}
+                        </td>
+                      )}
                       <td className="py-3 px-4 text-right font-mono font-extrabold text-orange-600">
                         {formatCurrency(p.price, settings.currencySymbol)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 bg-slate-50">
                         {formatCurrency(priceWithTax, settings.currencySymbol)}
                       </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[10px] font-mono font-bold border border-emerald-200">
-                          +{marginPct}%
-                        </span>
-                      </td>
+                      {can('inventory.view_cost_price') && (
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[10px] font-mono font-bold border border-emerald-200">
+                            +{marginPct}%
+                          </span>
+                        </td>
+                      )}
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center space-x-1">
                           <span
@@ -360,13 +379,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center space-x-1">
                           {/* Stock Adjustment Trigger */}
-                          <button
-                            onClick={() => setAdjustingProduct(p)}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-orange-600 rounded-lg text-xs transition cursor-pointer"
-                            title="Ajustar Stock (Ingreso / Salida)"
-                          >
-                            <ArrowUpDown className="w-3.5 h-3.5" />
-                          </button>
+                          {can('inventory.stock_manual_adjust') && (
+                            <button
+                              onClick={() => setAdjustingProduct(p)}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-orange-600 rounded-lg text-xs transition cursor-pointer"
+                              title="Ajustar Stock (Ingreso / Salida)"
+                            >
+                              <ArrowUpDown className="w-3.5 h-3.5" />
+                            </button>
+                          )}
 
                           {/* Edit Product */}
                           <button
@@ -378,15 +399,18 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           </button>
 
                           {/* Delete Product */}
-                          <button
-                            onClick={() => onDeleteProduct(p.id)}
-                            className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition cursor-pointer"
-                            title="Eliminar Producto"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {can('inventory.delete_product') && (
+                            <button
+                              onClick={() => onDeleteProduct(p.id)}
+                              className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition cursor-pointer"
+                              title="Eliminar Producto"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
+
                     </tr>
                   );
                 })

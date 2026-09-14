@@ -23,6 +23,8 @@ import { CartItem, Customer, DocumentType, StoreSettings } from '../../types';
 import { formatCurrency, getDocumentTypeName } from '../../utils/formatters';
 import { SriTotalsTable } from './SriTotalsTable';
 import { calculateSriTotals } from '../../utils/sriCalculations';
+import { usePermissions } from '../../context/PermissionsContext';
+
 
 interface CartProps {
   cartItems: CartItem[];
@@ -65,7 +67,9 @@ export const Cart: React.FC<CartProps> = ({
   setSellerName,
   sellerOptions = [],
 }) => {
+  const { can } = usePermissions();
   const [propinaEnabled, setPropinaEnabled] = useState(false);
+
   const [showSriBreakdown, setShowSriBreakdown] = useState(false);
   const [isSellerMenuOpen, setIsSellerMenuOpen] = useState(false);
 
@@ -230,14 +234,17 @@ export const Cart: React.FC<CartProps> = ({
                   )}
                 </div>
 
-                <button
-                  onClick={() => onRemoveItem(item.product.id)}
-                  className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-rose-50 transition cursor-pointer shrink-0"
-                  title="Eliminar de la venta"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                  {can('pos.delete_cart_item') && (
+                    <button
+                      onClick={() => onRemoveItem(item.product.id)}
+                      className="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-rose-50 transition cursor-pointer shrink-0"
+                      title="Eliminar de la venta"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
 
               {/* Quantity, Discount & Subtotal Row */}
               <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60 text-xs">
@@ -306,16 +313,23 @@ export const Cart: React.FC<CartProps> = ({
                     min="0"
                     max="100"
                     placeholder="0"
+                    disabled={!can('pos.apply_discount')}
                     value={item.discountPercent || ''}
                     onChange={(e) => {
+                      if (!can('pos.apply_discount')) return;
                       const val = e.target.value;
                       onUpdateDiscount(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
                     }}
-                    className="w-9 px-1 py-0.5 bg-white border border-slate-200 text-slate-800 text-center font-mono font-bold rounded text-[11px] focus:ring-1 focus:ring-orange-500"
-                    title="Descuento %"
+                    className={`w-9 px-1 py-0.5 border text-center font-mono font-bold rounded text-[11px] focus:ring-1 focus:ring-orange-500 ${
+                      can('pos.apply_discount')
+                        ? 'bg-white border-slate-200 text-slate-800'
+                        : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-60'
+                    }`}
+                    title={can('pos.apply_discount') ? 'Descuento %' : 'Modificación de descuento bloqueada por el administrador'}
                   />
                   <span className="font-bold">%</span>
                 </div>
+
 
                 {/* Item Total */}
                 <div className="text-right">
@@ -401,14 +415,17 @@ export const Cart: React.FC<CartProps> = ({
 
         {/* Action Buttons: Clear & Big Vibrant Cobrar */}
         <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={onClearCart}
-            disabled={cartItems.length === 0}
-            className="p-3 bg-slate-900 hover:bg-slate-850 disabled:opacity-30 text-slate-400 hover:text-rose-400 font-bold rounded-xl text-xs transition flex items-center justify-center cursor-pointer border border-slate-800 shrink-0"
-            title="Vaciar Carrito"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {can('pos.clear_cart') && (
+            <button
+              onClick={onClearCart}
+              disabled={cartItems.length === 0}
+              className="p-3 bg-slate-900 hover:bg-slate-850 disabled:opacity-30 text-slate-400 hover:text-rose-400 font-bold rounded-xl text-xs transition flex items-center justify-center cursor-pointer border border-slate-800 shrink-0"
+              title="Vaciar Carrito"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+
 
           <button
             onClick={onProceedToCheckout}

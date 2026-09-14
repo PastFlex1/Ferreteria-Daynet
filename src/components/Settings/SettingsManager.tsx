@@ -58,7 +58,10 @@ import {
 import { SriBackendService } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
+import { UserPermissionsModal } from './UserPermissionsModal';
+
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
+import { MongoConnectorCard } from './MongoConnectorCard';
 
 interface SettingsManagerProps {
   subTab: SettingsSubTab | 'SETTINGS';
@@ -136,6 +139,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
+  const [userForPermissions, setUserForPermissions] = useState<any | null>(null);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
   // Payment Methods State
   const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
@@ -683,6 +688,17 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       'Eliminar usuario',
       'Cancelar'
     );
+  };
+
+  const handleSavePermissions = (userId: string, updatedPermissions: Record<string, boolean>, newRole?: string) => {
+    setUsersList(prev =>
+      prev.map(u =>
+        u.id === userId
+          ? { ...u, permissions: updatedPermissions, ...(newRole ? { role: newRole } : {}) }
+          : u
+      )
+    );
+    showToast('Permisos de trabajador guardados y actualizados correctamente', 'success');
   };
 
   const currentTab = subTab === 'SETTINGS' ? 'CFG_EMPRESA' : subTab;
@@ -2134,9 +2150,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       </td>
                       <td className="px-3 py-2 font-mono text-amber-500 font-bold whitespace-nowrap">{u.username || 'N/A'}</td>
                       <td className="px-3 py-2">
-                        <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap">
-                          {u.role}
-                        </span>
+                        <div className="space-y-0.5">
+                          <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap inline-block">
+                            {u.role}
+                          </span>
+                          {u.permissions && Object.keys(u.permissions).length > 0 && (
+                            <div className="text-[9px] font-mono text-orange-400 font-semibold flex items-center gap-1">
+                              <span>Personalizado ({Object.values(u.permissions).filter(Boolean).length} act.)</span>
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-center">
                         <button
@@ -2152,6 +2175,18 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUserForPermissions(u);
+                              setShowPermissionsModal(true);
+                            }}
+                            title="Configurar Permisos Detallados del Trabajador"
+                            className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white rounded-lg transition text-[10px] font-black flex items-center gap-1 border border-orange-500/25 cursor-pointer shadow-sm"
+                          >
+                            <Shield className="w-3 h-3" />
+                            <span>Permisos</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleEditUser(u)}
@@ -2170,6 +2205,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                           </button>
                         </div>
                       </td>
+
                     </tr>
                   );
                 })}
@@ -2345,8 +2381,22 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
             </div>
           )}
+
+          {/* MODAL DE PERMISOS GRANULARES DE TRABAJADOR */}
+          {showPermissionsModal && userForPermissions && (
+            <UserPermissionsModal
+              user={userForPermissions}
+              isOpen={showPermissionsModal}
+              onClose={() => {
+                setShowPermissionsModal(false);
+                setUserForPermissions(null);
+              }}
+              onSave={handleSavePermissions}
+            />
+          )}
         </div>
       )}
+
 
       {/* 7. FORMATO DE IMPRESIÓN */}
       {currentTab === 'CFG_FORMATO_IMPRESION' && (
@@ -2491,11 +2541,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <Database className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-lg font-black text-white">Respaldo & Copia de Seguridad</h2>
-                <p className="text-xs text-slate-400 font-medium">Exportación y restauración completa de base de datos, inventario, clientes y facturación</p>
+                <h2 className="text-lg font-black text-white">Base de Datos Local & Copias de Seguridad</h2>
+                <p className="text-xs text-slate-400 font-medium">Conexión directa con MongoDB Compass, exportación y restauración completa de datos</p>
               </div>
             </div>
           </div>
+
+          {/* MongoDB Local (Compass) Plug-and-Play Card */}
+          <MongoConnectorCard />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Export Card */}

@@ -295,18 +295,62 @@ export class RetentionApiClient {
   }
 
   /**
-   * 4. Consulta a Java para obtener la factura electrónica de sustento por clave de acceso
-   * (sin llamar al SRI directamente desde el navegador).
+   * 4. Consulta a Java para obtener la factura electrónica de sustento por clave de acceso.
+   * Usa el endpoint GET /api/sri/facturas/consultar?claveAcceso= del backend Java,
+   * que consulta directamente al Web Service de Autorización del SRI sin CORS.
    */
   public static async queryInvoiceByAccessKey(claveAcceso: string): Promise<{ success: boolean; xml?: string; error?: string }> {
+    const baseUrl = SriBackendService.getBaseUrl();
+    try {
+      // Endpoint dedicado en RetentionController.java para consultar facturas de proveedores
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const res = await fetch(
+        `${baseUrl}/api/sri/facturas/consultar?claveAcceso=${encodeURIComponent(claveAcceso)}`,
+        { signal: controller.signal }
+      ).catch(() => null);
+
+      clearTimeout(timeoutId);
+
+      if (res && res.ok) {
+        const text = await res.text();
+        // El backend devuelve el XML SOAP de autorización del SRI con la factura en CDATA
+        // o puede devolver directamente el XML de la factura.
+        // Si está vacío o es un JSON de error, intentar con fallback.
+        if (text && text.trim().length > 100) {
+          return { success: true, xml: text };
+        }
+        // Intentar parsear como JSON (puede ser { error: '...' })
+        try {
+          const json = JSON.parse(text);
+          if (json.error) {
+            return { success: false, error: json.error };
+          }
+        } catch (_) { /* no es JSON */ }
+      }
+
+      if (res && !res.ok) {
+        const errText = await res.text().catch(() => '');
+        try {
+          const json = JSON.parse(errText);
+          return { success: false, error: json.error || `Error ${res.status} consultando la factura.` };
+        } catch (_) {}
+        return { success: false, error: `Error ${res.status}: ${errText.substring(0, 200)}` };
+      }
+    } catch (err: any) {
+      // Si el backend no responde, intentar con el endpoint de autorización como fallback
+    }
+
+    // Fallback: usar el endpoint de autorización genérico (mismo endpoint que en facturas propias)
     try {
       const res = await SriBackendService.autorizarSri(claveAcceso, 2, 1000);
       if (res.success && res.autorizacion) {
         return { success: true, xml: res.autorizacion };
       }
-      return { success: false, error: res.error || 'No se encontró la factura en el SRI a través del backend.' };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Error al consultar la clave de acceso.' };
-    }
+    } catch (_) {}
+
+    return { success: false, error: 'No se pudo consultar la factura. Verifique que el backend Java esté activo y la clave de acceso sea correcta.' };
   }
 }
+

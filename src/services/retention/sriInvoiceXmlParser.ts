@@ -3,6 +3,10 @@
  * Permite importar archivos XML (o respuestas SOAP del SRI) para extraer automáticamente
  * todos los datos del emisor/proveedor, número de comprobante, clave de acceso,
  * fechas, bases imponibles e impuestos, y autocompletar el Comprobante de Retención.
+ *
+ * MEJORA v2: Usa getElementsByTagName (insensible a namespaces) en lugar de
+ * querySelector para máxima compatibilidad con XMLs firmados del SRI que incluyen
+ * xmlns= declarations que rompen querySelector.
  */
 
 import { ImpuestoDocSustento, RetentionPayment } from '../../types/retention';
@@ -39,6 +43,33 @@ export interface ParsedSriInvoice {
   };
 }
 
+/** Obtiene el texto del PRIMER elemento con ese tagName (ignora namespaces y prefijos) */
+function getTagText(doc: Document | Element, tagName: string): string {
+  // Intentar con getElementsByTagNameNS('*', ...) que maneja prefijos de namespace
+  if (typeof (doc as any).getElementsByTagNameNS === 'function') {
+    const nsEls = (doc as any).getElementsByTagNameNS('*', tagName);
+    if (nsEls && nsEls.length > 0) {
+      return (nsEls[0].textContent || '').trim();
+    }
+  }
+  // Fallback con getElementsByTagName
+  const els = (doc as any).getElementsByTagName(tagName);
+  if (els && els.length > 0) {
+    return (els[0].textContent || '').trim();
+  }
+  return '';
+}
+
+/** Obtiene todos los elementos con ese tagName */
+function getAllTags(doc: Document | Element, tagName: string): Element[] {
+  const result: Element[] = [];
+  const els = (doc as any).getElementsByTagName(tagName);
+  for (let i = 0; i < els.length; i++) {
+    result.push(els[i]);
+  }
+  return result;
+}
+
 export class SriInvoiceXmlParser {
   /**
    * Parsea el contenido XML de una factura electrónica (firmada o autorizada con CDATA).
@@ -70,16 +101,21 @@ export class SriInvoiceXmlParser {
     try {
       let invoiceXml = rawXml.trim();
 
+      // Extraer número de autorización del contenedor exterior si existe (antes de modificar invoiceXml)
+      const autMatch = rawXml.match(/<numeroAutorizacion[^>]*>(.*?)<\/numeroAutorizacion>/i);
+      const outerNumAut = autMatch ? autMatch[1].trim() : '';
+
       // 1. Si es un XML de autorización del SRI que envuelve la factura en CDATA:
       // <autorizacion><comprobante><![CDATA[<factura ...>]]></comprobante></autorizacion>
-      const cdataMatch = invoiceXml.match(/<comprobante>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/i);
+      const cdataMatch = invoiceXml.match(/<comprobante[^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/comprobante>/i);
       if (cdataMatch && cdataMatch[1]) {
         invoiceXml = cdataMatch[1].trim();
       } else {
-        const compMatch = invoiceXml.match(/<comprobante>([\s\S]*?)<\/comprobante>/i);
+        // Comprobante sin CDATA — puede ser HTML-encoded
+        const compMatch = invoiceXml.match(/<comprobante[^>]*>([\s\S]*?)<\/comprobante>/i);
         if (compMatch && compMatch[1]) {
           const inner = compMatch[1].trim();
-          if (inner.includes('&lt;factura') || inner.includes('&lt;liquidacionCompra')) {
+          if (inner.includes('&lt;factura') || inner.includes('&lt;liquidacionCompra') || inner.includes('&lt;notaCredito')) {
             invoiceXml = inner
               .replace(/&lt;/g, '<')
               .replace(/&gt;/g, '>')
@@ -90,64 +126,58 @@ export class SriInvoiceXmlParser {
         }
       }
 
-      // Extraer número de autorización del contenedor exterior si existe
-      const autMatch = rawXml.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
-      const outerNumAut = autMatch ? autMatch[1].trim() : '';
-
-      // 2. Parsear el XML de la factura (con soporte universal para Navegador y entornos de Test/Node)
-      let doc: any;
-      if (typeof DOMParser !== 'undefined') {
-        const parser = new DOMParser();
-        doc = parser.parseFromString(invoiceXml, 'text/xml');
-
-        const parseError = doc.querySelector('parsererror');
-        if (parseError) {
-          return {
-            success: false,
-            error: `Error al procesar la sintaxis del archivo XML: ${parseError.textContent?.substring(0, 200)}`,
-            supplier: {} as any,
-            invoice: {} as any,
-          };
-        }
-      } else {
-        // Fallback universal para Node / Test runners
-        doc = SriInvoiceXmlParser.parseXmlUniversal(invoiceXml);
+      // 2. Parsear el XML de la factura
+      if (typeof DOMParser === 'undefined') {
+        // Fallback para entornos sin DOM (tests Node)
+        return SriInvoiceXmlParser.parseWithRegex(invoiceXml, outerNumAut);
       }
 
-      // 3. Extraer <infoTributaria>
-      const ruc = doc.querySelector('infoTributaria > ruc')?.textContent?.trim() || '';
-      const razonSocial = doc.querySelector('infoTributaria > razonSocial')?.textContent?.trim() || 
-                          doc.querySelector('infoTributaria > nombreComercial')?.textContent?.trim() || '';
-      const dirMatriz = doc.querySelector('infoTributaria > dirMatriz')?.textContent?.trim() || '';
-      const estab = (doc.querySelector('infoTributaria > estab')?.textContent?.trim() || '001').padStart(3, '0');
-      const ptoEmi = (doc.querySelector('infoTributaria > ptoEmi')?.textContent?.trim() || '001').padStart(3, '0');
-      const secuencial = (doc.querySelector('infoTributaria > secuencial')?.textContent?.trim() || '000000001').padStart(9, '0');
-      const claveAcceso = doc.querySelector('infoTributaria > claveAcceso')?.textContent?.trim() || outerNumAut;
-      const codDoc = doc.querySelector('infoTributaria > codDoc')?.textContent?.trim() || '01';
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(invoiceXml, 'text/xml');
 
-      // Regímenes del emisor/proveedor
-      const contribuyenteRimpe = (doc.querySelector('infoTributaria > contribuyenteRimpe')?.textContent?.trim() || '').toUpperCase();
-      const contribuyenteEspecial = doc.querySelector('infoFactura > contribuyenteEspecial, infoTributaria > contribuyenteEspecial')?.textContent?.trim() || '';
+      // Verificar errores de parseo
+      const parseError = doc.querySelector('parsererror') || getAllTags(doc, 'parsererror')[0];
+      if (parseError) {
+        // Intentar con fallback regex antes de rendirse
+        console.warn('[SriParser] DOMParser falló, usando fallback regex:', parseError.textContent?.substring(0, 150));
+        return SriInvoiceXmlParser.parseWithRegex(invoiceXml, outerNumAut);
+      }
+
+      // 3. Extraer <infoTributaria> usando getElementsByTagName (insensible a namespaces)
+      const ruc       = getTagText(doc, 'ruc');
+      const razonSocial = getTagText(doc, 'razonSocial') || getTagText(doc, 'nombreComercial');
+      const dirMatriz = getTagText(doc, 'dirMatriz');
+      const estab     = (getTagText(doc, 'estab') || '001').padStart(3, '0');
+      const ptoEmi    = (getTagText(doc, 'ptoEmi') || '001').padStart(3, '0');
+      const secuencial = (getTagText(doc, 'secuencial') || '000000001').padStart(9, '0');
+      const claveAcceso = getTagText(doc, 'claveAcceso') || outerNumAut;
+      const codDoc    = getTagText(doc, 'codDoc') || '01';
+
+      // Regímenes del emisor
+      const contribuyenteRimpe = getTagText(doc, 'contribuyenteRimpe').toUpperCase();
+      const contribuyenteEspecial = getTagText(doc, 'contribuyenteEspecial');
 
       // 4. Extraer <infoFactura> o <infoLiquidacionCompra>
-      const infoFactura = doc.querySelector('infoFactura, infoLiquidacionCompra');
-      const fechaEmision = infoFactura?.querySelector('fechaEmision')?.textContent?.trim() || '';
-      const dirEstablecimiento = infoFactura?.querySelector('dirEstablecimiento')?.textContent?.trim() || dirMatriz;
-      const totalSinImpuestos = parseFloat(infoFactura?.querySelector('totalSinImpuestos')?.textContent || '0') || 0;
-      const importeTotal = parseFloat(infoFactura?.querySelector('importeTotal')?.textContent || '0') || 0;
+      const fechaEmision       = getTagText(doc, 'fechaEmision');
+      const dirEstablecimiento = getTagText(doc, 'dirEstablecimiento') || dirMatriz;
+      const totalSinImpuestos  = parseFloat(getTagText(doc, 'totalSinImpuestos')) || 0;
+      const importeTotal       = parseFloat(getTagText(doc, 'importeTotal')) || 0;
 
-      // Extraer array completo de impuestos de sustento (<impuestosDocSustento>)
+      // 5. Extraer impuestos (totalConImpuestos > totalImpuesto)
       let montoIva = 0;
       let tarifaIva = 15;
       const impuestos: ImpuestoDocSustento[] = [];
-      const totalImpuestos = doc.querySelectorAll('totalConImpuestos > totalImpuesto, impuestos > impuesto');
-      
-      totalImpuestos.forEach((imp) => {
-        const codigo = imp.querySelector('codigo')?.textContent?.trim() || '2';
-        const codPorc = imp.querySelector('codigoPorcentaje')?.textContent?.trim() || '4';
-        const base = parseFloat(imp.querySelector('baseImponible')?.textContent || '0') || 0;
-        const valor = parseFloat(imp.querySelector('valor')?.textContent || '0') || 0;
-        let tarifa = parseFloat(imp.querySelector('tarifa')?.textContent || '0') || 0;
+
+      // Buscar en totalConImpuestos primero, luego en impuestos genérico
+      const totalImpuestoEls = getAllTags(doc, 'totalImpuesto');
+      const impuestoEls = totalImpuestoEls.length > 0 ? totalImpuestoEls : getAllTags(doc, 'impuesto');
+
+      impuestoEls.forEach((imp) => {
+        const codigo   = getTagText(imp, 'codigo') || '2';
+        const codPorc  = getTagText(imp, 'codigoPorcentaje') || '4';
+        const base     = parseFloat(getTagText(imp, 'baseImponible')) || 0;
+        const valor    = parseFloat(getTagText(imp, 'valor')) || 0;
+        let tarifa     = parseFloat(getTagText(imp, 'tarifa')) || 0;
 
         if (codigo === '2') { // 2 = IVA
           montoIva = Math.round((montoIva + valor + Number.EPSILON) * 100) / 100;
@@ -169,7 +199,7 @@ export class SriInvoiceXmlParser {
         });
       });
 
-      // Si no se encontraron impuestos pero hay subtotal, agregar IVA por defecto
+      // Si no se encontraron impuestos pero hay subtotal
       if (impuestos.length === 0 && totalSinImpuestos > 0) {
         impuestos.push({
           codImpuestoDocSustento: '2',
@@ -181,16 +211,15 @@ export class SriInvoiceXmlParser {
         montoIva = Math.round((totalSinImpuestos * 0.15 + Number.EPSILON) * 100) / 100;
       }
 
-      // Extraer array completo de formas de pago (<pagos>)
+      // 6. Extraer formas de pago
       const pagos: RetentionPayment[] = [];
-      const pagoNodes = doc.querySelectorAll('pagos > pago');
-      pagoNodes.forEach((p) => {
-        const forma = p.querySelector('formaPago')?.textContent?.trim() || '20';
-        const total = parseFloat(p.querySelector('total')?.textContent || '0') || 0;
-        const plazoText = p.querySelector('plazo')?.textContent?.trim();
-        const plazo = plazoText ? parseInt(plazoText, 10) : undefined;
-        const unidadTiempo = p.querySelector('unidadTiempo')?.textContent?.trim() || undefined;
-
+      const pagoEls = getAllTags(doc, 'pago');
+      pagoEls.forEach((p) => {
+        const forma        = getTagText(p, 'formaPago') || '20';
+        const total        = parseFloat(getTagText(p, 'total')) || 0;
+        const plazoText    = getTagText(p, 'plazo');
+        const plazo        = plazoText ? parseInt(plazoText, 10) : undefined;
+        const unidadTiempo = getTagText(p, 'unidadTiempo') || undefined;
         pagos.push({
           formaPago: forma,
           total: Math.round((total + Number.EPSILON) * 100) / 100,
@@ -199,48 +228,42 @@ export class SriInvoiceXmlParser {
         });
       });
 
-      const formaPago = pagos[0]?.formaPago || doc.querySelector('pagos > pago > formaPago')?.textContent?.trim() || '20';
+      const formaPago = pagos[0]?.formaPago || '20';
       if (pagos.length === 0) {
-        pagos.push({
-          formaPago: '20',
-          total: importeTotal || totalSinImpuestos,
-        });
+        pagos.push({ formaPago: '20', total: importeTotal || totalSinImpuestos });
       }
 
-      // 5. Extraer <infoAdicional> (email, teléfono)
+      // 7. Extraer email de <infoAdicional>
       let email = '';
-      const camposAdicionales = doc.querySelectorAll('infoAdicional > campoAdicional');
-      camposAdicionales.forEach((campo) => {
-        const nombre = (campo.getAttribute('nombre') || '').toLowerCase();
-        const valor = campo.textContent?.trim() || '';
-        if (nombre.includes('email') || nombre.includes('correo')) {
-          if (!email) email = valor;
+      const campoEls = getAllTags(doc, 'campoAdicional');
+      campoEls.forEach((campo) => {
+        const nombre = ((campo as Element).getAttribute('nombre') || '').toLowerCase();
+        const valor  = (campo.textContent || '').trim();
+        if ((nombre.includes('email') || nombre.includes('correo')) && !email) {
+          email = valor;
         }
       });
 
-      // 6. Normalizaciones
-      // Formato ISO de fecha para inputs HTML date (YYYY-MM-DD)
+      // 8. Normalizar fecha ISO
       let isoDate = new Date().toISOString().split('T')[0];
       if (/^\d{2}\/\d{2}\/\d{4}$/.test(fechaEmision)) {
         const [dd, mm, yyyy] = fechaEmision.split('/');
         isoDate = `${yyyy}-${mm}-${dd}`;
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(fechaEmision)) {
+        isoDate = fechaEmision.substring(0, 10);
       }
 
-      // Condición tributaria del proveedor
+      // 9. Condición tributaria del proveedor
       let condition: 'GENERAL' | 'RIMPE_EMPRENDEDOR' | 'RIMPE_POPULAR' | 'ESPECIAL' = 'GENERAL';
-      if (contribuyenteRimpe.includes('POPULAR')) {
-        condition = 'RIMPE_POPULAR';
-      } else if (contribuyenteRimpe.includes('RIMPE') || contribuyenteRimpe.includes('EMPRENDEDOR')) {
-        condition = 'RIMPE_EMPRENDEDOR';
-      } else if (contribuyenteEspecial) {
-        condition = 'ESPECIAL';
-      }
+      if (contribuyenteRimpe.includes('POPULAR')) condition = 'RIMPE_POPULAR';
+      else if (contribuyenteRimpe.includes('RIMPE') || contribuyenteRimpe.includes('EMPRENDEDOR')) condition = 'RIMPE_EMPRENDEDOR';
+      else if (contribuyenteEspecial) condition = 'ESPECIAL';
 
-      // Tipo de identificación
+      // 10. Tipo de identificación
       const cleanRuc = ruc.replace(/\D/g, '');
       const tipoId: '04' | '05' | '06' = cleanRuc.length === 13 ? '04' : cleanRuc.length === 10 ? '05' : '06';
 
-      const numDocSustento = `${estab}${ptoEmi}${secuencial}`;
+      const numDocSustento  = `${estab}${ptoEmi}${secuencial}`;
       const formattedNumber = `${estab}-${ptoEmi}-${secuencial}`;
 
       return {
@@ -284,65 +307,147 @@ export class SriInvoiceXmlParser {
   }
 
   /**
-   * Parser universal ligero para entornos donde DOMParser no está disponible globalmente (ej: tests Node).
+   * Fallback: Parser por regex para entornos donde DOMParser no está disponible
+   * o cuando el XML no puede parsearse con DOMParser (ej: XML con errores menores).
    */
-  public static parseXmlUniversal(xml: string) {
+  public static parseWithRegex(xml: string, outerNumAut = ''): ParsedSriInvoice {
     const getTag = (tag: string, content: string): string => {
       const match = content.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
-      return match ? match[1].trim() : '';
+      return match ? match[1].trim().replace(/<[^>]+>/g, '') : '';
     };
 
     const getTags = (tag: string, content: string): string[] => {
       const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
       const results: string[] = [];
       let m;
-      while ((m = regex.exec(content)) !== null) {
-        results.push(m[1]);
-      }
+      while ((m = regex.exec(content)) !== null) results.push(m[1]);
       return results;
     };
 
+    try {
+      const ruc         = getTag('ruc', xml);
+      const razonSocial = getTag('razonSocial', xml) || getTag('nombreComercial', xml);
+      const dirMatriz   = getTag('dirMatriz', xml);
+      const estab       = (getTag('estab', xml) || '001').padStart(3, '0');
+      const ptoEmi      = (getTag('ptoEmi', xml) || '001').padStart(3, '0');
+      const secuencial  = (getTag('secuencial', xml) || '000000001').padStart(9, '0');
+      const claveAcceso = getTag('claveAcceso', xml) || outerNumAut;
+      const codDoc      = getTag('codDoc', xml) || '01';
+      const contribuyenteRimpe = getTag('contribuyenteRimpe', xml).toUpperCase();
+      const contribuyenteEspecial = getTag('contribuyenteEspecial', xml);
+      const fechaEmision = getTag('fechaEmision', xml);
+      const dirEstab    = getTag('dirEstablecimiento', xml) || dirMatriz;
+      const totalSinImpuestos = parseFloat(getTag('totalSinImpuestos', xml)) || 0;
+      const importeTotal = parseFloat(getTag('importeTotal', xml)) || 0;
+
+      // Impuestos
+      let montoIva = 0;
+      let tarifaIva = 15;
+      const impuestos: ImpuestoDocSustento[] = [];
+      const impRaw = getTags('totalImpuesto', xml).concat(getTags('impuesto', xml));
+      impRaw.forEach((raw) => {
+        const codigo  = getTag('codigo', raw) || '2';
+        const codPorc = getTag('codigoPorcentaje', raw) || '4';
+        const base    = parseFloat(getTag('baseImponible', raw)) || 0;
+        const valor   = parseFloat(getTag('valor', raw)) || 0;
+        let tarifa    = parseFloat(getTag('tarifa', raw)) || 0;
+        if (codigo === '2') {
+          montoIva += valor;
+          if (!tarifa) { if (codPorc === '4') tarifa = 15; else if (codPorc === '0') tarifa = 0; }
+          tarifaIva = tarifa;
+        }
+        impuestos.push({ codImpuestoDocSustento: codigo, codigoPorcentaje: codPorc, baseImponible: base, tarifa, valorImpuesto: valor });
+      });
+      if (impuestos.length === 0 && totalSinImpuestos > 0) {
+        const iva = Math.round(totalSinImpuestos * 0.15 * 100) / 100;
+        impuestos.push({ codImpuestoDocSustento: '2', codigoPorcentaje: '4', baseImponible: totalSinImpuestos, tarifa: 15, valorImpuesto: iva });
+        montoIva = iva;
+      }
+
+      // Pagos
+      const pagos: RetentionPayment[] = [];
+      getTags('pago', xml).forEach((raw) => {
+        const forma = getTag('formaPago', raw) || '20';
+        const total = parseFloat(getTag('total', raw)) || 0;
+        pagos.push({ formaPago: forma, total });
+      });
+      if (pagos.length === 0) pagos.push({ formaPago: '20', total: importeTotal });
+
+      // Email
+      let email = '';
+      const campoRegex = /<campoAdicional\s+nombre=["']([^"']*)["'][^>]*>([\s\S]*?)<\/campoAdicional>/gi;
+      let cm;
+      while ((cm = campoRegex.exec(xml)) !== null) {
+        if ((cm[1].toLowerCase().includes('email') || cm[1].toLowerCase().includes('correo')) && !email) email = cm[2].trim();
+      }
+
+      // Fecha ISO
+      let isoDate = new Date().toISOString().split('T')[0];
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(fechaEmision)) {
+        const [dd, mm, yyyy] = fechaEmision.split('/');
+        isoDate = `${yyyy}-${mm}-${dd}`;
+      }
+
+      let condition: 'GENERAL' | 'RIMPE_EMPRENDEDOR' | 'RIMPE_POPULAR' | 'ESPECIAL' = 'GENERAL';
+      if (contribuyenteRimpe.includes('POPULAR')) condition = 'RIMPE_POPULAR';
+      else if (contribuyenteRimpe.includes('RIMPE')) condition = 'RIMPE_EMPRENDEDOR';
+      else if (contribuyenteEspecial) condition = 'ESPECIAL';
+
+      const cleanRuc = ruc.replace(/\D/g, '');
+      const tipoId: '04' | '05' | '06' = cleanRuc.length === 13 ? '04' : cleanRuc.length === 10 ? '05' : '06';
+
+      return {
+        success: true,
+        supplier: { ruc: cleanRuc, razonSocial, direccion: dirEstab || 'MATRIZ', email, condition, tipoId },
+        invoice: {
+          codDocSustento: codDoc, estab, ptoEmi, secuencial,
+          numDocSustento: `${estab}${ptoEmi}${secuencial}`,
+          formattedNumber: `${estab}-${ptoEmi}-${secuencial}`,
+          claveAcceso, numAutorizacion: outerNumAut || claveAcceso,
+          fechaEmision, isoDate, totalSinImpuestos, montoIva, tarifaIva,
+          importeTotal, formaPago: pagos[0]?.formaPago || '20', impuestos, pagos,
+        },
+      };
+    } catch (err: any) {
+      return { success: false, error: `Error en fallback regex: ${err.message}`, supplier: {} as any, invoice: {} as any };
+    }
+  }
+
+  /**
+   * @deprecated Alias mantenido por compatibilidad con tests existentes.
+   */
+  public static parseXmlUniversal(xml: string) {
+    const getTag = (tag: string, content: string): string => {
+      const match = content.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+      return match ? match[1].trim() : '';
+    };
+    const getTags = (tag: string, content: string): string[] => {
+      const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+      const results: string[] = [];
+      let m;
+      while ((m = regex.exec(content)) !== null) results.push(m[1]);
+      return results;
+    };
     return {
       querySelector: (selector: string) => {
         const parts = selector.split(/\s*>\s*|\s+/).filter(Boolean);
         let cur = xml;
-        for (const p of parts) {
-          cur = getTag(p, cur);
-          if (!cur) return null;
-        }
+        for (const p of parts) { cur = getTag(p, cur); if (!cur) return null; }
         return { textContent: cur.replace(/<[^>]+>/g, '').trim() };
       },
       querySelectorAll: (selector: string) => {
         if (selector.includes('totalImpuesto') || selector.includes('impuesto')) {
           const rawItems = getTags('totalImpuesto', xml).concat(getTags('impuesto', xml));
-          return rawItems.map((raw) => ({
-            querySelector: (sel: string) => {
-              const val = getTag(sel, raw);
-              return val ? { textContent: val } : null;
-            }
-          }));
+          return rawItems.map((raw) => ({ querySelector: (sel: string) => { const val = getTag(sel, raw); return val ? { textContent: val } : null; } }));
         }
         if (selector.includes('pago')) {
-          const rawItems = getTags('pago', xml);
-          return rawItems.map((raw) => ({
-            querySelector: (sel: string) => {
-              const val = getTag(sel, raw);
-              return val ? { textContent: val } : null;
-            }
-          }));
+          return getTags('pago', xml).map((raw) => ({ querySelector: (sel: string) => { const val = getTag(sel, raw); return val ? { textContent: val } : null; } }));
         }
         if (selector.includes('campoAdicional')) {
           const regex = /<campoAdicional\s+nombre=["']([^"']*)["'][^>]*>([\s\S]*?)<\/campoAdicional>/gi;
           const items: any[] = [];
           let m;
-          while ((m = regex.exec(xml)) !== null) {
-            const attrNombre = m[1];
-            const textVal = m[2].trim();
-            items.push({
-              getAttribute: (name: string) => (name === 'nombre' ? attrNombre : null),
-              textContent: textVal,
-            });
-          }
+          while ((m = regex.exec(xml)) !== null) items.push({ getAttribute: (name: string) => (name === 'nombre' ? m![1] : null), textContent: m![2].trim() });
           return items;
         }
         return [];
@@ -350,4 +455,3 @@ export class SriInvoiceXmlParser {
     };
   }
 }
-

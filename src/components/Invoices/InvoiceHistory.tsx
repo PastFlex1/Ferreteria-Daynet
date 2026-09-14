@@ -32,6 +32,8 @@ import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
+import { usePermissions } from '../../context/PermissionsContext';
+
 
 interface InvoiceHistoryProps {
   invoices: Invoice[];
@@ -54,7 +56,9 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   initialDocType = 'TODOS',
   onNavigateToTab,
 }) => {
+  const { can } = usePermissions();
   const { showConfirm, showToast } = useModal();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [docTypeFilter, setDocTypeFilter] = useState<'TODOS' | DocumentType>(initialDocType);
   const [statusFilter, setStatusFilter] = useState<'TODOS' | InvoiceStatus>('TODOS');
@@ -522,7 +526,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           )}
 
                           {/* 4. Facturar (para Cotizaciones) */}
-                          {inv.documentType === 'COTIZACION' && (
+                          {inv.documentType === 'COTIZACION' && can('sales.convert_quote') && (
                             <button
                               onClick={() => onConvertQuoteToInvoice(inv)}
                               className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 transition cursor-pointer"
@@ -544,7 +548,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           )}
 
                           {/* Descargar XML Autorizado para Facturas Autorizadas */}
-                          {isFactura && isAutorizado && (
+                          {isFactura && isAutorizado && can('sales.view_invoice_xml') && (
                             <button
                               onClick={() => {
                                 const xml = getAuthorizedXmlContent(inv, settings, undefined, undefined, sriMode);
@@ -559,7 +563,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           )}
 
                           {/* Anular / N/C */}
-                          {inv.documentType !== 'COTIZACION' && !isAnulado && (
+                          {inv.documentType !== 'COTIZACION' && !isAnulado && (can('sales.anular_invoice') || can('sales.create_credit_note')) && (
                             <button
                               onClick={() => onOpenViewer(inv)}
                               className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition cursor-pointer"
@@ -570,7 +574,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                           )}
 
                           {/* 5. Eliminar */}
-                          {onDeleteInvoice && (!isAutorizado || inv.documentType === 'COTIZACION') && (
+                          {onDeleteInvoice && (!isAutorizado || inv.documentType === 'COTIZACION') && (inv.documentType === 'COTIZACION' ? can('sales.delete_quote') : can('sales.anular_invoice')) && (
                             <button
                               onClick={() => handleDelete(inv)}
                               className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer"
@@ -579,6 +583,7 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
                               <Trash2 className="w-4 h-4 text-rose-600" />
                             </button>
                           )}
+
                         </div>
                       </td>
                     </tr>

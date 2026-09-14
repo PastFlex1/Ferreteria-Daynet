@@ -21,6 +21,9 @@ import { AssetsManager } from './components/Assets/AssetsManager';
 import { HRManager } from './components/HR/HRManager';
 import { ReportsManager } from './components/Reports/ReportsManager';
 import { SplashScreen, ModuleSkeleton } from './components/UI/LoadingScreen';
+import { PermissionsProvider, usePermissions } from './context/PermissionsContext';
+import { TAB_TO_PERMISSION_MAP, DEFAULT_TAB_PRIORITY } from './types/permissions';
+
 import { 
   AccountingSubTab,
   AssetsSubTab,
@@ -65,7 +68,51 @@ import { generateDocumentNumber } from './utils/formatters';
 import { useModal } from './context/ModalContext';
 import { Lock, LogOut } from 'lucide-react';
 
+
+const AuthorizedTabContent: React.FC<{
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
+  children: React.ReactNode;
+}> = ({ activeTab, setActiveTab, children }) => {
+  const { can, isSuperAdmin } = usePermissions();
+  const requiredPermission = TAB_TO_PERMISSION_MAP[activeTab];
+
+  useEffect(() => {
+    if (isSuperAdmin) return;
+    if (requiredPermission && !can(requiredPermission)) {
+      // Si el trabajador no tiene permiso para este tab, buscar el primer tab permitido
+      const firstAllowed = DEFAULT_TAB_PRIORITY.find(tab => {
+        const perm = TAB_TO_PERMISSION_MAP[tab];
+        return perm ? can(perm) : false;
+      });
+      if (firstAllowed && firstAllowed !== activeTab) {
+        setActiveTab(firstAllowed as TabType);
+      }
+    }
+  }, [activeTab, isSuperAdmin, requiredPermission, can, setActiveTab]);
+
+  if (!isSuperAdmin && requiredPermission && !can(requiredPermission)) {
+    return (
+      <div className="py-24 px-6 text-center max-w-lg mx-auto space-y-4 animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center mx-auto shadow-inner">
+          <Lock className="w-8 h-8 stroke-[2.5]" />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-xl font-black text-slate-800 tracking-tight">Acceso Restringido</h2>
+          <p className="text-xs text-slate-500 leading-relaxed font-medium">
+            Tu cuenta de usuario no tiene permisos habilitados para acceder a la sección <strong className="text-slate-700 font-bold">{activeTab}</strong>.
+            Comunícate con el Administrador para solicitar acceso si lo requieres.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+};
+
 export default function App() {
+
   const { showAlert, showToast } = useModal();
   const [activeTab, setActiveTabState] = useState<TabType>('CAJA');
   const [posDocumentType, setPosDocumentType] = useState<DocumentType>('FACTURA');
@@ -628,31 +675,33 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-orange-500 selection:text-white">
-      {/* Left Sidebar + Top Topbar (both fixed/sticky, rendered by Header) */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        settings={settings}
-        lowStockCount={lowStockCount}
-        isCashRegisterOpen={cashSession.status === 'ABIERTA'}
-        cartItemCount={0}
-        currentUser={currentUser}
-        onLogout={() => setIsLogoutConfirmOpen(true)}
-        sidebarCollapsed={sidebarCollapsed}
-        setSidebarCollapsed={setSidebarCollapsed}
-      />
+    <PermissionsProvider currentUser={currentUser} usersList={usersList}>
+      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-orange-500 selection:text-white">
+        {/* Left Sidebar + Top Topbar (both fixed/sticky, rendered by Header) */}
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          settings={settings}
+          lowStockCount={lowStockCount}
+          isCashRegisterOpen={cashSession.status === 'ABIERTA'}
+          cartItemCount={0}
+          currentUser={currentUser}
+          onLogout={() => setIsLogoutConfirmOpen(true)}
+          sidebarCollapsed={sidebarCollapsed}
+          setSidebarCollapsed={setSidebarCollapsed}
+        />
 
-      {/* Main Container Content — offset by topbar (56px) and sidebar (dynamic) */}
-      <main className={`pt-14 min-h-screen transition-all duration-200 ${sidebarCollapsed ? 'pl-14' : 'pl-56'}`}>
-        <div className="p-4 sm:p-6 lg:p-8 max-w-[1920px] mx-auto">
-        {isTabLoading ? (
-          <ModuleSkeleton />
-        ) : (
-          <>
-        {(activeTab === 'CAJA') && (
-          <BillingTerminal
-            products={products}
+        {/* Main Container Content — offset by topbar (56px) and sidebar (dynamic) */}
+        <main className={`pt-14 min-h-screen transition-all duration-200 ${sidebarCollapsed ? 'pl-14' : 'pl-56'}`}>
+          <div className="p-4 sm:p-6 lg:p-8 max-w-[1920px] mx-auto">
+          {isTabLoading ? (
+            <ModuleSkeleton />
+          ) : (
+            <AuthorizedTabContent activeTab={activeTab} setActiveTab={setActiveTab}>
+          {(activeTab === 'CAJA') && (
+            <BillingTerminal
+              products={products}
+
             customers={allCustomers}
             settings={settings}
             categories={categories}
@@ -904,8 +953,9 @@ export default function App() {
             onClearAllData={handleClearAllData}
           />
         )}
-          </>
+            </AuthorizedTabContent>
         )}
+
         </div>
       </main>
 
@@ -961,5 +1011,7 @@ export default function App() {
         </div>
       )}
     </div>
+    </PermissionsProvider>
   );
 }
+

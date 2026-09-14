@@ -402,7 +402,9 @@ export interface SystemUser {
   name: string;
   email: string;
   username: string; // Cédula o RUC
-  role: 'Administrador' | 'Cajero' | 'Vendedor' | 'Contador';
+  role: 'Administrador' | 'Cajero' | 'Vendedor' | 'Contador' | 'Bodeguero' | 'Personalizado' | string;
   status: 'Activo' | 'Inactivo';
   password?: string;
+  permissions?: Record<string, boolean>;
 }
+

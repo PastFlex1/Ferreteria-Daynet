@@ -403,3 +403,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
   transform: scale(1.1);
 }
+/* ============================================================
+   FIX: Inputs con fondo claro siempre muestran texto oscuro.
+   Algunos browsers heredan color blanco de ancestros con
+   text-white. Esta regla garantiza visibilidad en formularios.
+   ============================================================ */
+input:not([class*="text-white"]):not([class*="bg-slate-800"]):not([class*="bg-slate-900"]):not([class*="bg-slate-950"]):not([class*="bg-dark"]) {
+  color: #1e293b; /* slate-800 — texto oscuro por defecto en inputs */
+}
+
+/* Placeholder siempre visible y sutil */
+input::placeholder {
+  color: #94a3b8 !important; /* slate-400 */
+  opacity: 1;
+}

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { CashRegisterSession, Invoice, StoreSettings } from '../../types';
 import { formatCurrency, formatFullDate } from '../../utils/formatters';
+import { usePermissions } from '../../context/PermissionsContext';
 
 interface CashRegisterViewProps {
   session: CashRegisterSession;
@@ -38,6 +39,7 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
   onOpenRegister,
   onCloseRegister,
 }) => {
+  const { can } = usePermissions();
   const [initialCashInput, setInitialCashInput] = useState('');
   const [actualCountInput, setActualCountInput] = useState('');
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
@@ -216,45 +218,49 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => handleOpenPrintModal(true)}
-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2 cursor-pointer shadow-sm"
-            >
-              <Printer className="w-4 h-4 text-orange-400" />
-              <span>Imprimir Arqueo / Cierre</span>
-            </button>
-
-            {session.status === 'ABIERTA' ? (
+            {can('cash.reprint_session') && (
               <button
                 type="button"
-                onClick={() => {
-                  setActualCountInput(expectedCashInDrawer.toFixed(2));
-                  setIsClosingModalOpen(true);
-                }}
-                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-rose-600/20 flex items-center space-x-2 cursor-pointer"
+                onClick={() => handleOpenPrintModal(true)}
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2 cursor-pointer shadow-sm"
               >
-                <Lock className="w-4 h-4 stroke-[2.5]" />
-                <span>Arqueo y Cierre de Caja</span>
+                <Printer className="w-4 h-4 text-orange-400" />
+                <span>Imprimir Arqueo / Cierre</span>
               </button>
-            ) : (
-              <form onSubmit={handleOpenSubmit} className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="Fondo Inicial ($)"
-                  value={initialCashInput}
-                  onChange={(e) => setInitialCashInput(e.target.value)}
-                  className="w-36 px-3.5 py-2 bg-slate-50 border border-slate-200 text-orange-600 font-mono font-black text-sm rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none"
-                />
+            )}
+
+            {can('cash.open_close_drawer') && (
+              session.status === 'ABIERTA' ? (
                 <button
-                  type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-xl text-xs transition cursor-pointer shadow-md shadow-orange-500/20"
+                  type="button"
+                  onClick={() => {
+                    setActualCountInput(can('cash.view_expected_cash') ? expectedCashInDrawer.toFixed(2) : '');
+                    setIsClosingModalOpen(true);
+                  }}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-rose-600/20 flex items-center space-x-2 cursor-pointer"
                 >
-                  Abrir Caja
+                  <Lock className="w-4 h-4 stroke-[2.5]" />
+                  <span>Arqueo y Cierre de Caja</span>
                 </button>
-              </form>
+              ) : (
+                <form onSubmit={handleOpenSubmit} className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Fondo Inicial ($)"
+                    value={initialCashInput}
+                    onChange={(e) => setInitialCashInput(e.target.value)}
+                    className="w-36 px-3.5 py-2 bg-slate-50 border border-slate-200 text-orange-600 font-mono font-black text-sm rounded-xl focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black rounded-xl text-xs transition cursor-pointer shadow-md shadow-orange-500/20"
+                  >
+                    Abrir Caja
+                  </button>
+                </form>
+              )
             )}
           </div>
         </div>
@@ -267,10 +273,12 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
             <DollarSign className="w-4 h-4 text-emerald-600 stroke-[2.5]" />
           </div>
           <div className="text-xl font-black text-emerald-600 font-mono">
-            {formatCurrency(expectedCashInDrawer, settings.currencySymbol)}
+            {can('cash.view_expected_cash') ? formatCurrency(expectedCashInDrawer, settings.currencySymbol) : '🔒 Protegido'}
           </div>
           <div className="text-[10px] text-slate-400 font-medium">
-            Fondo: {formatCurrency(session.initialCash, settings.currencySymbol)} + Ventas: {formatCurrency(todaySalesCash, settings.currencySymbol)}
+            {can('cash.view_expected_cash') 
+              ? `Fondo: ${formatCurrency(session.initialCash, settings.currencySymbol)} + Ventas: ${formatCurrency(todaySalesCash, settings.currencySymbol)}`
+              : 'Modo arqueo a ciegas activo'}
           </div>
         </div>
 
@@ -720,14 +728,21 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
               <span>Arqueo y Cierre de Caja</span>
             </h3>
 
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-              <div className="flex justify-between text-slate-600 font-medium">
-                <span>Efectivo Esperado en Cajón:</span>
-                <span className="font-mono text-emerald-700 font-bold">
-                  {formatCurrency(expectedCashInDrawer, settings.currencySymbol)}
-                </span>
+            {can('cash.view_expected_cash') ? (
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div className="flex justify-between text-slate-600 font-medium">
+                  <span>Efectivo Esperado en Cajón:</span>
+                  <span className="font-mono text-emerald-700 font-bold">
+                    {formatCurrency(expectedCashInDrawer, settings.currencySymbol)}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-start gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span><strong>Arqueo a ciegas:</strong> Ingresa el total de dinero físico contado. Por seguridad el monto esperado está oculto hasta verificación del administrador.</span>
+              </div>
+            )}
 
             <form onSubmit={handleCloseSubmit} className="space-y-4">
               <div>
@@ -746,8 +761,8 @@ export const CashRegisterView: React.FC<CashRegisterViewProps> = ({
                 />
               </div>
 
-              {/* Difference Preview */}
-              {(() => {
+              {/* Difference Preview (Only visible if worker can view expected cash) */}
+              {can('cash.view_expected_cash') && (() => {
                 const diff = (parseFloat(actualCountInput) || 0) - expectedCashInDrawer;
                 return (
                   <div

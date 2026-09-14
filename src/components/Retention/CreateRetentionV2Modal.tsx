@@ -181,9 +181,21 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
       setErrorMsg(`Error al procesar el archivo XML: ${result.error || 'Estructura inválida o no corresponde a una factura electrónica SRI.'}`);
       return;
     }
-
     setErrorMsg(null);
     setSelectedPurchaseId('');
+
+    // DEBUG: Ver qué datos extrajo el parser (abre la consola del navegador F12)
+    console.log('[RetenciónXML] Datos extraídos del XML:', {
+      proveedor: result.supplier,
+      factura: {
+        codDoc: result.invoice.codDocSustento,
+        numero: result.invoice.formattedNumber,
+        fecha: result.invoice.isoDate,
+        subtotal: result.invoice.totalSinImpuestos,
+        iva: result.invoice.montoIva,
+        total: result.invoice.importeTotal,
+      }
+    });
 
     // 1. Datos del Proveedor
     setTipoId(result.supplier.tipoId);
@@ -1003,7 +1015,8 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                     placeholder="Pegue aquí la Clave de Acceso de 49 dígitos (se consulta a través de Java)..."
                     value={claveAccesoInput}
                     onChange={(e) => setClaveAccesoInput(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    style={{ color: '#000000' }}
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-black placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none focus:bg-white"
                   />
                 </div>
                 <button
@@ -1099,7 +1112,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="Ej: 1790011223001"
                   value={identificacion}
                   onChange={(e) => setIdentificacion(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
 
@@ -1111,7 +1124,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="Nombre legal completo"
                   value={razonSocial}
                   onChange={(e) => setRazonSocial(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -1124,7 +1137,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="proveedor@empresa.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
               <div>
@@ -1134,7 +1147,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="Av. Principal y Secundaria"
                   value={direccion}
                   onChange={(e) => setDireccion(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -1180,7 +1193,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="001-001-000012345"
                   value={numDocSustento}
                   onChange={(e) => setNumDocSustento(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -1195,7 +1208,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   placeholder="Ej: 0101202601099999999900110010010000123451234567813"
                   value={numAutDocSustento}
                   onChange={(e) => setNumAutDocSustento(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -1207,7 +1220,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   type="date"
                   value={fechaEmisionDocSustento}
                   onChange={(e) => setFechaEmisionDocSustento(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
 
@@ -1217,7 +1230,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
                   type="date"
                   value={fechaRegistroContable}
                   onChange={(e) => setFechaRegistroContable(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:ring-2 focus:ring-orange-500 focus:outline-none"
                 />
               </div>
 
