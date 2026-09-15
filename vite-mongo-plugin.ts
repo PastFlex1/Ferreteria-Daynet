@@ -30,8 +30,8 @@ async function getMongoClient(uri: string = currentUri): Promise<MongoClient> {
 // Friendly collection names for MongoDB Compass
 const COMPASS_COLLECTIONS: Record<string, string> = {
   // Productos e Inventario
-  ferreteria_products: 'inventario_productos',
-  ferreteria_inventory: 'inventario_productos',
+  ferreteria_products: 'productos',
+  ferreteria_inventory: 'productos',
   ferreteria_categories: 'categorias_productos',
   ferreteria_units: 'unidades_medida',
   ferreteria_promotions: 'promociones',
