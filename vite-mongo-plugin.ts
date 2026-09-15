@@ -29,21 +29,114 @@ async function getMongoClient(uri: string = currentUri): Promise<MongoClient> {
 
 // Friendly collection names for MongoDB Compass
 const COMPASS_COLLECTIONS: Record<string, string> = {
+  // Productos e Inventario
+  ferreteria_products: 'inventario_productos',
   ferreteria_inventory: 'inventario_productos',
+  ferreteria_categories: 'categorias_productos',
+  ferreteria_units: 'unidades_medida',
+  ferreteria_promotions: 'promociones',
+  ferreteria_product_batches: 'lotes_productos',
+  ferreteria_taxes: 'tarifas_impuestos',
+  ferreteria_inventory_adjustments: 'ajustes_inventario',
+  ferreteria_kardex: 'kardex_movimientos',
+
+  // Ventas y Facturación
   ferreteria_invoices: 'facturas_ventas',
+  ferreteria_orders: 'cotizaciones_pedidos',
+  ferreteria_guias: 'guias_remision',
+  ferreteria_credit_notes: 'notas_credito',
+  ferreteria_retenciones: 'retenciones',
+  ferreteria_recetas: 'recetas_ordenes',
+  ferreteria_recetas_medicas: 'recetas_ordenes',
+  ferreteria_sellers: 'vendedores',
+
+  // Clientes
   ferreteria_customers: 'clientes',
+
+  // Compras y Proveedores
+  ferreteria_purchases: 'compras',
+  ferreteria_purchase_orders: 'ordenes_compra',
   ferreteria_suppliers: 'proveedores',
+  ferreteria_suppliers_details: 'proveedores',
+  ferreteria_payables: 'cuentas_por_pagar',
+  ferreteria_supplier_payments: 'pagos_proveedores',
+
+  // Caja, Bancos y Tesorería
+  ferreteria_cash_session: 'caja_sesiones',
+  ferreteria_cash_sessions_history: 'caja_historial_cierres',
+  ferreteria_bank_accounts: 'cuentas_bancarias',
+  ferreteria_bank_transactions: 'transacciones_bancarias',
+  ferreteria_bank_deposits: 'depositos_bancarios',
+  ferreteria_petty_expenses: 'caja_chica_gastos',
+  ferreteria_issued_checks: 'cheques_emitidos',
+  ferreteria_postdated_checks: 'cheques_posfechados',
+  ferreteria_card_reconciliations: 'conciliaciones_tarjetas',
+
+  // Contabilidad
+  ferreteria_journal_entries: 'asientos_contables',
+  ferreteria_account_plan: 'plan_cuentas_contable',
+  ferreteria_accounting_accounts: 'contabilidad_cuentas',
+  ferreteria_fiscal_periods: 'periodos_fiscales',
+
+  // Activos Fijos
+  ferreteria_assets: 'activos_fijos',
+  ferreteria_finance_assets: 'activos_fijos',
+  ferreteria_asset_maintenances: 'activos_mantenimientos',
+  ferreteria_asset_transfers: 'activos_transferencias',
+  ferreteria_asset_classifications: 'activos_clasificaciones',
+  ferreteria_asset_areas: 'activos_areas',
+  ferreteria_asset_locations: 'activos_ubicaciones',
+  ferreteria_asset_history_logs: 'activos_historial',
+
+  // Recursos Humanos / Nómina
+  ferreteria_hr_employees: 'empleados',
+  ferreteria_hr_payroll_roles: 'roles_pago_nomina',
+  ferreteria_hr_departments: 'departamentos_rrhh',
+  ferreteria_hr_positions: 'cargos_rrhh',
+  ferreteria_hr_vacations: 'vacaciones_rrhh',
+  ferreteria_hr_liquidations: 'liquidaciones_rrhh',
+  ferreteria_hr_decimos: 'decimos_rrhh',
+  ferreteria_hr_novelties: 'novedades_rrhh',
+  ferreteria_hr_incomes: 'ingresos_rrhh',
+  ferreteria_hr_discounts: 'descuentos_rrhh',
+
+  // Configuración del Sistema
   ferreteria_settings_users_list: 'usuarios_sistema',
   ferreteria_settings: 'configuracion_empresa',
-  ferreteria_cash_session: 'caja_sesiones',
-  ferreteria_accounting_accounts: 'contabilidad_cuentas',
+  ferreteria_settings_payment_methods: 'formas_pago',
+  ferreteria_settings_tax_rates: 'tarifas_impuestos',
 };
 
+function getFriendlyCollectionName(docId: string): string | null {
+  if (COMPASS_COLLECTIONS[docId]) {
+    return COMPASS_COLLECTIONS[docId];
+  }
+  // Group fine-grained system settings
+  if (docId.startsWith('ferreteria_settings_')) {
+    return 'configuracion_parametros';
+  }
+  // Fallback for any other module
+  if (docId.startsWith('ferreteria_')) {
+    return docId.replace(/^ferreteria_/, '');
+  }
+  if (docId.startsWith('doc_')) {
+    return docId.replace(/^doc_/, '');
+  }
+  return null;
+}
+
 async function syncToFriendlyCompassCollection(db: any, docId: string, data: any) {
-  const friendlyName = COMPASS_COLLECTIONS[docId];
+  const friendlyName = getFriendlyCollectionName(docId);
   if (!friendlyName) return;
 
   try {
+    // Ensure collection exists so Compass immediately reflects all collections
+    try {
+      await db.createCollection(friendlyName);
+    } catch {
+      // Collection already exists, continue
+    }
+
     const col = db.collection(friendlyName);
     if (Array.isArray(data)) {
       // Synchronize list items individually so Compass displays them as distinct documents
@@ -51,7 +144,6 @@ async function syncToFriendlyCompassCollection(db: any, docId: string, data: any
       if (data.length > 0) {
         const docsToInsert = data.map((item: any, index: number) => {
           const itemCopy = typeof item === 'object' && item !== null ? { ...item } : { value: item };
-          // Preserve custom ID or assign string _id
           const customId = itemCopy.id || itemCopy.code || itemCopy.cedula || itemCopy.ruc || `item_${index + 1}`;
           return {
             _id: String(customId),
@@ -62,9 +154,17 @@ async function syncToFriendlyCompassCollection(db: any, docId: string, data: any
         await col.insertMany(docsToInsert, { ordered: false });
       }
     } else if (typeof data === 'object' && data !== null) {
+      const docKey = friendlyName === 'configuracion_empresa' ? 'general_config' : docId;
       await col.updateOne(
-        { _id: 'general_config' },
+        { _id: docKey },
         { $set: { ...data, _syncedAt: new Date() } },
+        { upsert: true }
+      );
+    } else {
+      // Scalar/primitive setting value
+      await col.updateOne(
+        { _id: docId },
+        { $set: { key: docId, value: data, _syncedAt: new Date() } },
         { upsert: true }
       );
     }

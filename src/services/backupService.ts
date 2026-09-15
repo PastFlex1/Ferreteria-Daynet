@@ -25,7 +25,7 @@ export interface BackupPayload {
 }
 
 // Known collections to ensure complete fallback and export
-const KNOWN_COLLECTIONS = [
+export const KNOWN_COLLECTIONS = [
   'ferreteria_settings',
   'ferreteria_products',
   'ferreteria_customers',

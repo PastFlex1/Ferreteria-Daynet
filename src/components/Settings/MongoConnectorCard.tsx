@@ -14,6 +14,44 @@ import {
 } from 'lucide-react';
 import { mongoSync, MongoStatusResponse } from '../../services/mongoSyncService';
 import { useModal } from '../../context/ModalContext';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { KNOWN_COLLECTIONS } from '../../services/backupService';
+import {
+  defaultTaxRates,
+  initialStoreSettings,
+  defaultAccountPlan,
+  defaultAssetClassifications,
+  defaultAssetAreas,
+  defaultAssetLocations,
+  defaultPaymentMethods,
+  defaultUsersList,
+  defaultSellers,
+  defaultEmployees,
+  defaultCategories,
+  initialCustomers,
+  initialProducts,
+  initialInvoices
+} from '../../data/initialData';
+
+const DEFAULT_FALLBACKS: Record<string, any> = {
+  ferreteria_settings: initialStoreSettings,
+  ferreteria_products: initialProducts,
+  ferreteria_customers: initialCustomers,
+  ferreteria_invoices: initialInvoices,
+  ferreteria_categories: defaultCategories,
+  ferreteria_taxes: defaultTaxRates,
+  ferreteria_settings_tax_rates: defaultTaxRates,
+  ferreteria_settings_users_list: defaultUsersList,
+  ferreteria_settings_payment_methods: defaultPaymentMethods,
+  ferreteria_account_plan: defaultAccountPlan,
+  ferreteria_accounting_accounts: defaultAccountPlan,
+  ferreteria_asset_classifications: defaultAssetClassifications,
+  ferreteria_asset_areas: defaultAssetAreas,
+  ferreteria_asset_locations: defaultAssetLocations,
+  ferreteria_hr_employees: defaultEmployees,
+  ferreteria_sellers: defaultSellers,
+};
 
 export const MongoConnectorCard: React.FC = () => {
   const { showAlert, showToast } = useModal();
@@ -73,25 +111,60 @@ export const MongoConnectorCard: React.FC = () => {
   const handleExportAllToMongo = async () => {
     setIsSyncing(true);
     try {
-      // Collect all persistent app keys from localStorage
       const payload: Record<string, any> = {};
+
+      // 1. Fetch from Firestore app_state if available
+      try {
+        const querySnapshot = await getDocs(collection(db, 'app_state'));
+        querySnapshot.forEach((docSnap) => {
+          const val = docSnap.data();
+          payload[docSnap.id] = val?.data !== undefined ? val.data : val;
+        });
+      } catch (err) {
+        console.warn('Could not read from Firestore app_state, using localStorage:', err);
+      }
+
+      // 2. Read all keys from localStorage
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && (key.startsWith('ferreteria_') || key.startsWith('doc_') || key === 'app_state')) {
           try {
             const raw = localStorage.getItem(key);
-            if (raw) {
-              payload[key] = JSON.parse(raw);
+            if (raw && !payload[key]) {
+              try {
+                payload[key] = JSON.parse(raw);
+              } catch {
+                payload[key] = raw;
+              }
             }
-          } catch {
-            payload[key] = localStorage.getItem(key);
+          } catch {}
+        }
+      }
+
+      // 3. Ensure every single module and collection has an initial structure
+      for (const key of KNOWN_COLLECTIONS) {
+        if (payload[key] === undefined || payload[key] === null) {
+          if (DEFAULT_FALLBACKS[key] !== undefined) {
+            payload[key] = DEFAULT_FALLBACKS[key];
+          } else if (
+            key.endsWith('s') || 
+            key.includes('history') || 
+            key.includes('list') || 
+            key.includes('details') ||
+            key.includes('records') ||
+            key.includes('plan')
+          ) {
+            payload[key] = [];
+          } else {
+            payload[key] = {};
           }
         }
       }
 
       const res = await mongoSync.exportAllToMongo(payload);
       if (res.success) {
-        showToast('🚀 ¡Todos los datos (productos, ventas, clientes, usuarios) se volcaron a MongoDB Compass con éxito!', 'success');
+        const count = Object.keys(payload).length;
+        showToast(`🚀 ¡Se exportaron ${count} secciones y colecciones a MongoDB Compass exitosamente!`, 'success');
         await fetchStatus(true);
       } else {
         showAlert('Fallo en sincronización', res.message);
