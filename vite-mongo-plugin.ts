@@ -1,9 +1,23 @@
 import { MongoClient } from 'mongodb';
 import type { Plugin } from 'vite';
 
+function extractDbNameFromUri(uri: string, fallback: string): string {
+  try {
+    const withoutProtocol = uri.replace(/^mongodb(\+srv)?:\/\//, '');
+    const parts = withoutProtocol.split('/');
+    if (parts.length > 1) {
+      const dbAndQuery = parts[1].split('?')[0];
+      if (dbAndQuery && dbAndQuery.trim().length > 0) {
+        return dbAndQuery.trim();
+      }
+    }
+  } catch {}
+  return fallback;
+}
+
 let cachedClient: MongoClient | null = null;
-let currentUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
-let currentDbName = process.env.MONGODB_DB_NAME || 'ferreteria_daynet';
+let currentUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ferreteria_daynet';
+let currentDbName = process.env.MONGODB_DB_NAME || extractDbNameFromUri(currentUri, 'ferreteria_daynet');
 
 async function getMongoClient(uri: string = currentUri): Promise<MongoClient> {
   if (cachedClient) {
@@ -24,6 +38,7 @@ async function getMongoClient(uri: string = currentUri): Promise<MongoClient> {
   await client.connect();
   cachedClient = client;
   currentUri = uri;
+  currentDbName = extractDbNameFromUri(uri, currentDbName);
   return client;
 }
 
