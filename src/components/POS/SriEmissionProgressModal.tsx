@@ -17,8 +17,6 @@ import { Invoice, StoreSettings } from '../../types';
 import { SriBackendService, isSecuencialAlreadyRegistered } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { db } from '../../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
 
 interface SriEmissionProgressModalProps {
   isOpen: boolean;
@@ -217,7 +215,11 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           await new Promise((r) => setTimeout(r, 800));
           continue; // Reintentar con el siguiente secuencial
@@ -285,7 +287,11 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           await new Promise((r) => setTimeout(r, 800));
           continue; // Reintentar con el siguiente secuencial
@@ -377,7 +383,11 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
         try {
           localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-          setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+          fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: nextSecSetting })
+          }).catch(() => {});
         } catch (_) {}
 
         // Actualizar factura en estado principal

@@ -1,5 +1,3 @@
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { StoreSettings } from '../types';
 
 export interface BackupMetadata {
@@ -107,15 +105,17 @@ export const KNOWN_COLLECTIONS = [
 export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ fileName: string; totalCollections: number }> {
   const exportData: Record<string, any> = {};
 
-  // 1. Attempt to fetch all docs from Firestore 'app_state'
+  // 1. Attempt to fetch all docs from MongoDB Local (Compass)
   try {
-    const querySnapshot = await getDocs(collection(db, 'app_state'));
-    querySnapshot.forEach((docSnap) => {
-      const val = docSnap.data();
-      exportData[docSnap.id] = val?.data !== undefined ? val.data : val;
-    });
+    const res = await fetch('/api/mongo/pull-all', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data) {
+        Object.assign(exportData, json.data);
+      }
+    }
   } catch (error) {
-    console.warn('Could not read from Firestore collection app_state, falling back to localStorage:', error);
+    console.warn('Could not read from MongoDB pull-all, falling back to localStorage:', error);
   }
 
   // 2. Supplement / fallback from localStorage
@@ -254,7 +254,7 @@ export async function inspectBackupFile(file: File): Promise<BackupPayload> {
 }
 
 /**
- * Restores all collections into Firestore and localStorage.
+ * Restores all collections into MongoDB Local (Compass) and localStorage.
  */
 export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ restoredCount: number }> {
   const data = backup.data;
@@ -263,31 +263,31 @@ export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ re
   }
 
   const keys = Object.keys(data);
-  const savePromises: Promise<any>[] = [];
 
+  // 1. Write each collection to localStorage for instantaneous offline availability
   for (const key of keys) {
     const rawVal = data[key];
     const cleanVal = JSON.parse(JSON.stringify(rawVal));
-
-    // 1. Write to localStorage
     try {
       localStorage.setItem(key, typeof cleanVal === 'string' ? cleanVal : JSON.stringify(cleanVal));
     } catch (e) {
       console.warn(`Error writing ${key} to localStorage:`, e);
     }
-
-    // 2. Write to Firestore collection 'app_state'
-    try {
-      const p = setDoc(doc(db, 'app_state', key), { data: cleanVal }).catch((err) => {
-        console.warn(`Error saving ${key} to Firestore:`, err);
-      });
-      savePromises.push(p);
-    } catch (err) {
-      console.warn(`Firestore setDoc error for ${key}:`, err);
-    }
   }
 
-  await Promise.allSettled(savePromises);
+  // 2. Synchronize entire backup payload to MongoDB Compass
+  try {
+    const res = await fetch('/api/mongo/sync-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data })
+    });
+    if (!res.ok) {
+      console.warn('MongoDB sync-all returned status:', res.status);
+    }
+  } catch (err) {
+    console.warn('Error saving backup to MongoDB:', err);
+  }
 
   return {
     restoredCount: keys.length,

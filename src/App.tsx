@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useFirestoreSync } from './hooks/useFirestoreSync';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from './lib/firebase';
 import { Header } from './components/Header';
 import { LoginView } from './components/Auth/LoginView';
 import { BillingTerminal } from './components/POS/BillingTerminal';
@@ -576,15 +574,15 @@ export default function App() {
 
   const handleClearAllData = async () => {
     try {
-      const resetJobs = [
-        setDoc(doc(db, 'app_state', 'ferreteria_settings'), { data: initialStoreSettings }),
-        setDoc(doc(db, 'app_state', 'ferreteria_units'), { data: [
+      const resetMap: Record<string, any> = {
+        ferreteria_settings: initialStoreSettings,
+        ferreteria_units: [
           { id: 'u-1', code: 'UND', name: 'Unidad', symbol: 'und', baseRatio: 1, category: 'CANTIDAD', fractional: false }
-        ] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_products'), { data: initialProducts }),
-        setDoc(doc(db, 'app_state', 'ferreteria_customers'), { data: initialCustomers }),
-        setDoc(doc(db, 'app_state', 'ferreteria_invoices'), { data: initialInvoices }),
-        setDoc(doc(db, 'app_state', 'ferreteria_cash_session'), { data: {
+        ],
+        ferreteria_products: initialProducts,
+        ferreteria_customers: initialCustomers,
+        ferreteria_invoices: initialInvoices,
+        ferreteria_cash_session: {
           id: 'cash-0',
           openedAt: new Date().toISOString(),
           initialCash: 0,
@@ -595,74 +593,84 @@ export default function App() {
           totalSalesCard: 0,
           totalSalesCredit: 0,
           totalInvoicesCount: 0,
-        } }),
-        setDoc(doc(db, 'app_state', 'ferreteria_suppliers'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_purchases'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_purchase_orders'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_product_batches'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_suppliers_details'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_payables'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_supplier_payments'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_bank_accounts'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_bank_transactions'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_bank_deposits'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_petty_expenses'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_finance_assets'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_budget_categories'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_issued_checks'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_postdated_checks'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_card_reconciliations'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_journal_entries'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_account_plan'), { data: defaultAccountPlan }),
-        setDoc(doc(db, 'app_state', 'ferreteria_fiscal_periods'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_assets'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_maintenances'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_transfers'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_classifications'), { data: defaultAssetClassifications }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_areas'), { data: defaultAssetAreas }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_locations'), { data: defaultAssetLocations }),
-        setDoc(doc(db, 'app_state', 'ferreteria_asset_history_logs'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_departments'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_positions'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_employees'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_payroll_roles'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_incomes'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_discounts'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_vacations'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_liquidations'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_decimos'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_hr_novelties'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_orders'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_guias'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_credit_notes'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_retenciones'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_recetas'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_promotions'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_seller_goals'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_stock_adjustments'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_warranties'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_transfers'), { data: [] }),
-        setDoc(doc(db, 'app_state', 'ferreteria_sellers'), { data: defaultSellers }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_sri_mode'), { data: 'PRUEBAS' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_establishment'), { data: '001' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_emission_point'), { data: '001' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: '000000001' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_credit_note'), { data: '000000001' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_retention'), { data: '000000001' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_users_list'), { data: defaultUsersList }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_payment_methods'), { data: defaultPaymentMethods }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_print_format'), { data: 'TICKET_80MM' }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_include_qr'), { data: true }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_print_logo'), { data: true }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_allow_negative_stock'), { data: false }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_block_no_stock_sales'), { data: true }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_min_stock_alert'), { data: true }),
-        setDoc(doc(db, 'app_state', 'ferreteria_settings_auto_session_timeout'), { data: '30' }),
-      ];
+        },
+        ferreteria_suppliers: [],
+        ferreteria_purchases: [],
+        ferreteria_purchase_orders: [],
+        ferreteria_product_batches: [],
+        ferreteria_suppliers_details: [],
+        ferreteria_payables: [],
+        ferreteria_supplier_payments: [],
+        ferreteria_bank_accounts: [],
+        ferreteria_bank_transactions: [],
+        ferreteria_bank_deposits: [],
+        ferreteria_petty_expenses: [],
+        ferreteria_finance_assets: [],
+        ferreteria_budget_categories: [],
+        ferreteria_issued_checks: [],
+        ferreteria_postdated_checks: [],
+        ferreteria_card_reconciliations: [],
+        ferreteria_journal_entries: [],
+        ferreteria_account_plan: defaultAccountPlan,
+        ferreteria_fiscal_periods: [],
+        ferreteria_assets: [],
+        ferreteria_asset_maintenances: [],
+        ferreteria_asset_transfers: [],
+        ferreteria_asset_classifications: defaultAssetClassifications,
+        ferreteria_asset_areas: defaultAssetAreas,
+        ferreteria_asset_locations: defaultAssetLocations,
+        ferreteria_asset_history_logs: [],
+        ferreteria_hr_departments: [],
+        ferreteria_hr_positions: [],
+        ferreteria_hr_employees: [],
+        ferreteria_hr_payroll_roles: [],
+        ferreteria_hr_incomes: [],
+        ferreteria_hr_discounts: [],
+        ferreteria_hr_vacations: [],
+        ferreteria_hr_liquidations: [],
+        ferreteria_hr_decimos: [],
+        ferreteria_hr_novelties: [],
+        ferreteria_orders: [],
+        ferreteria_guias: [],
+        ferreteria_credit_notes: [],
+        ferreteria_retenciones: [],
+        ferreteria_recetas: [],
+        ferreteria_promotions: [],
+        ferreteria_seller_goals: [],
+        ferreteria_stock_adjustments: [],
+        ferreteria_warranties: [],
+        ferreteria_transfers: [],
+        ferreteria_sellers: defaultSellers,
+        ferreteria_settings_sri_mode: 'PRUEBAS',
+        ferreteria_settings_establishment: '001',
+        ferreteria_settings_emission_point: '001',
+        ferreteria_settings_sec_invoice: '000000001',
+        ferreteria_settings_sec_credit_note: '000000001',
+        ferreteria_settings_sec_retention: '000000001',
+        ferreteria_settings_users_list: defaultUsersList,
+        ferreteria_settings_payment_methods: defaultPaymentMethods,
+        ferreteria_settings_print_format: 'TICKET_80MM',
+        ferreteria_settings_include_qr: true,
+        ferreteria_settings_print_logo: true,
+        ferreteria_settings_allow_negative_stock: false,
+        ferreteria_settings_block_no_stock_sales: true,
+        ferreteria_settings_min_stock_alert: true,
+        ferreteria_settings_auto_session_timeout: '30',
+      };
 
-      await Promise.all(resetJobs);
+      for (const [key, val] of Object.entries(resetMap)) {
+        try {
+          localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val));
+        } catch {}
+      }
+
+      await fetch('/api/mongo/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: resetMap })
+      });
     } catch (e) {
-      console.error("Error clearing Firestore database: ", e);
+      console.error("Error clearing database: ", e);
     }
 
     localStorage.clear();

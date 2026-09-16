@@ -168,9 +168,23 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     }
   }, [claveAccesoCalculada, isOpen]);
 
-  if (!isOpen || !currentInvoice) return null;
-
   const activeInvoice = currentInvoice;
+
+  const hasExistingCN = React.useMemo(() => {
+    if (!activeInvoice) return false;
+    return (creditNotes || []).some(
+      (cn) =>
+        (activeInvoice.creditNoteRef && cn.id === activeInvoice.creditNoteRef) ||
+        cn.invoiceRef === activeInvoice.fullNumber ||
+        cn.invoiceId === activeInvoice.id ||
+        (activeInvoice.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(activeInvoice.fullNumber))
+    );
+  }, [activeInvoice, creditNotes]);
+
+  const isAnuladaOrHasCN = React.useMemo(() => {
+    if (!activeInvoice) return false;
+    return activeInvoice.paymentStatus === 'ANULADA' || activeInvoice.sriStatus === 'ANULADO' || hasExistingCN;
+  }, [activeInvoice, hasExistingCN]);
 
   const handlePrint = () => {
     window.print();
@@ -207,29 +221,13 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
       pdf.addImage(imgData, 'PNG', margin, margin, imgWidth, imgHeight);
-      pdf.save(`RIDE-${activeInvoice.fullNumber}.pdf`);
+      pdf.save(`RIDE-${activeInvoice?.fullNumber || 'comprobante'}.pdf`);
     } catch (err) {
       console.error('[PDF Export Error]', err);
     } finally {
       setIsGeneratingPdf(false);
     }
   };
-
-  const hasExistingCN = React.useMemo(() => {
-    if (!activeInvoice) return false;
-    return (creditNotes || []).some(
-      (cn) =>
-        (activeInvoice.creditNoteRef && cn.id === activeInvoice.creditNoteRef) ||
-        cn.invoiceRef === activeInvoice.fullNumber ||
-        cn.invoiceId === activeInvoice.id ||
-        (activeInvoice.fullNumber && cn.invoiceRef && cn.invoiceRef.endsWith(activeInvoice.fullNumber))
-    );
-  }, [activeInvoice, creditNotes]);
-
-  const isAnuladaOrHasCN = React.useMemo(() => {
-    if (!activeInvoice) return false;
-    return activeInvoice.paymentStatus === 'ANULADA' || activeInvoice.sriStatus === 'ANULADO' || hasExistingCN;
-  }, [activeInvoice, hasExistingCN]);
 
   const handleInvoiceUpdated = (updated: Invoice) => {
     setCurrentInvoice(updated);
@@ -461,6 +459,8 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
       setViewingCreditNote(syntheticNC);
     }
   };
+
+  if (!isOpen || !activeInvoice) return null;
 
   return (
     <>

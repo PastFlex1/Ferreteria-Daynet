@@ -1,7 +1,5 @@
 import { useState } from 'react';
 import { useModal } from '../context/ModalContext';
-import { db } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
 import { validateEcuadorianDocument } from '../utils/ecuadorianValidator';
 import { SriBackendService } from '../services/sriBackendService';
 
@@ -29,47 +27,39 @@ export function useCedulaSearch() {
     
     setIsSearchingCedula(true);
     try {
-      // 2. Primero busca localmente en Firebase (Clientes y Proveedores)
-      if (db) {
-        try {
-          // Buscar en Customers
-          const qDoc = query(collection(db, "customers"), where("docNumber", "==", cleanDoc));
-          let snap = await getDocs(qDoc);
-          if (snap.empty) {
-            const qRuc = query(collection(db, "customers"), where("ruc", "==", cleanDoc));
-            snap = await getDocs(qRuc);
-          }
-          if (!snap.empty) {
-            const data = snap.docs[0].data();
-            onFound({
-              name: data.name || "",
-              ...(data.address && { address: data.address }),
-              ...(data.email && { email: data.email }),
-              ...(data.phone && { phone: data.phone })
-            });
-            showToast("Contacto encontrado en la base de datos local.", "success");
-            setIsSearchingCedula(false);
-            return;
-          }
-
-          // Buscar en Suppliers
-          const qSup = query(collection(db, "ferreteria_suppliers_details"), where("taxId", "==", cleanDoc));
-          const snapSup = await getDocs(qSup);
-          if (!snapSup.empty) {
-            const data = snapSup.docs[0].data();
-            onFound({
-              name: data.name || "",
-              ...(data.address && { address: data.address }),
-              ...(data.email && { email: data.email }),
-              ...(data.phone && { phone: data.phone })
-            });
-            showToast("Proveedor encontrado en la base de datos.", "success");
-            setIsSearchingCedula(false);
-            return;
-          }
-        } catch (e) {
-          console.warn('Firebase search fallback:', e);
+      // 2. Primero busca localmente en Clientes y Proveedores (MongoDB / Cache Local)
+      try {
+        const rawCust = localStorage.getItem('ferreteria_customers');
+        const customers: any[] = rawCust ? JSON.parse(rawCust) : [];
+        const foundCust = customers.find(c => (c.docNumber && c.docNumber.trim() === cleanDoc) || (c.ruc && c.ruc.trim() === cleanDoc) || (c.identification && c.identification.trim() === cleanDoc));
+        if (foundCust) {
+          onFound({
+            name: foundCust.name || "",
+            ...(foundCust.address && { address: foundCust.address }),
+            ...(foundCust.email && { email: foundCust.email }),
+            ...(foundCust.phone && { phone: foundCust.phone })
+          });
+          showToast("Contacto encontrado en la base de datos local.", "success");
+          setIsSearchingCedula(false);
+          return;
         }
+
+        const rawSup = localStorage.getItem('ferreteria_suppliers') || localStorage.getItem('ferreteria_suppliers_details');
+        const suppliers: any[] = rawSup ? JSON.parse(rawSup) : [];
+        const foundSup = suppliers.find(s => (s.taxId && s.taxId.trim() === cleanDoc) || (s.ruc && s.ruc.trim() === cleanDoc) || (s.docNumber && s.docNumber.trim() === cleanDoc));
+        if (foundSup) {
+          onFound({
+            name: foundSup.name || foundSup.businessName || "",
+            ...(foundSup.address && { address: foundSup.address }),
+            ...(foundSup.email && { email: foundSup.email }),
+            ...(foundSup.phone && { phone: foundSup.phone })
+          });
+          showToast("Proveedor encontrado en la base de datos.", "success");
+          setIsSearchingCedula(false);
+          return;
+        }
+      } catch (e) {
+        console.warn('Local search fallback:', e);
       }
 
       const searchDoc = cleanDoc.length === 13 ? cleanDoc.substring(0, 10) : cleanDoc;

@@ -6,8 +6,6 @@
 
 import { SRIInvoiceData, generateInvoiceXML, convertERPInvoiceToSRI, generateCreditNoteXML, convertCreditNoteToSRI } from './sriXmlService';
 import { Invoice, StoreSettings } from '../types';
-import { db } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
 import { SRIRetentionData } from '../types/retention';
 import { SriRetentionXmlGenerator } from './retention/SriRetentionXmlGenerator';
 import { RetentionXsdValidator } from './retention/RetentionXsdValidator';
@@ -343,7 +341,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           continue;
         }
@@ -355,13 +357,22 @@ export class SriBackendService {
             estado: 'ERROR',
             xmlOriginal,
             xmlFirmado: fRes.xmlFirmado,
-            mensaje: rRes.error || 'Error en recepción SRI.',
+            mensaje: rRes.error || 'Error en recepción del comprobante ante el SRI.',
+            rawRecepcion: rRes.recepcion,
             nuevoSecuencial: formattedSec,
             nuevoFullNumber: currentInvoice.fullNumber,
           };
         }
 
         if (rRes.recepcion.includes('DEVUELTA')) {
+          const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
+          const devMsgs: string[] = [];
+          let dm;
+          while ((dm = devMsgRegex.exec(rRes.recepcion)) !== null) {
+            devMsgs.push(dm[1].trim());
+          }
+          const finalDevMsg = devMsgs.length > 0 ? devMsgs.join(' | ') : 'Comprobante DEVUELTO por el SRI.';
+
           return {
             success: false,
             claveAcceso,
@@ -369,13 +380,13 @@ export class SriBackendService {
             xmlOriginal,
             xmlFirmado: fRes.xmlFirmado,
             rawRecepcion: rRes.recepcion,
-            mensaje: 'El comprobante fue devuelto por el SRI en Recepción.',
+            mensaje: finalDevMsg,
             nuevoSecuencial: formattedSec,
             nuevoFullNumber: currentInvoice.fullNumber,
           };
         }
 
-        // Pequeña espera para indexación en el servidor del SRI
+        // Pequeña espera para permitir indexación en los servidores del SRI
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Paso 3: Autorización SRI con reintentos
@@ -387,7 +398,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           continue;
         }
@@ -416,7 +431,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_invoice'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
         }
 
@@ -523,7 +542,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_credit_note'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           continue;
         }
@@ -567,7 +590,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_credit_note'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
           continue;
         }
@@ -596,7 +623,11 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            setDoc(doc(db, 'app_state', 'ferreteria_settings_sec_credit_note'), { data: nextSecSetting }).catch(() => {});
+            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: nextSecSetting })
+            }).catch(() => {});
           } catch (_) {}
         }
 

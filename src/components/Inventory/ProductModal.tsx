@@ -108,7 +108,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       const currentTax = productToEdit.taxRate ?? defaultTaxRate;
       setTaxRate(currentTax.toString());
       setPriceWithTax((pVal * (1 + currentTax / 100)).toFixed(2));
-      setPriceScales(productToEdit.priceScales || []);
+      setPriceScales((productToEdit.priceScales || []).map(s => {
+        const p = parseFloat(s.price?.toString() || '0') || 0;
+        const pWithTax = p > 0 ? (p * (1 + currentTax / 100)).toFixed(2) : '';
+        return {
+          ...s,
+          priceWithTax: s.priceWithTax !== undefined ? s.priceWithTax : pWithTax,
+        };
+      }));
     } else {
       // Reset defaults
       setSku('');
@@ -165,14 +172,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleTaxRateChange = (val: string) => {
     setTaxRate(val);
-    if (!price || price.trim() === '') {
-      setPriceWithTax('');
-      return;
-    }
-    const p = parseFloat(price) || 0;
     const t = parseFloat(val);
     const finalT = isNaN(t) ? defaultTaxRate : t;
-    setPriceWithTax((p * (1 + finalT / 100)).toFixed(2));
+    if (!price || price.trim() === '') {
+      setPriceWithTax('');
+    } else {
+      const p = parseFloat(price) || 0;
+      setPriceWithTax((p * (1 + finalT / 100)).toFixed(2));
+    }
+
+    setPriceScales(scales => scales.map(s => {
+      const p = parseFloat(s.price?.toString() || '0') || 0;
+      return {
+        ...s,
+        priceWithTax: p > 0 ? (p * (1 + finalT / 100)).toFixed(2) : '',
+      };
+    }));
   };
 
   const handlePriceBlur = () => {
@@ -230,14 +245,85 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const defaultMinQty = priceScales.length > 0 ? (priceScales[priceScales.length - 1].minQty * 2) : 6;
     const basePrice = parseFloat(price) || 0;
     const suggestedPrice = basePrice > 0 ? Math.round(basePrice * 0.9 * 100) / 100 : 0;
+    const t = parseFloat(taxRate);
+    const finalT = isNaN(t) ? defaultTaxRate : t;
+    const suggestedPriceWithTax = suggestedPrice > 0 ? (suggestedPrice * (1 + finalT / 100)).toFixed(2) : '';
 
     const newScale: PriceScale = {
       id: `scale-${Date.now()}`,
       name: `Mayorista ${priceScales.length + 1}`,
       minQty: defaultMinQty,
       price: suggestedPrice,
+      priceWithTax: suggestedPriceWithTax,
     };
     setPriceScales([...priceScales, newScale]);
+  };
+
+  const handleScalePriceChange = (scaleId: string, val: string) => {
+    const clean = normalizeDecimalInput(val);
+    const t = parseFloat(taxRate);
+    const finalT = isNaN(t) ? defaultTaxRate : t;
+    const p = parseFloat(clean) || 0;
+    const pWithTax = clean && clean.trim() !== '' ? (p * (1 + finalT / 100)).toFixed(2) : '';
+
+    setPriceScales(scales => scales.map(s => {
+      if (s.id !== scaleId) return s;
+      return {
+        ...s,
+        price: clean as any,
+        priceWithTax: pWithTax,
+      };
+    }));
+  };
+
+  const handleScalePriceWithTaxChange = (scaleId: string, val: string) => {
+    const clean = normalizeDecimalInput(val);
+    const t = parseFloat(taxRate);
+    const finalT = isNaN(t) ? defaultTaxRate : t;
+    const pWithTax = parseFloat(clean) || 0;
+    const pNet = clean && clean.trim() !== '' ? (pWithTax / (1 + finalT / 100)).toFixed(2) : '';
+
+    setPriceScales(scales => scales.map(s => {
+      if (s.id !== scaleId) return s;
+      return {
+        ...s,
+        price: pNet as any,
+        priceWithTax: clean,
+      };
+    }));
+  };
+
+  const handleScalePriceBlur = (scaleId: string) => {
+    setPriceScales(scales => scales.map(s => {
+      if (s.id !== scaleId) return s;
+      const p = parseFloat(s.price?.toString() || '');
+      if (isNaN(p)) return s;
+      const formatted = p.toFixed(2);
+      const t = parseFloat(taxRate);
+      const finalT = isNaN(t) ? defaultTaxRate : t;
+      return {
+        ...s,
+        price: formatted as any,
+        priceWithTax: (p * (1 + finalT / 100)).toFixed(2),
+      };
+    }));
+  };
+
+  const handleScalePriceWithTaxBlur = (scaleId: string) => {
+    setPriceScales(scales => scales.map(s => {
+      if (s.id !== scaleId) return s;
+      const pWithTax = parseFloat(s.priceWithTax?.toString() || '');
+      if (isNaN(pWithTax)) return s;
+      const formattedWithTax = pWithTax.toFixed(2);
+      const t = parseFloat(taxRate);
+      const finalT = isNaN(t) ? defaultTaxRate : t;
+      const pNet = (pWithTax / (1 + finalT / 100)).toFixed(2);
+      return {
+        ...s,
+        price: pNet as any,
+        priceWithTax: formattedWithTax,
+      };
+    }));
   };
 
   const handleUpdateScale = (id: string, field: keyof PriceScale, value: string | number | undefined) => {
@@ -303,7 +389,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
-      <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-slate-900/10">
+      <div className="bg-white border border-slate-200/90 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-slate-900/10">
         {/* Header */}
         <div className="px-6 py-4.5 bg-slate-950 text-white border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -648,11 +734,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             ) : (
               <div className="space-y-2.5">
                 {priceScales.map((scale, index) => {
-                  const scalePrice = parseFloat(scale.price.toString()) || 0;
+                  const scalePrice = parseFloat(scale.price?.toString() || '0') || 0;
                   const currentCost = parseFloat(costPrice) || 0;
                   const parsedTax = parseFloat(taxRate);
                   const currentTax = !isNaN(parsedTax) ? parsedTax : defaultTaxRate;
-                  const scalePriceWithTax = scalePrice * (1 + currentTax / 100);
+                  const hasTax = currentTax > 0;
+                  const scalePriceWithTaxDisplay = scale.priceWithTax !== undefined && scale.priceWithTax !== null
+                    ? scale.priceWithTax
+                    : (scalePrice > 0 ? (scalePrice * (1 + currentTax / 100)).toFixed(2) : '');
                   const marginPct = currentCost > 0 ? (((scalePrice - currentCost) / currentCost) * 100) : 0;
 
                   return (
@@ -688,9 +777,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         />
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                          Hasta (Opcional)
+                      <div className="sm:col-span-1">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 text-center">
+                          Hasta
                         </label>
                         <input
                           type="number"
@@ -698,13 +787,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           placeholder="∞"
                           value={scale.maxQty ? scale.maxQty : ''}
                           onChange={(e) => handleUpdateScale(scale.id, 'maxQty', e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined)}
-                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          title="Cantidad máxima opcional (dejar vacío para sin límite)"
                         />
                       </div>
 
-                      <div className="sm:col-span-2">
+                      <div className={hasTax ? "sm:col-span-2" : "sm:col-span-3"}>
                         <label className="block text-[10px] font-bold text-emerald-800 uppercase mb-1">
-                          Precio Unit. ($)
+                          {hasTax ? 'Precio Unit. ($)' : 'Precio Unit. ($)'}
                         </label>
                         <input
                           type="number"
@@ -712,31 +802,54 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           min="0"
                           placeholder="0.00"
                           value={scale.price !== undefined && scale.price !== null ? scale.price : ''}
-                          onChange={(e) => handleUpdateScale(scale.id, 'price', e.target.value)}
-                          onBlur={() => {
-                            if (scale.price !== undefined && scale.price !== null && String(scale.price).trim() !== '') {
-                              const p = parseFloat(scale.price.toString());
-                              if (!isNaN(p)) {
-                                const str = p < 1 ? p.toFixed(2) : p.toString();
-                                handleUpdateScale(scale.id, 'price', str.startsWith('.') ? '0' + str : str);
-                              }
-                            }
-                          }}
+                          onChange={(e) => handleScalePriceChange(scale.id, e.target.value)}
+                          onBlur={() => handleScalePriceBlur(scale.id)}
                           className="w-full px-2.5 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-800 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          title="Precio unitario sin IVA (base imponible)"
                         />
+                        {!hasTax && currentCost > 0 && (
+                          <div className="mt-0.5 text-[9px] font-mono text-center">
+                            <span className={`font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              Mg: {marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                          Con IVA / Margen
-                        </label>
-                        <div className="text-[11px] font-mono">
-                          <span className="font-bold text-slate-900">${scalePriceWithTax.toFixed(2)}</span>
-                          <span className={`ml-1 font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            ({marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%)
-                          </span>
+                      {hasTax && (
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-orange-700 uppercase mb-1 flex items-center justify-between">
+                            <span>P. Venta con IVA ($)</span>
+                            {currentCost > 0 && (
+                              <span className={`text-[9px] font-mono font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                ({marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%)
+                              </span>
+                            )}
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            value={scalePriceWithTaxDisplay}
+                            onChange={(e) => handleScalePriceWithTaxChange(scale.id, e.target.value)}
+                            onBlur={() => handleScalePriceWithTaxBlur(scale.id)}
+                            className="w-full px-2.5 py-1.5 bg-white border border-orange-300 text-slate-900 font-mono font-bold rounded-lg text-xs focus:ring-2 focus:ring-orange-500 shadow-2xs"
+                            title="Precio de venta con IVA incluido para esta escala"
+                          />
                         </div>
-                      </div>
+                      )}
+
+                      {!hasTax && (
+                        <div className="sm:col-span-2 text-center">
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                            Margen
+                          </label>
+                          <div className={`py-1 text-xs font-mono font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%
+                          </div>
+                        </div>
+                      )}
 
                       <div className="sm:col-span-1 flex justify-end items-center">
                         <button

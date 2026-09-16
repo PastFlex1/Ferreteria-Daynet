@@ -38,9 +38,33 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
       if (clean.startsWith('.')) clean = '0' + clean;
       finalVal = clean;
     }
+    const currentTaxRate = typeof product.taxRate === 'number' ? product.taxRate : defaultTaxRate;
+
     setPriceScales(scales => scales.map(s => {
       if (s.id !== id) return s;
+      if (field === 'price') {
+        const p = parseFloat(finalVal.toString()) || 0;
+        const pWithTax = finalVal.toString().trim() !== '' ? (p * (1 + currentTaxRate / 100)).toFixed(2) : '';
+        return { ...s, price: finalVal as any, priceWithTax: pWithTax };
+      }
       return { ...s, [field]: finalVal };
+    }));
+  };
+
+  const handleScalePriceWithTax = (id: string, valWithTax: string) => {
+    let clean = valWithTax.replace(/,/g, '.');
+    if (clean.startsWith('.')) clean = '0' + clean;
+    const currentTaxRate = typeof product.taxRate === 'number' ? product.taxRate : defaultTaxRate;
+    const pWithTax = parseFloat(clean) || 0;
+    const pNet = clean.trim() !== '' ? (pWithTax / (1 + currentTaxRate / 100)).toFixed(2) : '';
+
+    setPriceScales(scales => scales.map(s => {
+      if (s.id !== id) return s;
+      return {
+        ...s,
+        price: pNet as any,
+        priceWithTax: clean,
+      };
     }));
   };
 
@@ -163,10 +187,17 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Precio + IVA</label>
-                      <div className="px-2.5 py-1.5 bg-slate-100 text-slate-600 font-mono font-bold rounded-lg text-xs border border-transparent">
-                        ${scalePriceWithTax.toFixed(2)}
-                      </div>
+                      <label className="block text-[10px] font-bold text-orange-700 uppercase tracking-wider mb-1">Precio con IVA ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={scale.priceWithTax !== undefined && scale.priceWithTax !== null ? scale.priceWithTax : (scalePriceParsed > 0 ? scalePriceWithTax.toFixed(2) : '')}
+                        onChange={(e) => handleScalePriceWithTax(scale.id, e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-orange-300 text-slate-900 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-orange-500 shadow-2xs"
+                        title="Precio de venta con IVA incluido"
+                      />
                     </div>
                     <div className="sm:col-span-1">
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Ganancia</label>

@@ -44,6 +44,7 @@ export interface PriceScale {
   minQty: number;
   maxQty?: number;
   price: number;
+  priceWithTax?: number | string;
 }
 
 export interface CartItem {
@@ -62,10 +63,16 @@ export interface PromotionItem {
   productName: string;
   sku?: string;
   barcode?: string;
+  stock?: number;
+  taxRate?: number;
+  unit?: string;
   currentPrice: number;
+  currentPriceWithTax?: number;
   discountPercent: number;
   discountAmount: number;
+  discountAmountWithTax?: number;
   finalPrice: number;
+  finalPriceWithTax?: number;
 }
 
 export interface Promotion {

@@ -14,8 +14,6 @@ import {
 } from 'lucide-react';
 import { mongoSync, MongoStatusResponse } from '../../services/mongoSyncService';
 import { useModal } from '../../context/ModalContext';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import { KNOWN_COLLECTIONS } from '../../services/backupService';
 import {
   defaultTaxRates,
@@ -113,16 +111,7 @@ export const MongoConnectorCard: React.FC = () => {
     try {
       const payload: Record<string, any> = {};
 
-      // 1. Fetch from Firestore app_state if available
-      try {
-        const querySnapshot = await getDocs(collection(db, 'app_state'));
-        querySnapshot.forEach((docSnap) => {
-          const val = docSnap.data();
-          payload[docSnap.id] = val?.data !== undefined ? val.data : val;
-        });
-      } catch (err) {
-        console.warn('Could not read from Firestore app_state, using localStorage:', err);
-      }
+      // Read all collections from localStorage and memory
 
       // 2. Read all keys from localStorage
       for (let i = 0; i < localStorage.length; i++) {

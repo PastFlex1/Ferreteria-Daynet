@@ -157,9 +157,10 @@ export const Header: React.FC<HeaderProps> = ({
   ];
 
   const purchasesSubTabs: { id: PurchasesSubTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'COMPRAS',       label: 'Compras',          icon: <ShoppingBag className="w-3.5 h-3.5" /> },
-    { id: 'ORDENES_COMPRA', label: 'Órdenes de Compra', icon: <ListOrdered className="w-3.5 h-3.5" /> },
-    { id: 'PRE_ORDENES',   label: 'Pre-Órdenes',      icon: <FileCheck2 className="w-3.5 h-3.5" /> },
+    { id: 'COMPRAS',           label: 'Compras',              icon: <ShoppingBag className="w-3.5 h-3.5" /> },
+    { id: 'HISTORIAL_COMPRAS', label: 'Historial de Compras', icon: <Clock className="w-3.5 h-3.5" /> },
+    { id: 'ORDENES_COMPRA',    label: 'Órdenes de Compra',     icon: <ListOrdered className="w-3.5 h-3.5" /> },
+    { id: 'PRE_ORDENES',       label: 'Pre-Órdenes',          icon: <FileCheck2 className="w-3.5 h-3.5" /> },
   ];
 
   const suppliersSubTabs: { id: SuppliersSubTab; label: string; icon: React.ReactNode }[] = [

@@ -385,13 +385,25 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     const val = Math.max(0, Math.min(100, massDiscount));
     setPromoItems((prev) =>
       prev.map((item) => {
+        const prod = products.find((p) => p.id === item.productId || (item.barcode && p.barcode === item.barcode) || (item.sku && p.sku === item.sku));
+        const taxRate = typeof prod?.taxRate === 'number' ? prod.taxRate : (item.taxRate ?? settings?.defaultTaxRate ?? 15);
+        const taxMultiplier = 1 + (taxRate / 100);
+
         const discountAmount = Number((item.currentPrice * (val / 100)).toFixed(4));
+        const discountAmountWithTax = Number((discountAmount * taxMultiplier).toFixed(4));
         const finalPrice = Number(Math.max(0, item.currentPrice - discountAmount).toFixed(4));
+        const finalPriceWithTax = Number((finalPrice * taxMultiplier).toFixed(4));
+
         return {
           ...item,
+          stock: prod?.stock ?? item.stock ?? 0,
+          taxRate,
+          unit: prod?.unit || item.unit || 'UND',
           discountPercent: val,
           discountAmount,
+          discountAmountWithTax,
           finalPrice,
+          finalPriceWithTax,
         };
       })
     );
@@ -404,19 +416,32 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
       return;
     }
     const currentPrice = Number((product.price || 0).toFixed(4));
+    const taxRate = typeof product.taxRate === 'number' ? product.taxRate : (settings?.defaultTaxRate ?? 15);
+    const taxMultiplier = 1 + (taxRate / 100);
+    const currentPriceWithTax = Number((currentPrice * taxMultiplier).toFixed(4));
+
     const discountPercent = massDiscount > 0 ? massDiscount : 10;
     const discountAmount = Number((currentPrice * (discountPercent / 100)).toFixed(4));
+    const discountAmountWithTax = Number((discountAmount * taxMultiplier).toFixed(4));
+
     const finalPrice = Number(Math.max(0, currentPrice - discountAmount).toFixed(4));
+    const finalPriceWithTax = Number((finalPrice * taxMultiplier).toFixed(4));
 
     const newItem: PromotionItem = {
       productId: product.id,
       productName: product.name.toUpperCase(),
       sku: product.sku,
       barcode: product.barcode || product.sku,
+      stock: product.stock ?? 0,
+      taxRate,
+      unit: product.unit || 'UND',
       currentPrice,
+      currentPriceWithTax,
       discountPercent,
       discountAmount,
+      discountAmountWithTax,
       finalPrice,
+      finalPriceWithTax,
     };
 
     setPromoItems((prev) => [newItem, ...prev]);
@@ -430,13 +455,24 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
       const target = updated[indexInItems];
       if (!target) return prev;
       const newPercent = Math.max(0, Math.min(100, (target.discountPercent || 0) + delta));
+      const prod = products.find((p) => p.id === target.productId || (target.barcode && p.barcode === target.barcode) || (target.sku && p.sku === target.sku));
+      const taxRate = typeof prod?.taxRate === 'number' ? prod.taxRate : (target.taxRate ?? settings?.defaultTaxRate ?? 15);
+      const taxMultiplier = 1 + (taxRate / 100);
+
       const discountAmount = Number((target.currentPrice * (newPercent / 100)).toFixed(4));
+      const discountAmountWithTax = Number((discountAmount * taxMultiplier).toFixed(4));
       const finalPrice = Number(Math.max(0, target.currentPrice - discountAmount).toFixed(4));
+      const finalPriceWithTax = Number((finalPrice * taxMultiplier).toFixed(4));
+
       updated[indexInItems] = {
         ...target,
+        stock: prod?.stock ?? target.stock ?? 0,
+        taxRate,
         discountPercent: newPercent,
         discountAmount,
+        discountAmountWithTax,
         finalPrice,
+        finalPriceWithTax,
       };
       return updated;
     });
@@ -448,13 +484,24 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
       const target = updated[indexInItems];
       if (!target) return prev;
       const newPercent = Math.max(0, Math.min(100, isNaN(newPercentVal) ? 0 : newPercentVal));
+      const prod = products.find((p) => p.id === target.productId || (target.barcode && p.barcode === target.barcode) || (target.sku && p.sku === target.sku));
+      const taxRate = typeof prod?.taxRate === 'number' ? prod.taxRate : (target.taxRate ?? settings?.defaultTaxRate ?? 15);
+      const taxMultiplier = 1 + (taxRate / 100);
+
       const discountAmount = Number((target.currentPrice * (newPercent / 100)).toFixed(4));
+      const discountAmountWithTax = Number((discountAmount * taxMultiplier).toFixed(4));
       const finalPrice = Number(Math.max(0, target.currentPrice - discountAmount).toFixed(4));
+      const finalPriceWithTax = Number((finalPrice * taxMultiplier).toFixed(4));
+
       updated[indexInItems] = {
         ...target,
+        stock: prod?.stock ?? target.stock ?? 0,
+        taxRate,
         discountPercent: newPercent,
         discountAmount,
+        discountAmountWithTax,
         finalPrice,
+        finalPriceWithTax,
       };
       return updated;
     });
@@ -471,30 +518,48 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
         productName: 'BORRADOR GRANDE PZ 20',
         sku: '7703064446502',
         barcode: '7703064446502',
+        stock: 35,
+        unit: 'PZ',
+        taxRate: 15,
         currentPrice: 2.8156,
+        currentPriceWithTax: 3.2379,
         discountPercent: 10,
         discountAmount: 0.2816,
+        discountAmountWithTax: 0.3238,
         finalPrice: 2.5340,
+        finalPriceWithTax: 2.9141,
       },
       {
         productId: 'demo-2',
         productName: 'PINTURA MI NOTA LARGA X 12',
         sku: '7707323871147',
         barcode: '7707323871147',
+        stock: 12,
+        unit: 'UND',
+        taxRate: 15,
         currentPrice: 10.6080,
+        currentPriceWithTax: 12.1992,
         discountPercent: 10,
         discountAmount: 1.0608,
+        discountAmountWithTax: 1.2199,
         finalPrice: 9.5472,
+        finalPriceWithTax: 10.9793,
       },
       {
         productId: 'demo-3',
         productName: 'CERVEZA PILSENER 355ML',
         sku: '7861002700010',
         barcode: '7861002700010',
+        stock: 84,
+        unit: 'UND',
+        taxRate: 15,
         currentPrice: 1.2500,
+        currentPriceWithTax: 1.4375,
         discountPercent: 10,
         discountAmount: 0.1250,
+        discountAmountWithTax: 0.1438,
         finalPrice: 1.1250,
+        finalPriceWithTax: 1.2938,
       },
     ];
     setPromoItems(demoItems);
@@ -2138,26 +2203,40 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                               (p.barcode && p.barcode.toLowerCase().includes(promoSearchQuery.toLowerCase()))
                           )
                           .slice(0, 15)
-                          .map((prod) => (
-                            <button
-                              key={prod.id}
-                              type="button"
-                              onClick={() => handleAddProductToPromo(prod)}
-                              className="w-full text-left px-3 py-2.5 hover:bg-blue-50/80 transition flex items-center justify-between text-xs cursor-pointer group"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 group-hover:border-blue-300">
-                                  {prod.barcode || prod.sku}
-                                </span>
-                                <span className="font-bold text-slate-800 group-hover:text-blue-600">
-                                  {prod.name}
-                                </span>
-                              </div>
-                              <span className="font-mono font-bold text-emerald-600">
-                                ${prod.price?.toFixed(4) || '0.0000'}
-                              </span>
-                            </button>
-                          ))}
+                          .map((prod) => {
+                            const taxRate = typeof prod.taxRate === 'number' ? prod.taxRate : (settings?.defaultTaxRate ?? 15);
+                            const pvp = prod.price * (1 + taxRate / 100);
+                            return (
+                              <button
+                                key={prod.id}
+                                type="button"
+                                onClick={() => handleAddProductToPromo(prod)}
+                                className="w-full text-left px-3 py-2.5 hover:bg-blue-50/80 transition flex items-center justify-between text-xs cursor-pointer group"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200 group-hover:border-blue-300">
+                                    {prod.barcode || prod.sku}
+                                  </span>
+                                  <span className="font-bold text-slate-800 group-hover:text-blue-600">
+                                    {prod.name}
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    (prod.stock || 0) <= 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    Stock: {prod.stock || 0} {prod.unit || 'UND'}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-mono font-black text-emerald-600 block">
+                                    ${pvp.toFixed(2)}
+                                  </span>
+                                  <span className="text-[9px] font-medium text-slate-400 block">
+                                    P.V.P con IVA ({taxRate}%)
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
                         {products.filter(
                           (p) =>
                             (p.name && p.name.toLowerCase().includes(promoSearchQuery.toLowerCase())) ||
@@ -2221,25 +2300,26 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                 </div>
               </div>
 
-              {/* Row 3: Table matching screenshot */}
+              {/* Row 3: Table with Stock and Prices with IVA */}
               <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-[#24303f] text-white uppercase text-[11px] font-black tracking-wider">
                       <tr>
-                        <th className="py-2.5 px-3 text-center w-16">ELIMINAR</th>
-                        <th className="py-2.5 px-4 w-40">CÓDIGO</th>
-                        <th className="py-2.5 px-4">PRODUCTO</th>
-                        <th className="py-2.5 px-4 w-32">P. / ACTUAL</th>
-                        <th className="py-2.5 px-4 text-center w-48">DESCUENTO</th>
-                        <th className="py-2.5 px-4 w-32">T. / DSCTO</th>
-                        <th className="py-2.5 px-4 w-32">P. / FINAL</th>
+                        <th className="py-2.5 px-3 text-center w-14">ELIMINAR</th>
+                        <th className="py-2.5 px-3 w-36">CÓDIGO</th>
+                        <th className="py-2.5 px-3">PRODUCTO</th>
+                        <th className="py-2.5 px-3 text-center w-28">STOCK ACTUAL</th>
+                        <th className="py-2.5 px-3 text-right w-36">P. ACTUAL (CON IVA)</th>
+                        <th className="py-2.5 px-3 text-center w-36">DESCUENTO</th>
+                        <th className="py-2.5 px-3 text-right w-28">AHORRO</th>
+                        <th className="py-2.5 px-3 text-right w-36">P. FINAL (CON IVA)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {promoItems.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-12 text-center text-slate-400">
+                          <td colSpan={8} className="py-12 text-center text-slate-400">
                             <Tag className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                             <p className="font-bold text-slate-600">No hay productos agregados a la promoción</p>
                             <p className="text-[11px] text-slate-400 mt-1">
@@ -2259,6 +2339,22 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                           .slice((promoCurrentPage - 1) * promoPageSize, promoCurrentPage * promoPageSize)
                           .map((item, localIdx) => {
                             const actualIdx = (promoCurrentPage - 1) * promoPageSize + localIdx;
+                            const prod = products.find(
+                              (p) =>
+                                p.id === item.productId ||
+                                (item.barcode && p.barcode === item.barcode) ||
+                                (item.sku && p.sku === item.sku)
+                            );
+                            const currentStock = prod?.stock ?? item.stock ?? 0;
+                            const minStock = prod?.minStock ?? 5;
+                            const unit = prod?.unit || item.unit || 'UND';
+                            const taxRate = typeof prod?.taxRate === 'number' ? prod.taxRate : (item.taxRate ?? settings?.defaultTaxRate ?? 15);
+                            const taxMultiplier = 1 + (taxRate / 100);
+
+                            const currentPriceConIva = item.currentPriceWithTax ?? Number((item.currentPrice * taxMultiplier).toFixed(4));
+                            const finalPriceConIva = item.finalPriceWithTax ?? Number((item.finalPrice * taxMultiplier).toFixed(4));
+                            const discountAmountConIva = item.discountAmountWithTax ?? Number((item.discountAmount * taxMultiplier).toFixed(4));
+
                             return (
                               <tr key={item.productId || actualIdx} className="hover:bg-slate-50/80 transition">
                                 {/* ELIMINAR */}
@@ -2274,22 +2370,51 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                                 </td>
 
                                 {/* CÓDIGO */}
-                                <td className="py-2.5 px-4 font-mono text-slate-700 font-semibold text-[11px]">
+                                <td className="py-2.5 px-3 font-mono text-slate-700 font-semibold text-[11px]">
                                   {item.barcode || item.sku}
                                 </td>
 
                                 {/* PRODUCTO */}
-                                <td className="py-2.5 px-4 font-bold text-slate-900 uppercase">
-                                  {item.productName}
+                                <td className="py-2.5 px-3">
+                                  <div className="font-bold text-slate-900 uppercase">
+                                    {item.productName}
+                                  </div>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                      IVA {taxRate}%
+                                    </span>
+                                  </div>
                                 </td>
 
-                                {/* P. / ACTUAL */}
-                                <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
-                                  ${item.currentPrice.toFixed(4)}
+                                {/* STOCK ACTUAL */}
+                                <td className="py-2.5 px-3 text-center">
+                                  <span
+                                    className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-black border shadow-2xs ${
+                                      currentStock <= 0
+                                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                        : currentStock <= minStock
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    }`}
+                                    title={`Stock mínimo: ${minStock} ${unit}`}
+                                  >
+                                    {currentStock <= 0 ? '0' : currentStock}{' '}
+                                    <span className="text-[10px] font-sans font-bold opacity-75">{unit}</span>
+                                  </span>
+                                </td>
+
+                                {/* P. / ACTUAL (CON IVA) */}
+                                <td className="py-2.5 px-3 text-right">
+                                  <div className="font-mono font-black text-slate-900 text-xs">
+                                    ${currentPriceConIva.toFixed(2)}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400">
+                                    Sin IVA: ${item.currentPrice.toFixed(2)}
+                                  </div>
                                 </td>
 
                                 {/* DESCUENTO (STEPPER) */}
-                                <td className="py-2.5 px-4 text-center">
+                                <td className="py-2.5 px-3 text-center">
                                   <div className="inline-flex items-center gap-1.5 justify-center">
                                     <div className="inline-flex items-stretch border border-slate-300 rounded overflow-hidden bg-white shadow-xs">
                                       <button
@@ -2321,14 +2446,24 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                                   </div>
                                 </td>
 
-                                {/* T. / DSCTO */}
-                                <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
-                                  ${item.discountAmount.toFixed(4)}
+                                {/* T. / DSCTO (AHORRO) */}
+                                <td className="py-2.5 px-3 text-right">
+                                  <div className="font-mono font-black text-emerald-600 text-xs">
+                                    -${discountAmountConIva.toFixed(2)}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400">
+                                    Sin IVA: -${item.discountAmount.toFixed(2)}
+                                  </div>
                                 </td>
 
-                                {/* P. / FINAL */}
-                                <td className="py-2.5 px-4 font-mono font-bold text-blue-700">
-                                  ${item.finalPrice.toFixed(4)}
+                                {/* P. / FINAL (CON IVA) */}
+                                <td className="py-2.5 px-3 text-right">
+                                  <div className="font-mono font-black text-blue-700 text-sm">
+                                    ${finalPriceConIva.toFixed(2)}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400">
+                                    Sin IVA: ${item.finalPrice.toFixed(2)}
+                                  </div>
                                 </td>
                               </tr>
                             );

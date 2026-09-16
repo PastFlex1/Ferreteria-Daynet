@@ -212,17 +212,46 @@ function sendJson(res: any, statusCode: number, data: any) {
   res.end(JSON.stringify(data));
 }
 
-export function mongoBridgePlugin(): Plugin {
+const sseClients = new Set<any>();
+
+function broadcastSse(payload: any) {
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+export function viteMongoPlugin(): Plugin {
   return {
-    name: 'vite-plugin-mongo-bridge',
+    name: 'vite-mongo-bridge',
     configureServer(server) {
-      server.middlewares.use(async (req: any, res: any, next: any) => {
+      server.middlewares.use(async (req, res, next) => {
         const url = req.url || '';
         if (!url.startsWith('/api/mongo')) {
           return next();
         }
 
         const pathname = url.split('?')[0];
+
+        // 0. GET /api/mongo/events (Server-Sent Events for real-time LAN push)
+        if (pathname === '/api/mongo/events' && req.method === 'GET') {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.write('data: {"type":"connected"}\n\n');
+          sseClients.add(res);
+          req.on('close', () => {
+            sseClients.delete(res);
+          });
+          return;
+        }
 
         // 1. GET /api/mongo/status
         if (pathname === '/api/mongo/status' && req.method === 'GET') {
@@ -336,6 +365,9 @@ export function mongoBridgePlugin(): Plugin {
             // Also synchronize into friendly MongoDB Compass collection for clear inspection
             await syncToFriendlyCompassCollection(db, docId, body.data);
 
+            // Broadcast to all connected clients on LAN
+            broadcastSse({ type: 'doc_updated', docId, data: body.data });
+
             return sendJson(res, 200, { success: true, docId });
           } catch (error: any) {
             return sendJson(res, 500, { error: error.message });
@@ -360,6 +392,9 @@ export function mongoBridgePlugin(): Plugin {
               );
               await syncToFriendlyCompassCollection(db, docId, val);
             }
+
+            // Broadcast to all connected clients on LAN
+            broadcastSse({ type: 'all_synced', docIds });
 
             return sendJson(res, 200, {
               success: true,
@@ -399,3 +434,7 @@ export function mongoBridgePlugin(): Plugin {
     },
   };
 }
+
+export const mongoBridgePlugin = viteMongoPlugin;
+export default viteMongoPlugin;
+
