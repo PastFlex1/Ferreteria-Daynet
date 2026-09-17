@@ -1188,6 +1188,87 @@ export const ROLE_PRESETS: Record<string, { label: string; description: string; 
   },
 };
 
+// Interface para el catálogo extensible de roles dinámicos del sistema
+export interface SystemRole {
+  id: string;
+  name: string;
+  label: string;
+  description: string;
+  isSystem?: boolean;
+  color?: string; // ej: 'amber' | 'emerald' | 'cyan' | 'purple' | 'blue' | 'rose' | 'orange' | 'indigo'
+  permissions: PermissionMap;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Lista inicial de roles del sistema predeterminados
+export const DEFAULT_SYSTEM_ROLES: SystemRole[] = [
+  {
+    id: 'Administrador',
+    name: 'Administrador',
+    label: '👑 Administrador',
+    description: 'Acceso irrestricto y absoluto a todas las funciones, inputs, opciones y configuraciones del sistema.',
+    isSystem: true,
+    color: 'amber',
+    permissions: ROLE_PRESETS.Administrador.permissions,
+  },
+  {
+    id: 'Cajero',
+    name: 'Cajero',
+    label: '💳 Cajero / Facturador',
+    description: 'Enfocado en cobrar y emitir comprobantes en caja. Sin acceso a editar precios, ver costos ni anular sin permiso.',
+    isSystem: true,
+    color: 'emerald',
+    permissions: ROLE_PRESETS.Cajero.permissions,
+  },
+  {
+    id: 'Vendedor',
+    name: 'Vendedor',
+    label: '🛍️ Vendedor / Asesor Comercial',
+    description: 'Enfocado en consultar catálogo, hacer proformas y pedidos. No puede cobrar ni ver costos de compra.',
+    isSystem: true,
+    color: 'cyan',
+    permissions: ROLE_PRESETS.Vendedor.permissions,
+  },
+  {
+    id: 'Bodeguero',
+    name: 'Bodeguero',
+    label: '📦 Bodeguero / Almacén',
+    description: 'Gestión de existencias, transferencias, tomas físicas y recepción de compras. Sin acceso a caja ni costos.',
+    isSystem: true,
+    color: 'purple',
+    permissions: ROLE_PRESETS.Bodeguero.permissions,
+  },
+  {
+    id: 'Contador',
+    name: 'Contador',
+    label: '📊 Contador / Auditor',
+    description: 'Acceso a facturación, retenciones, compras, asientos contables, ATS y reportes financieros y tributarios.',
+    isSystem: true,
+    color: 'blue',
+    permissions: ROLE_PRESETS.Contador.permissions,
+  },
+];
+
+/**
+ * Combina las plantillas base del sistema con cualquier rol dinámico personalizado creado por el usuario.
+ */
+export function getCombinedRolePresets(customRoles?: SystemRole[]): Record<string, { label: string; description: string; permissions: PermissionMap; isSystem?: boolean; color?: string }> {
+  const result: Record<string, { label: string; description: string; permissions: PermissionMap; isSystem?: boolean; color?: string }> = { ...ROLE_PRESETS };
+  if (customRoles && Array.isArray(customRoles)) {
+    customRoles.forEach((r) => {
+      result[r.name] = {
+        label: r.label || r.name,
+        description: r.description || '',
+        permissions: r.permissions || {},
+        isSystem: !!r.isSystem,
+        color: r.color || 'cyan',
+      };
+    });
+  }
+  return result;
+}
+
 // Mapeo exhaustivo de TabType a código de permiso
 export const TAB_TO_PERMISSION_MAP: Record<string, string> = {
   // Ventas

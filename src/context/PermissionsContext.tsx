@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, ReactNode } from 'react';
 import { SystemUser } from '../types';
-import { ROLE_PRESETS, PermissionMap } from '../types/permissions';
+import { ROLE_PRESETS, PermissionMap, SystemRole, DEFAULT_SYSTEM_ROLES, getCombinedRolePresets } from '../types/permissions';
 import { Lock } from 'lucide-react';
 
 interface PermissionsContextType {
@@ -10,6 +10,7 @@ interface PermissionsContextType {
   isSuperAdmin: boolean;
   activeUser: SystemUser | null;
   userPermissions: PermissionMap;
+  rolesList: SystemRole[];
 }
 
 const PermissionsContext = createContext<PermissionsContextType>({
@@ -19,18 +20,21 @@ const PermissionsContext = createContext<PermissionsContextType>({
   isSuperAdmin: true,
   activeUser: null,
   userPermissions: {},
+  rolesList: DEFAULT_SYSTEM_ROLES,
 });
 
 interface PermissionsProviderProps {
   children: ReactNode;
   currentUser: any;
   usersList?: any[];
+  rolesList?: SystemRole[];
 }
 
 export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
   children,
   currentUser,
   usersList = [],
+  rolesList = DEFAULT_SYSTEM_ROLES,
 }) => {
   // Obtener la versión reactiva más fresca del usuario desde usersList de Firestore
   const activeUser = useMemo<SystemUser | null>(() => {
@@ -55,8 +59,12 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
       return ROLE_PRESETS.Administrador.permissions;
     }
 
-    // 1. Obtener la plantilla predeterminada según su rol asignado
-    const basePreset = ROLE_PRESETS[activeUser.role]?.permissions || {};
+    // 1. Obtener la plantilla según su rol asignado (soporta roles personalizados creados dinámicamente)
+    const combinedPresets = getCombinedRolePresets(rolesList);
+    const matchedRole = rolesList.find(
+      (r) => r.name.toLowerCase() === (activeUser.role || '').toLowerCase() || r.id === activeUser.role
+    );
+    const basePreset = matchedRole?.permissions || combinedPresets[activeUser.role]?.permissions || {};
 
     // 2. Aplicar sobreescrituras granulares personalizadas para este trabajador
     const customPermissions = activeUser.permissions || {};
@@ -65,7 +73,7 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
       ...basePreset,
       ...customPermissions,
     };
-  }, [activeUser, isSuperAdmin]);
+  }, [activeUser, isSuperAdmin, rolesList]);
 
   // Mapa de equivalencias entre accesos de navegación y acciones de módulo
   const PERMISSION_ALIASES: Record<string, string[]> = {
@@ -146,6 +154,7 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
         isSuperAdmin,
         activeUser,
         userPermissions,
+        rolesList,
       }}
     >
       {children}

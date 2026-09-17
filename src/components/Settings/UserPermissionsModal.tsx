@@ -20,7 +20,9 @@ import {
   PERMISSION_MODULES, 
   ROLE_PRESETS, 
   PermissionMap, 
-  PermissionDefinition 
+  PermissionDefinition,
+  SystemRole,
+  getCombinedRolePresets
 } from '../../types/permissions';
 import { SystemUser } from '../../types';
 
@@ -29,6 +31,7 @@ interface UserPermissionsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (userId: string, updatedPermissions: PermissionMap, newRole?: string) => void;
+  rolesList?: SystemRole[];
 }
 
 export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
@@ -36,12 +39,17 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  rolesList,
 }) => {
   if (!isOpen) return null;
 
+  const combinedPresets = useMemo(() => {
+    return getCombinedRolePresets(rolesList);
+  }, [rolesList]);
+
   // Inicializar estado local de permisos con valores booleanos explícitos para cada permiso del sistema
   const [permissions, setPermissions] = useState<PermissionMap>(() => {
-    const basePreset = ROLE_PRESETS[user.role]?.permissions || {};
+    const basePreset = combinedPresets[user.role]?.permissions || ROLE_PRESETS[user.role]?.permissions || {};
     const existing = user.permissions || {};
     const initialMap: PermissionMap = {};
     ALL_PERMISSIONS.forEach(p => {
@@ -129,7 +137,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
 
   // Cargar una plantilla de rol predeterminada
   const handleApplyPreset = (presetKey: string) => {
-    const preset = ROLE_PRESETS[presetKey];
+    const preset = combinedPresets[presetKey] || ROLE_PRESETS[presetKey];
     if (preset) {
       const newMap: PermissionMap = {};
       ALL_PERMISSIONS.forEach(p => {
@@ -223,7 +231,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
           </span>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            {Object.keys(ROLE_PRESETS).map((key) => {
+            {Object.keys(combinedPresets).map((key) => {
               const isSelected = selectedRole === key;
               return (
                 <button
@@ -236,7 +244,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-750 hover:text-white border border-slate-700/50'
                   }`}
                 >
-                  <span>{ROLE_PRESETS[key].label}</span>
+                  <span>{combinedPresets[key].label}</span>
                 </button>
               );
             })}

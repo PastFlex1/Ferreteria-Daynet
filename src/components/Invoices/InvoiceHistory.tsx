@@ -33,11 +33,13 @@ import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 import { usePermissions } from '../../context/PermissionsContext';
-
+import { initialProducts, initialCustomers } from '../../data/initialData';
 
 interface InvoiceHistoryProps {
   invoices: Invoice[];
   settings: StoreSettings;
+  products?: Product[];
+  customers?: Customer[];
   onOpenViewer: (invoice: Invoice) => void;
   onConvertQuoteToInvoice: (invoice: Invoice) => void;
   onUpdateInvoice?: (invoice: Invoice) => void;
@@ -49,6 +51,8 @@ interface InvoiceHistoryProps {
 export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   invoices,
   settings,
+  products: propsProducts,
+  customers: propsCustomers,
   onOpenViewer,
   onConvertQuoteToInvoice,
   onUpdateInvoice,
@@ -65,8 +69,10 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   const [sriStatusFilter, setSriStatusFilter] = useState<'TODOS' | 'AUTORIZADO' | 'PENDIENTE' | 'DEVUELTA'>('TODOS');
   
   // Data for editing quotes
-  const [products] = useFirestoreSync<Product[]>('ferreteria_products', []);
-  const [customers] = useFirestoreSync<Customer[]>('ferreteria_customers', []);
+  const [syncProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
+  const [syncCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
+  const products = propsProducts ?? syncProducts;
+  const customers = propsCustomers ?? syncCustomers;
   const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [editingQuote, setEditingQuote] = useState<Invoice | null>(null);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);

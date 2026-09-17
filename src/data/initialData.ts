@@ -89,11 +89,93 @@ export const CONSUMIDOR_FINAL: Customer = {
   currentBalance: 0,
 };
 
-export const initialCustomers: Customer[] = [];
-export const initialProducts: Product[] = [];
+export const initialCustomers: Customer[] = [
+  CONSUMIDOR_FINAL,
+  {
+    id: 'cust-1',
+    docType: 'RUC',
+    docNumber: '1792345678001',
+    name: 'Constructora del Valle Cía. Ltda.',
+    email: 'compras@valle.ec',
+    phone: '022345678',
+    address: 'Av. Simón Bolívar Km 4',
+    creditLimit: 5000,
+    currentBalance: 0
+  }
+];
+
+export const initialProducts: Product[] = [
+  {
+    id: 'prod-001',
+    sku: 'FER-001',
+    barcode: '786100123456',
+    name: 'Cemento Selvalegre 50kg',
+    category: 'Materiales de Construcción',
+    unit: 'SACO',
+    price: 8.50,
+    costPrice: 7.10,
+    stock: 150,
+    minStock: 20,
+    taxRate: 5,
+    allowFractional: false,
+    location: 'Bodega Principal - B01'
+  },
+  {
+    id: 'prod-002',
+    sku: 'FER-002',
+    barcode: '786100123457',
+    name: 'Varilla de Acero 12mm x 12m',
+    category: 'Hierros y Aceros',
+    unit: 'VARILLA',
+    price: 9.20,
+    costPrice: 7.80,
+    stock: 80,
+    minStock: 15,
+    taxRate: 5,
+    allowFractional: false,
+    location: 'Patio Hierros - H03'
+  },
+  {
+    id: 'prod-003',
+    sku: 'FER-003',
+    barcode: '786100123458',
+    name: 'Taladro Percutor DeWalt 1/2" 710W',
+    category: 'Herramientas Eléctricas',
+    unit: 'UNIDAD',
+    price: 85.00,
+    costPrice: 68.00,
+    stock: 12,
+    minStock: 3,
+    taxRate: 15,
+    allowFractional: false,
+    location: 'Vitrina 2 - Estante A'
+  },
+  {
+    id: 'prod-004',
+    sku: 'FER-004',
+    barcode: '786100123459',
+    name: 'Pintura Látex Supremo Blanco Galón',
+    category: 'Pinturas y Acabados',
+    unit: 'GALON',
+    price: 18.50,
+    costPrice: 14.20,
+    stock: 35,
+    minStock: 5,
+    taxRate: 15,
+    allowFractional: false,
+    location: 'Pasillo 4 - Tintes'
+  }
+];
+
 export const initialInvoices: Invoice[] = [];
 
-export const defaultCategories: ProductCategory[] = [];
+export const defaultCategories: ProductCategory[] = [
+  { id: 'cat-1', name: 'Materiales de Construcción', description: 'Cementos, arenas, bloques', color: '#f97316' },
+  { id: 'cat-2', name: 'Hierros y Aceros', description: 'Varillas, mallas, ángulos', color: '#64748b' },
+  { id: 'cat-3', name: 'Herramientas Eléctricas', description: 'Taladros, amoladoras, sierras', color: '#3b82f6' },
+  { id: 'cat-4', name: 'Pinturas y Acabados', description: 'Látex, esmaltes, brochas', color: '#10b981' },
+  { id: 'cat-5', name: 'Plomería y Grifería', description: 'Tubos PVC, accesorios, llaves', color: '#06b6d4' }
+];
 
 export const defaultAccountPlan = [
   { code: '1.0.00.00.00', name: 'ACTIVO', level: 1, type: 'ACTIVO', nature: 'DEUDORA', acceptsMovement: false, balance: 0 },

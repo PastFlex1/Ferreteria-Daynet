@@ -59,10 +59,11 @@ import { SriBackendService } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { UserPermissionsModal } from './UserPermissionsModal';
+import { RoleModal } from './RoleModal';
 
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
 import { MongoConnectorCard } from './MongoConnectorCard';
-import { ROLE_PRESETS, ALL_PERMISSIONS } from '../../types/permissions';
+import { ROLE_PRESETS, ALL_PERMISSIONS, SystemRole, DEFAULT_SYSTEM_ROLES } from '../../types/permissions';
 
 interface SettingsManagerProps {
   subTab: SettingsSubTab | 'SETTINGS';
@@ -71,6 +72,8 @@ interface SettingsManagerProps {
   onClearAllData?: () => void;
   usersList?: any[];
   setUsersList?: (users: any[] | ((prev: any[]) => any[])) => void;
+  rolesList?: SystemRole[];
+  setRolesList?: (roles: SystemRole[] | ((prev: SystemRole[]) => SystemRole[])) => void;
   currentUser?: any;
   setCurrentUser?: (user: any) => void;
 }
@@ -82,6 +85,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   onClearAllData,
   usersList: propUsersList,
   setUsersList: propSetUsersList,
+  rolesList: propRolesList,
+  setRolesList: propSetRolesList,
   currentUser,
   setCurrentUser,
 }) => {
@@ -142,10 +147,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     description: '',
   });
 
-  // Users Management State
+  // Users & Roles Management State
   const [internalUsersList, setInternalUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const usersList = propUsersList || internalUsersList;
   const setUsersList = propSetUsersList || setInternalUsersList;
+
+  const [internalRolesList, setInternalRolesList] = useFirestoreSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
+  const rolesList = propRolesList || internalRolesList;
+  const setRolesList = propSetRolesList || setInternalRolesList;
+
+  const [userSubTab, setUserSubTab] = useState<'users' | 'roles'>('users');
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [editingRole, setEditingRole] = useState<SystemRole | null>(null);
+
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
@@ -640,7 +654,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       );
       showToast('Usuario actualizado correctamente', 'success');
     } else {
-      const initialRolePermissions = ROLE_PRESETS[newUser.role]?.permissions || {};
+      const foundRole = rolesList.find(
+        (r) => r.name.toLowerCase() === newUser.role.toLowerCase() || r.id === newUser.role
+      );
+      const initialRolePermissions = foundRole?.permissions || ROLE_PRESETS[newUser.role]?.permissions || {};
       const newMap: Record<string, boolean> = {};
       ALL_PERMISSIONS.forEach(p => {
         newMap[p.id] = !!initialRolePermissions[p.id];
@@ -661,9 +678,57 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       ]);
       showToast('Usuario creado correctamente', 'success');
     }
-    setNewUser({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
+    setNewUser({ name: '', email: '', username: '', role: rolesList[0]?.name || 'Vendedor', password: '' });
     setEditingUser(null);
     setShowAddUserModal(false);
+  };
+
+  const handleSaveRole = (role: SystemRole) => {
+    const existingIndex = rolesList.findIndex(
+      (r) => r.id === role.id || r.name.toLowerCase() === role.name.toLowerCase()
+    );
+    if (existingIndex >= 0) {
+      const updated = [...rolesList];
+      updated[existingIndex] = role;
+      setRolesList(updated);
+      showToast(`Rol "${role.name}" actualizado correctamente.`, 'success');
+    } else {
+      setRolesList([...rolesList, role]);
+      showToast(`Rol "${role.name}" creado correctamente.`, 'success');
+      // Si el modal de usuario estaba abierto, seleccionarlo automáticamente
+      setNewUser((prev) => ({ ...prev, role: role.name }));
+    }
+  };
+
+  const handleDeleteRole = (role: SystemRole) => {
+    if (role.isSystem) {
+      showAlert('Este es un rol base del sistema y no puede ser eliminado.', 'Acción no permitida', 'warning');
+      return;
+    }
+
+    const assignedUsers = usersList.filter(
+      (u) => (u.role || '').toLowerCase() === role.name.toLowerCase()
+    );
+
+    if (assignedUsers.length > 0) {
+      showAlert(
+        `No se puede eliminar el rol "${role.name}" porque actualmente está asignado a ${assignedUsers.length} usuario(s) (${assignedUsers.map((u) => u.name).join(', ')}). Por favor, reasigne otro rol a estos trabajadores antes de eliminarlo.`,
+        'Rol en uso',
+        'warning'
+      );
+      return;
+    }
+
+    showConfirm(
+      `¿Está seguro de eliminar permanentemente el rol "${role.name}"? Los permisos definidos para este rol se descartarán.`,
+      () => {
+        setRolesList(rolesList.filter((r) => r.id !== role.id));
+        showToast(`Rol "${role.name}" eliminado correctamente.`, 'success');
+      },
+      'Confirmar eliminación',
+      'Eliminar Rol',
+      'Cancelar'
+    );
   };
 
   const handleEditUser = (user: any) => {
@@ -2128,126 +2193,311 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         </div>
       )}
 
-      {/* 6. USUARIOS */}
+      {/* 6. USUARIOS Y ROLES */}
       {currentTab === 'CFG_USUARIOS' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          {/* Header con Sub-tabs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div className="flex items-center space-x-3.5">
               <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-2xl border border-cyan-500/20">
                 <Users className="w-6 h-6" />
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">Gestión de Usuarios & Roles</h2>
-                <p className="text-xs text-slate-400 font-medium">Control de acceso, permisos y cuentas de cajeros y vendedores</p>
+                <p className="text-xs text-slate-400 font-medium">Control de acceso, perfiles de trabajo y permisos granulares del personal</p>
               </div>
             </div>
 
-            <button
-              onClick={() => {
-                setEditingUser(null);
-                setNewUser({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
-                setShowAddUserModal(true);
-              }}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>NUEVO USUARIO</span>
-            </button>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Selector de Sub-tab */}
+              <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setUserSubTab('users')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    userSubTab === 'users'
+                      ? 'bg-cyan-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Usuarios ({usersList.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserSubTab('roles')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    userSubTab === 'roles'
+                      ? 'bg-cyan-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Roles & Perfiles ({rolesList.length})</span>
+                </button>
+              </div>
+
+              {/* Botón de Acción Principal según sub-tab */}
+              {userSubTab === 'users' ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRole(null);
+                      setShowRoleModal(true);
+                    }}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>+ NUEVO ROL</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingUser(null);
+                      setNewUser({ name: '', email: '', username: '', role: rolesList[0]?.name || 'Vendedor', password: '' });
+                      setShowAddUserModal(true);
+                    }}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>NUEVO USUARIO</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setEditingRole(null);
+                    setShowRoleModal(true);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
+                >
+                  <Shield className="w-4 h-4" />
+                  <span>+ CREAR NUEVO ROL</span>
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-800">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
-                <tr>
-                  <th className="px-3 py-2.5">Usuario</th>
-                  <th className="px-3 py-2.5">Cédula / RUC</th>
-                  <th className="px-3 py-2.5">Rol</th>
-                  <th className="px-3 py-2.5 text-center">Estado</th>
-                  <th className="px-3 py-2.5 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-medium">
-                {usersList.map((u) => {
-                  const isActive = u.status === 'Activo';
-                  return (
-                    <tr key={u.id} className="hover:bg-slate-800/40 transition">
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-black shrink-0">
-                            {(u.name || '?').trim().charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-white truncate">{u.name}</div>
-                            <div className="text-[10px] text-slate-500 font-mono truncate">{u.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 font-mono text-amber-500 font-bold whitespace-nowrap">{u.username || 'N/A'}</td>
-                      <td className="px-3 py-2">
-                        <div className="space-y-0.5">
-                          <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap inline-block">
-                            {u.role}
-                          </span>
-                          {u.permissions && Object.keys(u.permissions).length > 0 && (
-                            <div className="text-[9px] font-mono text-orange-400 font-semibold flex items-center gap-1">
-                              <span>Personalizado ({Object.values(u.permissions).filter(Boolean).length} act.)</span>
+          {/* VISTA 1: TABLA DE USUARIOS */}
+          {userSubTab === 'users' && (
+            <div className="overflow-hidden rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="px-3 py-2.5">Usuario</th>
+                    <th className="px-3 py-2.5">Cédula / RUC</th>
+                    <th className="px-3 py-2.5">Rol Asignado</th>
+                    <th className="px-3 py-2.5 text-center">Estado</th>
+                    <th className="px-3 py-2.5 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-medium">
+                  {usersList.map((u) => {
+                    const isActive = u.status === 'Activo';
+                    const roleDef = rolesList.find(
+                      (r) => r.name.toLowerCase() === (u.role || '').toLowerCase() || r.id === u.role
+                    );
+
+                    return (
+                      <tr key={u.id} className="hover:bg-slate-800/40 transition">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-black shrink-0">
+                              {(u.name || '?').trim().charAt(0).toUpperCase()}
                             </div>
-                          )}
+                            <div className="min-w-0">
+                              <div className="font-bold text-white truncate">{u.name}</div>
+                              <div className="text-[10px] text-slate-500 font-mono truncate">{u.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 font-mono text-amber-500 font-bold whitespace-nowrap">{u.username || 'N/A'}</td>
+                        <td className="px-3 py-2">
+                          <div className="space-y-0.5">
+                            <span className="px-2.5 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap inline-flex items-center gap-1.5 shadow-sm">
+                              <span>{roleDef?.label || u.role}</span>
+                            </span>
+                            {u.permissions && Object.keys(u.permissions).length > 0 && (
+                              <div className="text-[9px] font-mono text-orange-400 font-semibold flex items-center gap-1">
+                                <span>Personalizado ({Object.values(u.permissions).filter(Boolean).length} act.)</span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleUserStatus(u)}
+                            title={isActive ? 'Deshabilitar usuario' : 'Habilitar usuario'}
+                            className={`relative inline-flex items-center w-9 h-4.5 rounded-full transition cursor-pointer ${
+                              isActive ? 'bg-emerald-500/80' : 'bg-slate-700'
+                            }`}
+                          >
+                            <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUserForPermissions(u);
+                                setShowPermissionsModal(true);
+                              }}
+                              title="Configurar Permisos Detallados del Trabajador"
+                              className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white rounded-lg transition text-[10px] font-black flex items-center gap-1 border border-orange-500/25 cursor-pointer shadow-sm"
+                            >
+                              <Shield className="w-3 h-3" />
+                              <span>Permisos</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEditUser(u)}
+                              title="Editar usuario"
+                              className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUser(u)}
+                              title="Eliminar usuario"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VISTA 2: CATÁLOGO DE ROLES & PERFILES */}
+          {userSubTab === 'roles' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <p>
+                  Defina perfiles y plantillas de acceso para el personal (cajeros, auditores, vendedores, bodegueros, supervisores). Al crear un usuario, heredará automáticamente los permisos de su rol asignado.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {rolesList.map((role) => {
+                  const assignedCount = usersList.filter(
+                    (u) => (u.role || '').toLowerCase() === role.name.toLowerCase() || u.role === role.id
+                  ).length;
+                  const activePermsCount = Object.values(role.permissions || {}).filter(Boolean).length;
+                  const totalPerms = ALL_PERMISSIONS.length;
+
+                  // Mapeo de colores
+                  const colorClassMap: Record<string, { bg: string; border: string; text: string }> = {
+                    amber: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400' },
+                    emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400' },
+                    cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', text: 'text-cyan-400' },
+                    purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400' },
+                    blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400' },
+                    rose: { bg: 'bg-rose-500/10', border: 'border-rose-500/30', text: 'text-rose-400' },
+                    orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400' },
+                    indigo: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', text: 'text-indigo-400' },
+                  };
+                  const theme = colorClassMap[role.color || 'cyan'] || colorClassMap.cyan;
+                  const emojiChar = role.label.match(/^(\p{Extended_Pictographic}|\S+)/u)?.[1] || '🛡️';
+
+                  return (
+                    <div
+                      key={role.id}
+                      className="bg-slate-950/70 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 flex flex-col justify-between space-y-4 transition shadow-md hover:shadow-xl group"
+                    >
+                      <div>
+                        {/* Header Tarjeta */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`w-9 h-9 rounded-xl ${theme.bg} border ${theme.border} ${theme.text} flex items-center justify-center text-base shrink-0 shadow-inner`}>
+                              {emojiChar}
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="font-bold text-white text-sm truncate flex items-center gap-1.5">
+                                <span>{role.name}</span>
+                              </h3>
+                              <span className="text-[10px] font-mono text-slate-500 block truncate">
+                                {role.id}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 border ${
+                              role.isSystem
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
+                            }`}
+                          >
+                            {role.isSystem ? 'Sistema' : 'Personalizado'}
+                          </span>
                         </div>
-                      </td>
-                      <td className="px-3 py-2 text-center">
+
+                        {/* Descripción */}
+                        <p className="text-xs text-slate-400 mt-3 line-clamp-2 min-h-[32px] leading-relaxed">
+                          {role.description || 'Sin descripción detallada para este rol.'}
+                        </p>
+
+                        {/* Stats */}
+                        <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-800/80 text-xs">
+                          <div className="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
+                            <span className="text-[10px] text-slate-500 font-medium block">Permisos Activos</span>
+                            <div className="font-bold text-white text-xs mt-0.5 flex items-center gap-1">
+                              <span className={theme.text}>{activePermsCount}</span>
+                              <span className="text-slate-500 text-[10px]">/ {totalPerms}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
+                            <span className="text-[10px] text-slate-500 font-medium block">Usuarios Asignados</span>
+                            <div className="font-bold text-white text-xs mt-0.5 flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>{assignedCount}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Botones de Acción */}
+                      <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2">
                         <button
                           type="button"
-                          onClick={() => handleToggleUserStatus(u)}
-                          title={isActive ? 'Deshabilitar usuario' : 'Habilitar usuario'}
-                          className={`relative inline-flex items-center w-9 h-4.5 rounded-full transition cursor-pointer ${
-                            isActive ? 'bg-emerald-500/80' : 'bg-slate-700'
-                          }`}
+                          onClick={() => {
+                            setEditingRole(role);
+                            setShowRoleModal(true);
+                          }}
+                          className="flex-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                         >
-                          <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} />
+                          <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Configurar Permisos</span>
                         </button>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center justify-end gap-1.5">
+
+                        {!role.isSystem && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setUserForPermissions(u);
-                              setShowPermissionsModal(true);
-                            }}
-                            title="Configurar Permisos Detallados del Trabajador"
-                            className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white rounded-lg transition text-[10px] font-black flex items-center gap-1 border border-orange-500/25 cursor-pointer shadow-sm"
-                          >
-                            <Shield className="w-3 h-3" />
-                            <span>Permisos</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleEditUser(u)}
-                            title="Editar usuario"
-                            className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteUser(u)}
-                            title="Eliminar usuario"
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                            onClick={() => handleDeleteRole(role)}
+                            title="Eliminar rol personalizado"
+                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-900 rounded-xl transition cursor-pointer border border-transparent hover:border-rose-500/30"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        </div>
-                      </td>
-
-                    </tr>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+          )}
 
-          {/* ADD USER MODAL (MODERNO & ELEGANTE) */}
+          {/* ADD / EDIT USER MODAL */}
           {showAddUserModal && (
             <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
               <div className="bg-slate-900 border border-slate-750/90 ring-1 ring-white/10 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative animate-in zoom-in-95 duration-200">
@@ -2262,7 +2512,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         {editingUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
                       </h3>
                       <p className="text-[11px] text-slate-400 font-medium">
-                        {editingUser ? 'Modifique las credenciales y permisos del usuario' : 'Asigne credenciales y roles de acceso para el personal'}
+                        {editingUser ? 'Modifique las credenciales y rol asignado al trabajador' : 'Asigne credenciales y perfil de rol para el trabajador'}
                       </p>
                     </div>
                   </div>
@@ -2282,19 +2532,17 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       <User className="w-3.5 h-3.5 text-cyan-400" />
                       <span>Nombre Completo *</span>
                     </label>
-                    <div className="relative">
-                      <input 
-                        type="text"
-                        required
-                        placeholder="ej: Alexander Palma"
-                        value={newUser.name}
-                        onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
-                      />
-                    </div>
+                    <input 
+                      type="text"
+                      required
+                      placeholder="ej: Alexander Palma"
+                      value={newUser.name}
+                      onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                      className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                    />
                   </div>
 
-                  {/* Grid: Cédula/RUC + Rol */}
+                  {/* Grid: Cédula/RUC + Rol Dinámico */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
                       <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
@@ -2334,19 +2582,45 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     </div>
 
                     <div>
-                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
-                        <Shield className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>Rol Asignado *</span>
-                      </label>
-                      <Select
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                          <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Rol Asignado *</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingRole(null);
+                            setShowRoleModal(true);
+                          }}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-0.5 cursor-pointer transition hover:underline"
+                          title="Crear un nuevo rol personalizado con permisos a medida"
+                        >
+                          <span>+ Crear Rol</span>
+                        </button>
+                      </div>
+                      <select
                         value={newUser.role}
                         onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                         className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-cyan-500 transition [color-scheme:dark]"
                       >
-                        <option value="Administrador">👑 Administrador</option>
-                        <option value="Cajero">💳 Cajero</option>
-                        <option value="Vendedor">🛍️ Vendedor</option>
-                      </Select>
+                        <optgroup label="Roles del Sistema">
+                          {rolesList.filter((r) => r.isSystem).map((r) => (
+                            <option key={r.id} value={r.name}>
+                              {r.label || r.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                        {rolesList.some((r) => !r.isSystem) && (
+                          <optgroup label="Roles Personalizados">
+                            {rolesList.filter((r) => !r.isSystem).map((r) => (
+                              <option key={r.id} value={r.name}>
+                                {r.label || r.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
                     </div>
                   </div>
 
@@ -2426,6 +2700,21 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 setUserForPermissions(null);
               }}
               onSave={handleSavePermissions}
+              rolesList={rolesList}
+            />
+          )}
+
+          {/* MODAL DE CREAR / EDITAR ROL */}
+          {showRoleModal && (
+            <RoleModal
+              isOpen={showRoleModal}
+              onClose={() => {
+                setShowRoleModal(false);
+                setEditingRole(null);
+              }}
+              onSave={handleSaveRole}
+              editingRole={editingRole}
+              existingRoles={rolesList}
             />
           )}
         </div>

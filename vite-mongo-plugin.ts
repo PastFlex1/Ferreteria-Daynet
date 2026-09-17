@@ -155,11 +155,19 @@ async function syncToFriendlyCompassCollection(db: any, docId: string, data: any
     const col = db.collection(friendlyName);
     if (Array.isArray(data)) {
       // Synchronize list items individually so Compass displays them as distinct documents
-      await col.deleteMany({});
       if (data.length > 0) {
+        await col.deleteMany({});
         const docsToInsert = data.map((item: any, index: number) => {
           const itemCopy = typeof item === 'object' && item !== null ? { ...item } : { value: item };
-          const customId = itemCopy.id || itemCopy.code || itemCopy.cedula || itemCopy.ruc || `item_${index + 1}`;
+          const customId = itemCopy.id || itemCopy.code || itemCopy.sku || itemCopy.cedula || itemCopy.ruc || `item_${index + 1}`;
+          
+          if (docId === 'ferreteria_products') {
+            if (itemCopy.sku && !itemCopy.code) itemCopy.code = itemCopy.sku;
+            if (itemCopy.code && !itemCopy.sku) itemCopy.sku = itemCopy.code;
+            if (itemCopy.costPrice !== undefined && itemCopy.cost === undefined) itemCopy.cost = itemCopy.costPrice;
+            if (itemCopy.cost !== undefined && itemCopy.costPrice === undefined) itemCopy.costPrice = itemCopy.cost;
+          }
+
           return {
             _id: String(customId),
             ...itemCopy,
@@ -261,10 +269,14 @@ export function viteMongoPlugin(): Plugin {
             await db.admin().ping();
             const cols = await db.listCollections().toArray();
             
-            // Count total docs in app_state
+            // Count total docs across all real collections in MongoDB
             let totalDocs = 0;
             try {
-              totalDocs = await db.collection('app_state').countDocuments();
+              for (const c of cols) {
+                if (!c.name.startsWith('system.')) {
+                  totalDocs += await db.collection(c.name).countDocuments();
+                }
+              }
             } catch {}
 
             return sendJson(res, 200, {
@@ -337,11 +349,61 @@ export function viteMongoPlugin(): Plugin {
             const db = client.db(currentDbName);
             const doc = await db.collection('app_state').findOne({ _id: docId } as any);
             
+            // If app_state has the document and it has content, return it
+            if (doc && doc.data !== undefined && (Array.isArray(doc.data) ? doc.data.length > 0 : true)) {
+              return sendJson(res, 200, { exists: true, data: doc.data, updatedAt: doc.updatedAt });
+            }
+
+            // Fallback: check friendly collection directly!
+            const friendlyName = getFriendlyCollectionName(docId);
+            if (friendlyName) {
+              const friendlyCol = db.collection(friendlyName);
+              const count = await friendlyCol.countDocuments();
+              if (count > 0) {
+                if (friendlyName === 'configuracion_empresa') {
+                  const confDoc = await friendlyCol.findOne({ _id: 'general_config' });
+                  if (confDoc) {
+                    const { _id, _syncedAt, ...cleanData } = confDoc;
+                    // Cache into app_state
+                    await db.collection('app_state').updateOne(
+                      { _id: docId } as any,
+                      { $set: { data: cleanData, updatedAt: new Date() } },
+                      { upsert: true }
+                    );
+                    return sendJson(res, 200, { exists: true, data: cleanData, updatedAt: _syncedAt || new Date() });
+                  }
+                } else {
+                  const items = await friendlyCol.find({}).toArray();
+                  const cleanItems = items.map((item: any) => {
+                    const { _syncedAt, ...clean } = item;
+                    clean.id = String(clean.id || clean._id);
+                    if (docId === 'ferreteria_products') {
+                      if (!clean.sku && clean.code) clean.sku = clean.code;
+                      if (!clean.code && clean.sku) clean.code = clean.sku;
+                      if (clean.costPrice === undefined && clean.cost !== undefined) clean.costPrice = clean.cost;
+                      if (clean.cost === undefined && clean.costPrice !== undefined) clean.cost = clean.costPrice;
+                    }
+                    return clean;
+                  });
+
+                  // Cache into app_state
+                  await db.collection('app_state').updateOne(
+                    { _id: docId } as any,
+                    { $set: { data: cleanItems, updatedAt: new Date() } },
+                    { upsert: true }
+                  );
+
+                  return sendJson(res, 200, { exists: true, data: cleanItems, updatedAt: new Date() });
+                }
+              }
+            }
+
+            // If it was explicitly empty in app_state, return it
             if (doc && doc.data !== undefined) {
               return sendJson(res, 200, { exists: true, data: doc.data, updatedAt: doc.updatedAt });
-            } else {
-              return sendJson(res, 200, { exists: false, data: null });
             }
+
+            return sendJson(res, 200, { exists: false, data: null });
           } catch (error: any) {
             return sendJson(res, 500, { error: error.message });
           }
@@ -418,10 +480,42 @@ export function viteMongoPlugin(): Plugin {
               result[String(d._id)] = d.data;
             }
 
+            // Also check all friendly collections for any collection missing or empty in app_state
+            for (const [docId, friendlyName] of Object.entries(COMPASS_COLLECTIONS)) {
+              if (!result[docId] || (Array.isArray(result[docId]) && result[docId].length === 0)) {
+                try {
+                  const friendlyCol = db.collection(friendlyName);
+                  const count = await friendlyCol.countDocuments();
+                  if (count > 0) {
+                    if (friendlyName === 'configuracion_empresa') {
+                      const confDoc = await friendlyCol.findOne({ _id: 'general_config' });
+                      if (confDoc) {
+                        const { _id, _syncedAt, ...cleanData } = confDoc;
+                        result[docId] = cleanData;
+                      }
+                    } else {
+                      const items = await friendlyCol.find({}).toArray();
+                      result[docId] = items.map((item: any) => {
+                        const { _syncedAt, ...clean } = item;
+                        clean.id = String(clean.id || clean._id);
+                        if (docId === 'ferreteria_products') {
+                          if (!clean.sku && clean.code) clean.sku = clean.code;
+                          if (!clean.code && clean.sku) clean.code = clean.sku;
+                          if (clean.costPrice === undefined && clean.cost !== undefined) clean.costPrice = clean.cost;
+                          if (clean.cost === undefined && clean.costPrice !== undefined) clean.cost = clean.costPrice;
+                        }
+                        return clean;
+                      });
+                    }
+                  }
+                } catch {}
+              }
+            }
+
             return sendJson(res, 200, {
               success: true,
               data: result,
-              count: docs.length
+              count: Object.keys(result).length
             });
           } catch (error: any) {
             return sendJson(res, 500, { error: error.message });

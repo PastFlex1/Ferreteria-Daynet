@@ -311,24 +311,48 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const fechaMatch = authXml.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
         const estadoMatch = authXml.match(/<estado>(.*?)<\/estado>/i);
         
-        // Extraer todos los mensajes y advertencias devueltos por el SRI
+        // Extraer todos los mensajes y advertencias devueltos por el SRI (manejando etiquetas anidadas <mensajes><mensaje><mensaje>...)
         const mensajesList: string[] = [];
-        const msgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
-        let m;
-        while ((m = msgRegex.exec(authXml)) !== null) {
-          const block = m[1];
-          const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
-          const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
-          const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
-          const tipoM = block.match(/<tipo>(.*?)<\/tipo>/i);
+        try {
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(authXml, 'text/xml');
+          const mensajesBlocks = xmlDoc.getElementsByTagName('mensajes');
+          for (let b = 0; b < mensajesBlocks.length; b++) {
+            const children = Array.from(mensajesBlocks[b].children);
+            for (const item of children) {
+              if (item.tagName.toLowerCase() === 'mensaje') {
+                const ident = item.getElementsByTagName('identificador')[0]?.textContent?.trim();
+                const innerMsg = Array.from(item.children).find(c => c.tagName.toLowerCase() === 'mensaje')?.textContent?.trim();
+                const info = item.getElementsByTagName('informacionAdicional')[0]?.textContent?.trim();
+                const tipo = item.getElementsByTagName('tipo')[0]?.textContent?.trim();
 
-          const idStr = identM ? `[Código ${identM[1]}] ` : '';
-          const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
-          const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
-          const tipoStr = tipoM ? ` (${tipoM[1]})` : '';
+                const idStr = ident ? `[Código ${ident}] ` : '';
+                const msgStr = innerMsg || '';
+                const infoStr = info ? ` — ${info}` : '';
+                const tipoStr = tipo ? ` (${tipo})` : '';
 
-          if (msgStr) {
-            mensajesList.push(`${idStr}${msgStr}${infoStr}${tipoStr}`);
+                if (msgStr || info || ident) {
+                  mensajesList.push(`${idStr}${msgStr}${infoStr}${tipoStr}`.trim());
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        if (mensajesList.length === 0) {
+          const regexMatches = /<identificador>(.*?)<\/identificador>[\s\S]*?<mensaje>(.*?)<\/mensaje>(?:[\s\S]*?<informacionAdicional>(.*?)<\/informacionAdicional>)?(?:[\s\S]*?<tipo>(.*?)<\/tipo>)?/gi;
+          let rm;
+          while ((rm = regexMatches.exec(authXml)) !== null) {
+            const ident = rm[1]?.trim();
+            const msg = rm[2]?.replace(/<[^>]+>/g, '').trim();
+            const info = rm[3]?.replace(/<[^>]+>/g, '').trim();
+            const tipo = rm[4]?.trim();
+            const idStr = ident ? `[Código ${ident}] ` : '';
+            const infoStr = info ? ` — ${info}` : '';
+            const tipoStr = tipo ? ` (${tipo})` : '';
+            if (msg || info || ident) {
+              mensajesList.push(`${idStr}${msg}${infoStr}${tipoStr}`.trim());
+            }
           }
         }
 

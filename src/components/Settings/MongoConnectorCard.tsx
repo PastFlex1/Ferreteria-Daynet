@@ -250,7 +250,7 @@ export const MongoConnectorCard: React.FC = () => {
               ¡MongoDB está enlazado en tiempo real con este computador!
             </p>
             <p className="text-emerald-700">
-              Base de Datos: <strong className="font-mono">{status.dbName}</strong> | Colecciones detectadas: <strong className="font-mono">{status.collections?.length || 0}</strong> ({status.collections?.join(', ') || 'sin colecciones aún'}).
+              Base de Datos: <strong className="font-mono">{status.dbName}</strong> | Registros totales: <strong className="font-mono">{status.totalDocs ?? 0}</strong> | Colecciones activas: <strong className="font-mono">{status.collections?.length || 0}</strong> ({status.collections?.slice(0, 8).join(', ')}{status.collections && status.collections.length > 8 ? ` y ${status.collections.length - 8} más...` : ''}).
             </p>
           </div>
         </div>

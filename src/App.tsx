@@ -20,7 +20,7 @@ import { HRManager } from './components/HR/HRManager';
 import { ReportsManager } from './components/Reports/ReportsManager';
 import { SplashScreen, ModuleSkeleton } from './components/UI/LoadingScreen';
 import { PermissionsProvider, usePermissions } from './context/PermissionsContext';
-import { TAB_TO_PERMISSION_MAP, DEFAULT_TAB_PRIORITY } from './types/permissions';
+import { TAB_TO_PERMISSION_MAP, DEFAULT_TAB_PRIORITY, SystemRole, DEFAULT_SYSTEM_ROLES } from './types/permissions';
 
 import { 
   AccountingSubTab,
@@ -178,6 +178,7 @@ export default function App() {
   const [secBoleta, setSecBoleta] = useFirestoreSync<string>('ferreteria_settings_sec_boleta', '000001');
   const [secQuote, setSecQuote] = useFirestoreSync<string>('ferreteria_settings_sec_quote', '000001');
   const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [rolesList, setRolesList] = useFirestoreSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
 
   const [currentUser, setCurrentUser] = useState<any>(() => {
     const saved = sessionStorage.getItem('ferreteria_current_user');
@@ -235,7 +236,7 @@ export default function App() {
 
   const [units, setUnits] = useFirestoreSync<any[]>('ferreteria_units', []);
   const [categories, setCategories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', []);
-  const [promotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
+  const [promotions, setPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
   const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
   const [products, setProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
   const [customers, setCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
@@ -698,7 +699,7 @@ export default function App() {
   }
 
   return (
-    <PermissionsProvider currentUser={currentUser} usersList={usersList}>
+    <PermissionsProvider currentUser={currentUser} usersList={usersList} rolesList={rolesList}>
       <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-orange-500 selection:text-white">
         {/* Left Sidebar + Top Topbar (both fixed/sticky, rendered by Header) */}
         <Header
@@ -756,6 +757,8 @@ export default function App() {
           <InvoiceHistory
             invoices={invoices}
             settings={settings}
+            products={products}
+            customers={allCustomers}
             onOpenViewer={handleOpenInvoiceViewer}
             onConvertQuoteToInvoice={handleConvertQuoteToInvoice}
             onUpdateInvoice={handleUpdateInvoice}
@@ -817,6 +820,8 @@ export default function App() {
             onUpdateUnits={setUnits}
             categories={categories}
             onUpdateCategories={setCategories}
+            promotions={promotions}
+            onUpdatePromotions={setPromotions}
             onSaveProduct={handleSaveProduct}
             onDeleteProduct={handleDeleteProduct}
             onStockAdjust={handleStockAdjust}
@@ -940,6 +945,10 @@ export default function App() {
           <ReportsManager
             subTab={activeTab as ReportsSubTab}
             settings={settings}
+            products={products}
+            invoices={invoices}
+            categories={categories}
+            cashSession={cashSession}
           />
         )}
 
@@ -976,6 +985,8 @@ export default function App() {
             onClearAllData={handleClearAllData}
             usersList={usersList}
             setUsersList={setUsersList}
+            rolesList={rolesList}
+            setRolesList={setRolesList}
             currentUser={currentUser}
             setCurrentUser={setCurrentUser}
           />

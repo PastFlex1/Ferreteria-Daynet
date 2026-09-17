@@ -52,11 +52,15 @@ import {
   Eye,
   ArrowLeftRight
 } from 'lucide-react';
-import { defaultEmployees, defaultUsersList } from '../../data/initialData';
+import { defaultEmployees, defaultUsersList, initialProducts, defaultCategories } from '../../data/initialData';
 
 interface ReportsManagerProps {
   subTab: ReportsSubTab;
   settings: StoreSettings;
+  products?: Product[];
+  invoices?: Invoice[];
+  categories?: ProductCategory[];
+  cashSession?: any;
 }
 
 // Executive Color Palette with HSL Precision
@@ -99,13 +103,20 @@ const CustomChartTooltip = ({ active, payload, label, prefix = '$', isCurrency =
   return null;
 };
 
-export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings }) => {
+export const ReportsManager: React.FC<ReportsManagerProps> = ({
+  subTab,
+  settings,
+  products: propsProducts,
+  invoices: propsInvoices,
+  categories: propsCategories,
+  cashSession: propsCashSession
+}) => {
   const { showAlert, showToast } = useModal();
 
   // Firestore Data Collections
-  const [invoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
-  const [products] = useFirestoreSync<Product[]>('ferreteria_products', []);
-  const [categories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', []);
+  const [syncInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
+  const [syncProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
+  const [syncCategories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', defaultCategories);
   const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
   const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
   const [sellers] = useFirestoreSync<any[]>('ferreteria_sellers', []);
@@ -113,7 +124,12 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({ subTab, settings
   const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
   const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [payrollRoles] = useFirestoreSync<any[]>('ferreteria_hr_payroll_roles', []);
-  const [cashSession] = useFirestoreSync<any>('ferreteria_cash_session', null);
+  const [syncCashSession] = useFirestoreSync<any>('ferreteria_cash_session', null);
+
+  const invoices = propsInvoices ?? syncInvoices;
+  const products = propsProducts ?? syncProducts;
+  const categories = propsCategories ?? syncCategories;
+  const cashSession = propsCashSession ?? syncCashSession;
   const [cashSessionsHistory] = useFirestoreSync<any[]>('ferreteria_cash_sessions_history', []);
   const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
   const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);

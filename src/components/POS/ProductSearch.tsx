@@ -20,12 +20,13 @@ import {
   Tag,
   LayoutGrid
 } from 'lucide-react';
-import { Category, Product, ProductCategory } from '../../types';
+import { Category, Product, ProductCategory, Promotion } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 
 interface ProductSearchProps {
   products: Product[];
   categories?: ProductCategory[];
+  promotions?: Promotion[];
   onAddToCart: (product: Product, qty?: number) => void;
   currencySymbol: string;
   defaultTaxRate?: number;
@@ -47,6 +48,7 @@ const CATEGORIES: { name: 'TODAS' | Category; icon: React.ReactNode; color?: str
 export const ProductSearch: React.FC<ProductSearchProps> = ({
   products,
   categories,
+  promotions = [],
   onAddToCart,
   currencySymbol,
   defaultTaxRate = 15,
@@ -55,6 +57,58 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<'TODAS' | Category>('TODAS');
   const [viewMode, setViewMode] = useState<'GRID' | 'LIST'>('GRID');
   const [addedProductId, setAddedProductId] = useState<string | null>(null);
+
+  // Helper para detectar promociones activas
+  const getActivePromoForProduct = (product: Product): Promotion | null => {
+    if (!promotions || promotions.length === 0) return null;
+    const now = new Date();
+    const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const applicablePromos: Promotion[] = [];
+
+    promotions.forEach((p) => {
+      if (p.status && p.status.trim().toUpperCase() !== 'ACTIVA') return;
+      const start = p.startDate ? p.startDate.split('T')[0].trim() : '';
+      const end = p.endDate ? p.endDate.split('T')[0].trim() : '';
+      if (start && start > todayLocal) return;
+      if (end && end < todayLocal) return;
+
+      if (p.items && p.items.length > 0) {
+        const itemMatch = p.items.find((it) => {
+          const matchId = it.productId && product.id && String(it.productId).trim() === String(product.id).trim();
+          const matchBarcode = it.barcode && product.barcode && String(it.barcode).trim() === String(product.barcode).trim();
+          const matchSku = it.sku && product.sku && String(it.sku).trim().toLowerCase() === String(product.sku).trim().toLowerCase();
+          const matchName = it.productName && product.name && String(it.productName).trim().toUpperCase() === String(product.name).trim().toUpperCase();
+          return matchId || matchBarcode || matchSku || matchName;
+        });
+        if (itemMatch) {
+          const itemDiscount = typeof itemMatch.discountPercent === 'number' ? itemMatch.discountPercent : p.discountPercent;
+          applicablePromos.push({
+            ...p,
+            discountPercent: itemDiscount,
+            name: p.name || `${itemDiscount}% OFF`,
+          });
+        }
+        return;
+      }
+
+      if (p.productId && String(p.productId).trim() === String(product.id).trim()) {
+        applicablePromos.push(p);
+        return;
+      }
+
+      if (p.appliedCategory && p.appliedCategory !== 'TODOS') {
+        if (product.category && p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase()) {
+          applicablePromos.push(p);
+        }
+        return;
+      }
+
+      applicablePromos.push(p);
+    });
+
+    if (applicablePromos.length === 0) return null;
+    return applicablePromos.reduce((best, p) => (p.discountPercent > best.discountPercent ? p : best));
+  };
 
   const dynamicCategories = useMemo(() => {
     const defaultList: { name: 'TODAS' | Category; icon: React.ReactNode; color?: string }[] = [
@@ -271,6 +325,10 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
               const stockPct = Math.min(100, Math.max(0, (product.stock / stockMax) * 100));
               const taxRate = typeof product.taxRate === 'number' ? product.taxRate : defaultTaxRate;
               const priceWithTax = product.price * (1 + taxRate / 100);
+              const promo = getActivePromoForProduct(product);
+              const discountPct = promo ? promo.discountPercent : 0;
+              const discountedPriceWithTax = promo ? priceWithTax * (1 - discountPct / 100) : priceWithTax;
+              const savings = promo ? priceWithTax - discountedPriceWithTax : 0;
 
               return (
                 <div
@@ -279,6 +337,8 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                   className={`group relative bg-white border rounded-2xl p-3.5 flex flex-col justify-between transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md ${
                     isOutStock
                       ? 'border-slate-200 opacity-60 pointer-events-none'
+                      : promo
+                      ? 'border-amber-300 ring-2 ring-amber-400/30 bg-gradient-to-b from-amber-50/40 to-white'
                       : isLowStock
                       ? 'border-amber-300/80 hover:border-orange-500 ring-1 ring-amber-200/60'
                       : 'border-slate-200/80 hover:border-orange-400'
@@ -293,6 +353,14 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                         {product.unit}
                       </span>
                     </div>
+
+                    {promo && (
+                      <div className="mb-1.5">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-xs animate-pulse">
+                          🔥 {promo.discountPercent}% OFF · {promo.name || promo.code}
+                        </span>
+                      </div>
+                    )}
 
                     <h3 className="text-xs font-black text-slate-900 group-hover:text-orange-600 transition line-clamp-2 mb-1.5 leading-snug">
                       {product.name}
@@ -343,12 +411,28 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-base font-black text-slate-900 font-mono tracking-tight">
-                          {formatCurrency(priceWithTax, currencySymbol)}
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono block">
-                          Sin IVA: {formatCurrency(product.price, currencySymbol)}
-                        </span>
+                        {promo ? (
+                          <div>
+                            <div className="text-[11px] text-slate-400 line-through font-mono">
+                              {formatCurrency(priceWithTax, currencySymbol)}
+                            </div>
+                            <div className="text-base font-black text-emerald-600 font-mono tracking-tight">
+                              {formatCurrency(discountedPriceWithTax, currencySymbol)}
+                            </div>
+                            <div className="text-[9px] text-rose-600 font-bold font-mono">
+                              Ahorro: -{formatCurrency(savings, currencySymbol)}
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-base font-black text-slate-900 font-mono tracking-tight">
+                              {formatCurrency(priceWithTax, currencySymbol)}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono block">
+                              Sin IVA: {formatCurrency(product.price, currencySymbol)}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <button
@@ -400,16 +484,28 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                   const isLowStock = product.stock <= product.minStock;
                   const taxRate = typeof product.taxRate === 'number' ? product.taxRate : defaultTaxRate;
                   const priceWithTax = product.price * (1 + taxRate / 100);
+                  const promo = getActivePromoForProduct(product);
+                  const discountPct = promo ? promo.discountPercent : 0;
+                  const discountedPriceWithTax = promo ? priceWithTax * (1 - discountPct / 100) : priceWithTax;
 
                   return (
                     <tr
                       key={product.id}
-                      className="hover:bg-slate-50 transition group cursor-pointer"
+                      className={`hover:bg-slate-50 transition group cursor-pointer ${
+                        promo ? 'bg-amber-50/40 border-l-4 border-l-amber-500' : ''
+                      }`}
                       onClick={() => onAddToCart(product)}
                     >
                       <td className="py-2.5 px-3 font-mono font-bold text-slate-600">{product.sku}</td>
                       <td className="py-2.5 px-3 font-black text-slate-900 group-hover:text-orange-600">
-                        {product.name}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{product.name}</span>
+                          {promo && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white animate-pulse">
+                              🔥 {promo.discountPercent}% OFF
+                            </span>
+                          )}
+                        </div>
                         {product.location && (
                           <span className="block text-[10px] text-slate-400 font-normal">
                             Ubicación: {product.location}
@@ -428,12 +524,25 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono">
-                        <div className="font-black text-slate-900 text-sm">
-                          {formatCurrency(priceWithTax, currencySymbol)}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          Sin IVA: {formatCurrency(product.price, currencySymbol)}
-                        </div>
+                        {promo ? (
+                          <div>
+                            <div className="text-[10px] text-slate-400 line-through">
+                              {formatCurrency(priceWithTax, currencySymbol)}
+                            </div>
+                            <div className="font-black text-emerald-600 text-sm">
+                              {formatCurrency(discountedPriceWithTax, currencySymbol)}
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-black text-slate-900 text-sm">
+                              {formatCurrency(priceWithTax, currencySymbol)}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              Sin IVA: {formatCurrency(product.price, currencySymbol)}
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 px-3 text-center">
                         <button

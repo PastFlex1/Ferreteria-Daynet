@@ -172,8 +172,17 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
 
   let tipoId = '05'; // Cédula por defecto
   const idStr = (data.cliente.identificacion || '').trim();
+  const nameUpper = (data.cliente.razonSocial || '').trim().toUpperCase();
 
-  if (idStr === '9999999999999' || data.cliente.razonSocial?.toUpperCase().includes('CONSUMIDOR FINAL')) {
+  if (
+    idStr === '9999999999999' ||
+    idStr === '9999999999' ||
+    nameUpper.includes('CONSUMIDOR FINAL') ||
+    nameUpper.includes('PUBLICO GENERAL') ||
+    nameUpper.includes('PÚBLICO GENERAL') ||
+    (data.cliente as any).tipoIdentificacion === '07' ||
+    (data.cliente as any).docType === 'Consumidor Final'
+  ) {
     tipoId = '07'; // Consumidor Final
   } else if (idStr.length === 13) {
     tipoId = '04'; // RUC
@@ -182,6 +191,11 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
   } else {
     tipoId = '06'; // Pasaporte
   }
+
+  // REGLA SRI: Si el comprador es Consumidor Final (07), la leyenda DEBE ser estrictamente "CONSUMIDOR FINAL" y la identificación "9999999999999" (Error 69 del SRI)
+  const esConsumidorFinal = tipoId === '07';
+  const razonSocialComprador = esConsumidorFinal ? 'CONSUMIDOR FINAL' : (data.cliente.razonSocial || 'CONSUMIDOR FINAL');
+  const identificacionComprador = esConsumidorFinal ? '9999999999999' : (data.cliente.identificacion || '9999999999999');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
   xml += `<factura id="comprobante" version="1.1.0">\n\n`;
@@ -205,8 +219,8 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
   xml += `        <dirEstablecimiento>${escapeXml(data.dirMatriz || 'Ecuador')}</dirEstablecimiento>\n`;
   xml += `        <obligadoContabilidad>${data.obligadoContabilidad || 'NO'}</obligadoContabilidad>\n`;
   xml += `        <tipoIdentificacionComprador>${tipoId}</tipoIdentificacionComprador>\n`;
-  xml += `        <razonSocialComprador>${escapeXml(data.cliente.razonSocial || 'CONSUMIDOR FINAL')}</razonSocialComprador>\n`;
-  xml += `        <identificacionComprador>${data.cliente.identificacion || '9999999999999'}</identificacionComprador>\n`;
+  xml += `        <razonSocialComprador>${escapeXml(razonSocialComprador)}</razonSocialComprador>\n`;
+  xml += `        <identificacionComprador>${identificacionComprador}</identificacionComprador>\n`;
   xml += `        <direccionComprador>${escapeXml(data.cliente.direccion || 'S/N')}</direccionComprador>\n`;
   xml += `        <totalSinImpuestos>${safe(subtotalTotal).toFixed(2)}</totalSinImpuestos>\n`;
   xml += `        <totalDescuento>${safe(totalDescuentoCalculado).toFixed(2)}</totalDescuento>\n\n`;
@@ -566,7 +580,17 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
 
   let tipoId = '05';
   const idStr = (data.cliente.identificacion || '').trim();
-  if (idStr === '9999999999999' || data.cliente.razonSocial?.toUpperCase().includes('CONSUMIDOR FINAL')) {
+  const nameUpper = (data.cliente.razonSocial || '').trim().toUpperCase();
+
+  if (
+    idStr === '9999999999999' ||
+    idStr === '9999999999' ||
+    nameUpper.includes('CONSUMIDOR FINAL') ||
+    nameUpper.includes('PUBLICO GENERAL') ||
+    nameUpper.includes('PÚBLICO GENERAL') ||
+    (data.cliente as any).tipoIdentificacion === '07' ||
+    (data.cliente as any).docType === 'Consumidor Final'
+  ) {
     tipoId = '07';
   } else if (idStr.length === 13) {
     tipoId = '04';
@@ -575,6 +599,11 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
   } else {
     tipoId = '06';
   }
+
+  // REGLA SRI: Si el comprador es Consumidor Final (07), la leyenda DEBE ser estrictamente "CONSUMIDOR FINAL" y la identificación "9999999999999" (Error 69 del SRI)
+  const esConsumidorFinal = tipoId === '07';
+  const razonSocialComprador = esConsumidorFinal ? 'CONSUMIDOR FINAL' : (data.cliente.razonSocial || 'CONSUMIDOR FINAL');
+  const identificacionComprador = esConsumidorFinal ? '9999999999999' : (data.cliente.identificacion || '9999999999999');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
   xml += `<notaCredito id="comprobante" version="1.1.0">\n\n`;
@@ -597,8 +626,8 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
   xml += `        <fechaEmision>${data.fechaEmision}</fechaEmision>\n`;
   xml += `        <dirEstablecimiento>${escapeXml(data.dirMatriz || 'Ecuador')}</dirEstablecimiento>\n`;
   xml += `        <tipoIdentificacionComprador>${tipoId}</tipoIdentificacionComprador>\n`;
-  xml += `        <razonSocialComprador>${escapeXml(data.cliente.razonSocial || 'CONSUMIDOR FINAL')}</razonSocialComprador>\n`;
-  xml += `        <identificacionComprador>${data.cliente.identificacion || '9999999999999'}</identificacionComprador>\n`;
+  xml += `        <razonSocialComprador>${escapeXml(razonSocialComprador)}</razonSocialComprador>\n`;
+  xml += `        <identificacionComprador>${identificacionComprador}</identificacionComprador>\n`;
   xml += `        <obligadoContabilidad>${data.obligadoContabilidad || 'NO'}</obligadoContabilidad>\n`;
   xml += `        <codDocModificado>01</codDocModificado>\n`;
   xml += `        <numDocModificado>${data.facturaModificada.numero}</numDocModificado>\n`;

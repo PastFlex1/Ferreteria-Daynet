@@ -76,6 +76,8 @@ interface InventoryModuleViewProps {
   onUpdateUnits: (units: any[]) => void;
   categories?: ProductCategory[];
   onUpdateCategories?: (categories: ProductCategory[]) => void;
+  promotions?: Promotion[];
+  onUpdatePromotions?: (promotions: Promotion[] | ((prev: Promotion[]) => Promotion[])) => void;
 }
 
 // Promotion type is imported from '../../types'
@@ -201,7 +203,9 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   units,
   onUpdateUnits,
   categories,
-  onUpdateCategories
+  onUpdateCategories,
+  promotions: propPromotions,
+  onUpdatePromotions
 }) => {
   const { showAlert, showToast, showConfirm } = useModal();
   const currentCategories = categories || [];
@@ -338,8 +342,10 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     return maxCount > 0 ? `${maxCat} (${maxCount})` : currentCategories[0].name;
   }, [currentCategories, products]);
 
-  // 1. Promociones State (persisted in Firestore so POS can read them)
-  const [promotions, setPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
+  // 1. Promociones State (Sincronizado a nivel global con el POS de facturación)
+  const [internalPromotions, setInternalPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
+  const promotions = propPromotions ?? internalPromotions;
+  const setPromotions = onUpdatePromotions ?? setInternalPromotions;
   const [isCreatingPromo, setIsCreatingPromo] = useState(false);
   const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
   const [promoName, setPromoName] = useState('Campaña Promocional');

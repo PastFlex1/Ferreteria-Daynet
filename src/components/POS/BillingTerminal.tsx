@@ -79,6 +79,93 @@ interface BillingTerminalProps {
   onOpenCashRegister?: (initialCash: number) => void;
 }
 
+interface DecimalInputProps {
+  value: number;
+  onChange: (val: number) => void;
+  onBlurFallback?: number;
+  className?: string;
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  allowEmpty?: boolean;
+}
+
+const DecimalInput: React.FC<DecimalInputProps> = ({
+  value,
+  onChange,
+  onBlurFallback,
+  className,
+  min = 0,
+  max,
+  placeholder,
+  allowEmpty = false,
+}) => {
+  const [localText, setLocalText] = useState<string>(() => {
+    if (value === 0 && allowEmpty) return '';
+    return String(value);
+  });
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      if (value === 0 && allowEmpty) {
+        setLocalText('');
+      } else {
+        setLocalText(String(value));
+      }
+    }
+  }, [value, isFocused, allowEmpty]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={localText}
+      onFocus={(e) => {
+        setIsFocused(true);
+        e.target.select();
+      }}
+      onChange={(e) => {
+        let raw = e.target.value.replace(',', '.');
+
+        if (!/^[0-9]*\.?[0-9]*$/.test(raw)) {
+          return;
+        }
+
+        setLocalText(raw);
+
+        if (raw === '' || raw === '.') {
+          if (allowEmpty) {
+            onChange(0);
+          }
+          return;
+        }
+
+        const num = parseFloat(raw);
+        if (!isNaN(num)) {
+          if (max !== undefined && num > max) return;
+          onChange(num);
+        }
+      }}
+      onBlur={() => {
+        setIsFocused(false);
+        const clean = localText.replace(',', '.').trim();
+        const num = parseFloat(clean);
+        if (isNaN(num) || (onBlurFallback !== undefined && onBlurFallback > 0 && num <= 0)) {
+          const fallback = onBlurFallback !== undefined ? onBlurFallback : (allowEmpty ? 0 : 1);
+          setLocalText(fallback === 0 && allowEmpty ? '' : String(fallback));
+          onChange(fallback);
+        } else {
+          setLocalText(String(num));
+          onChange(num);
+        }
+      }}
+      className={className}
+    />
+  );
+};
+
 export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   products,
   customers,
@@ -296,36 +383,56 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   }, [cartItems]);
 
   // Promotion calculation helper
-  const getActivePromoForProduct = (product: Product, qty: number): Promotion | null => {
-    const today = new Date().toISOString().split('T')[0];
+  const getActivePromoForProduct = (product: Product, qty: number = 1): Promotion | null => {
+    if (!promotions || promotions.length === 0) return null;
+
+    // Obtener fecha local YYYY-MM-DD para evitar desfases de zona horaria con UTC
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const todayLocal = `${year}-${month}-${day}`;
+
     const applicablePromos: Promotion[] = [];
 
-    promotions.forEach(p => {
-      if (p.status !== 'ACTIVA') return;
-      if (p.startDate && p.startDate > today) return;
-      if (p.endDate && p.endDate < today) return;
+    promotions.forEach((p) => {
+      // Estado activo (insensible a mayúsculas/minúsculas)
+      if (p.status && p.status.trim().toUpperCase() !== 'ACTIVA') return;
+
+      // Fechas de vigencia
+      const start = p.startDate ? p.startDate.split('T')[0].trim() : '';
+      const end = p.endDate ? p.endDate.split('T')[0].trim() : '';
+      if (start && start > todayLocal) return;
+      if (end && end < todayLocal) return;
+
+      // Cantidad mínima requerida
       if (qty < (p.minQuantity || 1)) return;
 
       // 1. Si la promoción tiene lista detallada de productos (items)
       if (p.items && p.items.length > 0) {
-        const itemMatch = p.items.find(it => 
-          it.productId === product.id || 
-          (product.barcode && it.barcode === product.barcode) ||
-          (product.sku && it.sku === product.sku)
-        );
+        const itemMatch = p.items.find((it) => {
+          const matchId = it.productId && product.id && String(it.productId).trim() === String(product.id).trim();
+          const matchBarcode = it.barcode && product.barcode && String(it.barcode).trim() === String(product.barcode).trim();
+          const matchSku = it.sku && product.sku && String(it.sku).trim().toLowerCase() === String(product.sku).trim().toLowerCase();
+          const matchName = it.productName && product.name && String(it.productName).trim().toUpperCase() === String(product.name).trim().toUpperCase();
+          return matchId || matchBarcode || matchSku || matchName;
+        });
+
         if (itemMatch) {
+          const itemDiscount = typeof itemMatch.discountPercent === 'number' ? itemMatch.discountPercent : p.discountPercent;
           applicablePromos.push({
             ...p,
-            discountPercent: itemMatch.discountPercent,
-            name: p.name || `${itemMatch.discountPercent}% OFF`
+            discountPercent: itemDiscount,
+            name: p.name || `${itemDiscount}% OFF`,
           });
-          return;
         }
+        // Si la campaña tenía lista de productos y este producto no está en ella, no continúa a general
+        return;
       }
 
       // 2. Coincidencia por producto específico
       if (p.productId) {
-        if (p.productId === product.id) {
+        if (String(p.productId).trim() === String(product.id).trim()) {
           applicablePromos.push(p);
         }
         return;
@@ -333,20 +440,18 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
       // 3. Coincidencia por categoría
       if (p.appliedCategory && p.appliedCategory !== 'TODOS') {
-        if (p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase()) {
+        if (product.category && p.appliedCategory.trim().toLowerCase() === product.category.trim().toLowerCase()) {
           applicablePromos.push(p);
         }
         return;
       }
 
-      // 4. Promoción general
-      if (!p.items || p.items.length === 0) {
-        applicablePromos.push(p);
-      }
+      // 4. Promoción general (para todos los productos)
+      applicablePromos.push(p);
     });
 
     if (applicablePromos.length === 0) return null;
-    return applicablePromos.reduce((best, p) => p.discountPercent > best.discountPercent ? p : best);
+    return applicablePromos.reduce((best, p) => (p.discountPercent > best.discountPercent ? p : best));
   };
 
   // Helper for Price Scales
@@ -396,6 +501,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       };
 
       if (existing) {
+        if (promo && !existing.appliedPromo) {
+          setTimeout(() => showToast(`🏷️ Promo aplicada: ${promo.name} (${promo.discountPercent}% OFF)`, 'success'), 0);
+        }
         return prev.map((item) => (item.product.id === product.id ? updatedItem : item));
       } else {
         if (promo) {
@@ -416,8 +524,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         const baseUnitPrice = getPriceForQuantity(item.product, newQty);
 
         const promo = getActivePromoForProduct(item.product, newQty);
-        const discountPct = promo ? Math.max(promo.discountPercent, item.discountPercent) : item.discountPercent;
-        const appliedPromo = promo ? `${promo.code} · ${promo.discountPercent}% OFF` : item.appliedPromo;
+        let discountPct = item.discountPercent;
+        let appliedPromo = item.appliedPromo;
+        if (promo) {
+          discountPct = Math.max(promo.discountPercent, item.discountPercent);
+          appliedPromo = `${promo.code} · ${promo.discountPercent}% OFF`;
+        } else if (item.appliedPromo) {
+          // Si ya no cumple la promoción (por ej. cantidad reducida)
+          discountPct = 0;
+          appliedPromo = undefined;
+        }
 
         const itemSubtotal = newQty * baseUnitPrice;
         const itemDiscountAmount = itemSubtotal * (discountPct / 100);
@@ -1194,8 +1310,13 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 {/* Product Search Dropdown */}
                 {isProductDropdownOpen && (
                   <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-40 max-h-72 overflow-y-auto custom-scrollbar p-1.5 animate-fadeIn">
-                    <div className="px-2.5 py-1 text-[10px] uppercase font-black tracking-wider text-slate-400 border-b border-slate-100">
-                      Productos Disponibles ({filteredProducts.length})
+                    <div className="px-2.5 py-1.5 text-[10px] uppercase font-black tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+                      <span>Productos Disponibles ({filteredProducts.length})</span>
+                      {promotions.filter((p) => p.status === 'ACTIVA').length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 font-black text-[9px]">
+                          🔥 {promotions.filter((p) => p.status === 'ACTIVA').length} Promoción(es) activa(s)
+                        </span>
+                      )}
                     </div>
 
                     {filteredProducts.length === 0 ? (
@@ -1218,6 +1339,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         const taxRate = typeof p.taxRate === 'number' ? p.taxRate : (settings.defaultTaxRate ?? 15);
                         const priceWithTax = p.price * (1 + taxRate / 100);
                         const promo = getActivePromoForProduct(p, 1);
+                        const discountPct = promo ? promo.discountPercent : 0;
+                        const discountedPriceWithTax = promo ? priceWithTax * (1 - discountPct / 100) : priceWithTax;
+                        const savings = promo ? priceWithTax - discountedPriceWithTax : 0;
 
                         return (
                           <button
@@ -1228,19 +1352,23 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                               setProductSearch('');
                               setIsProductDropdownOpen(false);
                             }}
-                            className="w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between hover:bg-slate-50 transition cursor-pointer border-b border-slate-50 last:border-none"
+                            className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer border-b border-slate-50 last:border-none ${
+                              promo
+                                ? 'bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-transparent hover:bg-amber-100/60 border-l-4 border-l-amber-500'
+                                : 'hover:bg-slate-50'
+                            }`}
                           >
-                            <div>
+                            <div className="space-y-1">
                               <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                                 <span>{p.name}</span>
                                 <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
                                 {promo && (
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse">
-                                    🏷️ {promo.discountPercent}% OFF
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-xs animate-pulse">
+                                    🔥 PROMO: {promo.discountPercent}% OFF · {promo.name || promo.code}
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
+                              <div className="text-[10px] text-slate-500 flex items-center gap-2 flex-wrap">
                                 <span>Cat: {p.category}</span>
                                 <span>•</span>
                                 <span className={p.stock <= p.minStock ? 'text-rose-600 font-bold' : 'text-slate-600'}>
@@ -1248,15 +1376,39 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                 </span>
                                 <span>•</span>
                                 <span className="font-bold text-orange-600">IVA: {taxRate}%</span>
+                                {promo && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      Ahorras: {formatCurrency(savings, settings.currencySymbol)}
+                                    </span>
+                                  </>
+                                )}
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="text-sm font-black font-mono text-slate-900">
-                                {formatCurrency(priceWithTax, settings.currencySymbol)}
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                Sin IVA: {formatCurrency(p.price, settings.currencySymbol)}
-                              </div>
+                            <div className="text-right pl-3 shrink-0">
+                              {promo ? (
+                                <div>
+                                  <div className="text-[11px] text-slate-400 line-through font-mono">
+                                    {formatCurrency(priceWithTax, settings.currencySymbol)}
+                                  </div>
+                                  <div className="text-sm font-black font-mono text-emerald-600">
+                                    {formatCurrency(discountedPriceWithTax, settings.currencySymbol)}
+                                  </div>
+                                  <div className="text-[9px] text-rose-600 font-bold font-mono">
+                                    -{promo.discountPercent}% en caja
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div className="text-sm font-black font-mono text-slate-900">
+                                    {formatCurrency(priceWithTax, settings.currencySymbol)}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-mono">
+                                    Sin IVA: {formatCurrency(p.price, settings.currencySymbol)}
+                                  </div>
+                                </div>
+                              )}
                               <span className="block text-[10px] text-emerald-600 font-bold mt-0.5">
                                 + Agregar
                               </span>
@@ -1334,13 +1486,15 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         {/* Descripción */}
                         <td className="py-2.5 px-3">
                           <div className="font-bold text-slate-900 leading-tight">{item.product.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
                             <span>SKU: {item.product.sku}</span>
                             {item.product.stock !== undefined && (
                               <span className="text-slate-500">Stock: {item.product.stock} {item.product.unit}</span>
                             )}
                             {item.appliedPromo && (
-                              <span className="text-emerald-700 bg-emerald-50 px-1 rounded font-bold">{item.appliedPromo}</span>
+                              <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100/90 border border-emerald-300 px-1.5 py-0.5 rounded font-black text-[10px] shadow-2xs">
+                                🔥 {item.appliedPromo}
+                              </span>
                             )}
                           </div>
                         </td>
@@ -1358,28 +1512,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                             >
                               -
                             </button>
-                            <input
-                              type="number"
-                              step="any"
-                              min="0.0001"
-                              value={item.quantity === 0 ? '' : item.quantity}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === '') {
-                                  handleUpdateQuantity(item.product.id, 0);
-                                } else {
-                                  const num = parseFloat(val);
-                                  if (!isNaN(num)) {
-                                    handleUpdateQuantity(item.product.id, num);
-                                  }
-                                }
-                              }}
-                              onBlur={(e) => {
-                                const num = parseFloat(e.target.value);
-                                if (isNaN(num) || num <= 0) {
-                                  handleUpdateQuantity(item.product.id, 1);
-                                }
-                              }}
+                            <DecimalInput
+                              value={item.quantity}
+                              onChange={(newQty) => handleUpdateQuantity(item.product.id, newQty)}
+                              onBlurFallback={1}
+                              min={0.0001}
                               className="w-14 text-center font-black font-mono border border-slate-200 rounded py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
                             />
                             <button
@@ -1397,15 +1534,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
                         {/* Precio Unitario */}
                         <td className="py-2.5 px-2 text-right">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                          <DecimalInput
                             value={item.unitPrice}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              handleUpdateUnitPrice(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
-                            }}
+                            onChange={(newPrice) => handleUpdateUnitPrice(item.product.id, newPrice)}
+                            onBlurFallback={0}
+                            min={0}
                             className="w-20 text-right font-bold font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:ring-1 focus:ring-orange-500 focus:outline-none"
                           />
                         </td>
@@ -1461,18 +1594,26 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
                         {/* Descuento */}
                         <td className="py-2.5 px-2 text-center">
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            max="100"
-                            value={item.discountPercent || 0}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              handleUpdateDiscount(item.product.id, val === '' ? 0 : parseFloat(val) || 0);
-                            }}
-                            className="w-12 text-center font-bold font-mono border border-slate-200 rounded px-1 py-0.5 text-xs text-slate-800 focus:ring-1 focus:ring-orange-500 focus:outline-none"
-                          />
+                          <div className="flex flex-col items-center">
+                            <DecimalInput
+                              value={item.discountPercent || 0}
+                              onChange={(newDisc) => handleUpdateDiscount(item.product.id, newDisc)}
+                              allowEmpty={true}
+                              min={0}
+                              max={100}
+                              placeholder="0"
+                              className={`w-14 text-center font-bold font-mono border rounded px-1 py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none ${
+                                item.discountPercent > 0
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-black ring-1 ring-emerald-200'
+                                  : 'border-slate-200 text-slate-800'
+                              }`}
+                            />
+                            {item.discountPercent > 0 && (
+                              <span className="text-[9px] font-black text-emerald-700 mt-0.5">
+                                {item.appliedPromo ? '🏷️ Promo' : '% desc.'}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Valor Total */}
@@ -1857,12 +1998,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   $
                 </span>
                 <input
-                  type="number"
-                  step="any"
-                  min="0"
+                  type="text"
+                  inputMode="decimal"
                   placeholder={sriBreakdown.valorAPagar > 0 ? sriBreakdown.valorAPagar.toFixed(2) : "0.00"}
                   value={cashAmountTendered}
-                  onChange={(e) => setCashAmountTendered(e.target.value)}
+                  onChange={(e) => {
+                    const clean = e.target.value.replace(',', '.');
+                    if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
+                      setCashAmountTendered(clean);
+                    }
+                  }}
                   className="w-full pl-8 pr-8 py-2 bg-slate-50 border border-slate-200 text-slate-950 font-mono font-black text-lg rounded-2xl focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none transition shadow-2xs"
                 />
                 {cashAmountTendered && (
@@ -1981,6 +2126,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
               <ProductSearch
                 products={products}
                 categories={categories}
+                promotions={promotions}
                 onAddToCart={(p, q) => {
                   handleAddToCart(p, q || 1);
                   showToast(`"${p.name}" agregado al detalle.`, 'success');
@@ -2039,24 +2185,32 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Precio Unit. ($)</label>
                   <input
-                    type="number"
-                    step="any"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     required
                     value={customPrice}
-                    onChange={(e) => setCustomPrice(e.target.value)}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(',', '.');
+                      if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
+                        setCustomPrice(clean);
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad</label>
                   <input
-                    type="number"
-                    step="any"
-                    min="0.0001"
+                    type="text"
+                    inputMode="decimal"
                     required
                     value={customQty}
-                    onChange={(e) => setCustomQty(e.target.value)}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(',', '.');
+                      if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
+                        setCustomQty(clean);
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   />
                 </div>
@@ -2147,12 +2301,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                     $
                   </span>
                   <input
-                    type="number"
-                    step="any"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     required
                     value={openCashAmount}
-                    onChange={(e) => setOpenCashAmount(e.target.value)}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(',', '.');
+                      if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
+                        setOpenCashAmount(clean);
+                      }
+                    }}
                     className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono font-black text-base text-slate-950 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                     autoFocus
                   />

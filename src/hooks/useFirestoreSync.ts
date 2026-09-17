@@ -142,7 +142,21 @@ export function useFirestoreSync<T>(docId: string, initialValue: T) {
         broadcastChannel?.postMessage({ docId, data: nextData });
       } catch {}
 
-      // C. Guardar en MongoDB Compass (colección app_state y colección friendly)
+      // C. Notificar a otros componentes montados en la misma pestaña/ventana
+      queueMicrotask(() => {
+        const docListeners = listenersByDocId.get(docId);
+        if (docListeners) {
+          docListeners.forEach((cb) => {
+            try {
+              cb(nextData);
+            } catch (err) {
+              console.error('Error notificando listener local:', err);
+            }
+          });
+        }
+      });
+
+      // D. Guardar en MongoDB Compass (colección app_state y colección friendly)
       fetch(`/api/mongo/doc/${encodeURIComponent(docId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
