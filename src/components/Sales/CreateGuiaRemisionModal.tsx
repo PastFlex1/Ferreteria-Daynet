@@ -3,6 +3,7 @@ import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { X, Truck, FileText, CheckCircle2 } from 'lucide-react';
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { useModal } from '../../context/ModalContext';
+import { getEcuadorianDateTime } from '../../utils/formatters';
 
 export interface GuiaRemisionData {
   id: string;
@@ -30,7 +31,7 @@ export function CreateGuiaRemisionModal({ isOpen, onClose, onSave }: CreateGuiaR
     plate: '',
     origin: '',
     destination: '',
-    date: new Date().toISOString().split('T')[0],
+    date: getEcuadorianDateTime().dateStr,
   });
 
   if (!isOpen) return null;

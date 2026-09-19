@@ -17,6 +17,7 @@ import { Invoice, StoreSettings } from '../../types';
 import { SriBackendService, isSecuencialAlreadyRegistered } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { getEcuadorianDateTime, formatFullDate } from '../../utils/formatters';
 
 interface SriEmissionProgressModalProps {
   isOpen: boolean;
@@ -96,7 +97,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
       setStep3Details(`N° Autorización SRI: ${invoice.sriNumeroAutorizacion || effectiveClave}`);
 
       const numAuth = invoice.sriNumeroAutorizacion || effectiveClave;
-      const fechaAuth = invoice.sriFechaAutorizacion || (invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : new Date().toLocaleString());
+      const fechaAuth = invoice.sriFechaAutorizacion || (invoice.createdAt ? formatFullDate(invoice.createdAt) : getEcuadorianDateTime().formatted);
 
       setAutorizacionData({
         numeroAutorizacion: numAuth,
@@ -194,8 +195,8 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         setStep1Status('SUCCESS');
         setStep1Details(`XML firmado exitosamente bajo el estándar XAdES-BES (${workingInvoice.fullNumber}).`);
 
-        // Pequeña pausa visual para observar la transición
-        await new Promise((r) => setTimeout(r, 600));
+        // Transición inmediata a Recepción SRI
+        await new Promise((r) => setTimeout(r, 50));
 
         // ──────────────────────────────────────────────────────────
         // PASO 2: RECEPCIÓN SRI (SOAP RecepcionComprobantesOffline)
@@ -221,7 +222,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
-          await new Promise((r) => setTimeout(r, 800));
+          await new Promise((r) => setTimeout(r, 50));
           continue; // Reintentar con el siguiente secuencial
         }
 
@@ -267,7 +268,8 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         setStep2Status('SUCCESS');
         setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
 
-        await new Promise((r) => setTimeout(r, 600));
+        // Transición inmediata a Autorización SRI
+        await new Promise((r) => setTimeout(r, 50));
 
         // ──────────────────────────────────────────────────────────
         // PASO 3: CONSULTA DE AUTORIZACIÓN SRI (SOAP Autorizacion)
@@ -293,7 +295,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
-          await new Promise((r) => setTimeout(r, 800));
+          await new Promise((r) => setTimeout(r, 50));
           continue; // Reintentar con el siguiente secuencial
         }
 
@@ -357,7 +359,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         }
 
         const numAuth = numMatch ? numMatch[1] : (isAutorizado ? claveCalculada : undefined);
-        const fechaAuth = fechaMatch ? fechaMatch[1] : (isAutorizado ? new Date().toLocaleString() : undefined);
+        const fechaAuth = fechaMatch ? fechaMatch[1] : (isAutorizado ? getEcuadorianDateTime().formatted : undefined);
         const estadoReal = estadoMatch ? estadoMatch[1] : (isAutorizado ? 'AUTORIZADO' : 'NO AUTORIZADO');
         const mensajeError = mensajesList.length > 0 ? mensajesList.join(' | ') : 'Sin detalle de error específico devuelto por el SRI.';
 
@@ -648,7 +650,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
                 </div>
                 <div>
                   <span className="text-emerald-200 block text-[10px] uppercase font-bold">Fecha y Hora SRI</span>
-                  <span className="font-mono font-bold block">{autorizacionData.fechaAutorizacion || new Date().toLocaleString()}</span>
+                  <span className="font-mono font-bold block">{autorizacionData.fechaAutorizacion || getEcuadorianDateTime().formatted}</span>
                 </div>
               </div>
             </div>

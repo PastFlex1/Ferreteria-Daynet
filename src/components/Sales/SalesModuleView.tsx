@@ -210,42 +210,55 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
       (inv) => inv.id === data.invoiceId || inv.fullNumber === data.invoiceRef
     );
 
-    // 2. TRANSMISIÓN EN VIVO AL BACKEND SRI (:8080)
+    const isConsumidorFinal =
+      (targetInvoice?.customer?.docNumber || '').trim() === '9999999999999' ||
+      (targetInvoice?.customer?.docNumber || '').trim() === '9999999999' ||
+      (targetInvoice?.customer?.name || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+      (targetInvoice?.customer?.name || '').toUpperCase().includes('PUBLICO GENERAL') ||
+      (data.customerRuc || '').trim() === '9999999999999' ||
+      (data.customer || '').toUpperCase().includes('CONSUMIDOR FINAL');
+
+    // 2. TRANSMISIÓN AL SRI (SOLO SI EL CLIENTE ESTÁ IDENTIFICADO CON CÉDULA O RUC)
     let updatedData = { ...data };
-    showToast('Transmitiendo Nota de Crédito a API local (:8080)...', 'info');
-    try {
-      const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
-      const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
-      const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
-        data,
-        settings,
-        targetInvoice?.createdAt,
-        establishment,
-        emissionPoint,
-        sriMode === 'PRODUCCION' ? '2' : '1',
-        certBase64,
-        pass
-      );
+    if (isConsumidorFinal) {
+      updatedData.status = 'COMPROBANTE_INTERNO';
+      showToast('Comprobante interno de devolución registrado. Stock reingresado a bodega (según Res. NAC-DGERCGC25-00000017 el SRI no admite N/C a Consumidor Final).', 'info');
+    } else {
+      showToast('Transmitiendo Nota de Crédito a API local (:8080)...', 'info');
+      try {
+        const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
+        const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+        const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
+          data,
+          settings,
+          targetInvoice?.createdAt,
+          establishment,
+          emissionPoint,
+          sriMode === 'PRODUCCION' ? '2' : '1',
+          certBase64,
+          pass
+        );
 
-      if (sriRes) {
-        if (sriRes.nuevoId) {
-          updatedData.id = sriRes.nuevoId;
-          updatedData.secNumber = sriRes.nuevoSecuencial;
-          updatedData.claveAcceso = sriRes.claveAcceso;
-        }
-        updatedData.status = sriRes.estado || 'PENDIENTE';
-        if (sriRes.numeroAutorizacion) updatedData.numeroAutorizacion = sriRes.numeroAutorizacion;
-        if (sriRes.fechaAutorizacion) updatedData.fechaAutorizacion = sriRes.fechaAutorizacion;
-        if (sriRes.xmlFirmado) updatedData.sriXmlFirmado = sriRes.xmlFirmado;
+        if (sriRes) {
+          if (sriRes.nuevoId) {
+            updatedData.id = sriRes.nuevoId;
+            updatedData.secNumber = sriRes.nuevoSecuencial;
+            updatedData.claveAcceso = sriRes.claveAcceso;
+          }
+          updatedData.status = sriRes.estado || 'PENDIENTE';
+          if (sriRes.numeroAutorizacion) updatedData.numeroAutorizacion = sriRes.numeroAutorizacion;
+          if (sriRes.fechaAutorizacion) updatedData.fechaAutorizacion = sriRes.fechaAutorizacion;
+          if (sriRes.xmlFirmado) updatedData.sriXmlFirmado = sriRes.xmlFirmado;
 
-        if (sriRes.estado === 'AUTORIZADO') {
-          showToast(`Nota de Crédito ${updatedData.id} AUTORIZADA por el SRI`, 'success');
-        } else if (sriRes.mensaje) {
-          showToast(sriRes.mensaje, 'info');
+          if (sriRes.estado === 'AUTORIZADO') {
+            showToast(`Nota de Crédito ${updatedData.id} AUTORIZADA por el SRI`, 'success');
+          } else if (sriRes.mensaje) {
+            showToast(sriRes.mensaje, 'info');
+          }
         }
+      } catch (apiErr: any) {
+        console.warn('Advertencia en transmisión de N/C:', apiErr);
       }
-    } catch (apiErr: any) {
-      console.warn('Advertencia en transmisión de N/C:', apiErr);
     }
 
     setCreditNotes((prev) => [updatedData, ...prev]);
@@ -735,8 +748,14 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                         -{formatCurrency(nc.amount, settings.currencySymbol)}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          {nc.status}
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                          nc.status === 'COMPROBANTE_INTERNO' || nc.customerRuc === '9999999999999' || (nc.customer || '').toUpperCase().includes('CONSUMIDOR FINAL')
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                            : nc.status === 'AUTORIZADO'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                          {nc.status === 'COMPROBANTE_INTERNO' ? 'DEV. INTERNA' : nc.status}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">

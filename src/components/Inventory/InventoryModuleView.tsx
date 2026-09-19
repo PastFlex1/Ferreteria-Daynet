@@ -50,7 +50,7 @@ import {
   ChevronsLeft,
   ChevronsRight
 } from 'lucide-react';
-import { InventorySubTab, Product, ProductCategory, Promotion, PromotionItem, StoreSettings } from '../../types';
+import { InventorySubTab, Invoice, Product, ProductCategory, Promotion, PromotionItem, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { InventoryManager } from './InventoryManager';
 import { BarcodeLabelsManager } from './BarcodeLabelsManager';
@@ -78,6 +78,7 @@ interface InventoryModuleViewProps {
   onUpdateCategories?: (categories: ProductCategory[]) => void;
   promotions?: Promotion[];
   onUpdatePromotions?: (promotions: Promotion[] | ((prev: Promotion[]) => Promotion[])) => void;
+  invoices?: Invoice[];
 }
 
 // Promotion type is imported from '../../types'
@@ -205,7 +206,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   categories,
   onUpdateCategories,
   promotions: propPromotions,
-  onUpdatePromotions
+  onUpdatePromotions,
+  invoices,
 }) => {
   const { showAlert, showToast, showConfirm } = useModal();
   const currentCategories = categories || [];
@@ -4195,6 +4197,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           categories={categories}
           onStockAdjust={onStockAdjust}
           onSaveProduct={onSaveProduct}
+          invoices={invoices}
         />
       )}
 

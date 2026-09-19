@@ -34,9 +34,61 @@ export const formatDecimalNumber = (amount: number | string | null | undefined, 
   });
 };
 
-export const formatDate = (dateString: string): string => {
+export const getEcuadorianDateTime = (dateInput?: Date | string | number | null) => {
+  const date = dateInput ? new Date(dateInput) : new Date();
+  const validDate = isNaN(date.getTime()) ? new Date() : date;
+
+  const formatter = new Intl.DateTimeFormat('es-EC', {
+    timeZone: 'America/Guayaquil',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(validDate);
+  const partMap: Record<string, string> = {};
+  for (const part of parts) {
+    partMap[part.type] = part.value;
+  }
+
+  const year = partMap.year || '2026';
+  const month = partMap.month || '01';
+  const day = partMap.day || '01';
+  const hour = partMap.hour || '00';
+  const minute = partMap.minute || '00';
+  const second = partMap.second || '00';
+
+  const dateStr = `${year}-${month}-${day}`;
+  const timeStr = `${hour}:${minute}:${second}`;
+  const timeShort = `${hour}:${minute}`;
+  const isoLocal = `${dateStr}T${timeStr}-05:00`;
+
+  return {
+    date: validDate,
+    dateStr,
+    timeStr,
+    timeShort,
+    isoLocal,
+    formatted: `${day}/${month}/${year} ${hour}:${minute}`,
+    day,
+    month,
+    year,
+    hour,
+    minute,
+    second,
+  };
+};
+
+export const formatDate = (dateString?: string | null): string => {
+  if (!dateString) return '-';
   const date = new Date(dateString);
-  return date.toLocaleDateString('es-ES', {
+  if (isNaN(date.getTime())) return String(dateString);
+  return date.toLocaleDateString('es-EC', {
+    timeZone: 'America/Guayaquil',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -45,9 +97,12 @@ export const formatDate = (dateString: string): string => {
   });
 };
 
-export const formatFullDate = (dateString: string): string => {
+export const formatFullDate = (dateString?: string | null): string => {
+  if (!dateString) return '-';
   const date = new Date(dateString);
-  return date.toLocaleDateString('es-ES', {
+  if (isNaN(date.getTime())) return String(dateString);
+  return date.toLocaleDateString('es-EC', {
+    timeZone: 'America/Guayaquil',
     weekday: 'long',
     day: 'numeric',
     month: 'long',

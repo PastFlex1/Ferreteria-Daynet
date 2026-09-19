@@ -24,7 +24,8 @@ import {
   PermissionMap, 
   PermissionDefinition,
   SystemRole,
-  DEFAULT_SYSTEM_ROLES
+  DEFAULT_SYSTEM_ROLES,
+  autoLinkPermissionDependencies
 } from '../../types/permissions';
 
 interface RoleModalProps {
@@ -141,10 +142,10 @@ export const RoleModal: React.FC<RoleModalProps> = ({
 
   // Toggle individual
   const handleTogglePermission = (id: string) => {
-    setPermissions((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    setPermissions((prev) => {
+      const nextVal = !prev[id];
+      return autoLinkPermissionDependencies(id, nextVal, prev);
+    });
   };
 
   // Toggle todos
@@ -162,9 +163,9 @@ export const RoleModal: React.FC<RoleModalProps> = ({
   const handleToggleModule = (moduleId: string, val: boolean) => {
     const modulePerms = ALL_PERMISSIONS.filter((p) => p.module === moduleId);
     setPermissions((prev) => {
-      const next = { ...prev };
+      let next = { ...prev };
       modulePerms.forEach((p) => {
-        next[p.id] = val;
+        next = autoLinkPermissionDependencies(p.id, val, next);
       });
       return next;
     });

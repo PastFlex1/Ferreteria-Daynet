@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { Product, StoreSettings, Invoice, ProductCategory } from '../../types';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCostCurrency, getEcuadorianDateTime } from '../../utils/formatters';
 import { exportKardexToModernExcel } from '../../utils/excelExport';
 import { Select } from '../Shared/Select';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
@@ -141,6 +141,7 @@ interface KardexManagerProps {
   categories?: ProductCategory[];
   onStockAdjust: (productId: string, adjustmentQty: number) => void;
   onSaveProduct: (product: Product) => void;
+  invoices?: Invoice[];
 }
 
 export const KardexManager: React.FC<KardexManagerProps> = ({
@@ -149,11 +150,13 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   categories,
   onStockAdjust,
   onSaveProduct,
+  invoices: propsInvoices,
 }) => {
   const { showAlert, showToast } = useModal();
 
   // ── Sync with Real Database Collections ────────────────────────────────────
-  const [invoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
+  const [syncInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
+  const invoices = propsInvoices ?? syncInvoices;
   const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
   const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
   const [stockAdjustments, setStockAdjustments] = useFirestoreSync<StockAdjustmentRecord[]>(
@@ -205,6 +208,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     products.forEach((p) => {
       if (p.id) map.set(p.id, p);
       if (p.sku) map.set(p.sku.toLowerCase(), p);
+      if ((p as any).code) map.set(String((p as any).code).toLowerCase(), p);
+      if (p.barcode) map.set(p.barcode.toLowerCase(), p);
+      if (p.name) map.set(p.name.trim().toLowerCase(), p);
     });
     return map;
   }, [products]);
@@ -231,75 +237,120 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       notes?: string;
     }[] = [];
 
-    const isSingleProduct = !!selectedProduct;
-    const prodId = selectedProduct?.id;
-    const prodSku = selectedProduct?.sku.toLowerCase();
-
-    const isTargetProduct = (pId?: string, pSku?: string) => {
-      if (!isSingleProduct) return true;
-      const lowerSku = (pSku || '').toLowerCase();
-      return pId === prodId || (lowerSku && lowerSku === prodSku);
+    const toEcuadorDateTimeStr = (d: any) => {
+      const dt = getEcuadorianDateTime(d);
+      return `${dt.dateStr} ${dt.timeShort}`;
     };
 
-    // 1. Invoices / Sales from POS
-    invoices.forEach((inv) => {
-      if (inv.paymentStatus === 'ANULADA' || inv.documentType === 'COTIZACION') return;
+    const isSingleProduct = !!selectedProduct;
+    const prodId = selectedProduct?.id;
+    const prodSku = (selectedProduct?.sku || '').toLowerCase();
+    const prodBarcode = (selectedProduct?.barcode || '').toLowerCase();
+    const prodName = (selectedProduct?.name || '').trim().toLowerCase();
+
+    const isTargetProduct = (pId?: string, pSku?: string, pName?: string, pBarcode?: string) => {
+      if (!isSingleProduct) return true;
+      const lowerSku = (pSku || '').toLowerCase();
+      const lowerBarcode = (pBarcode || '').toLowerCase();
+      const lowerName = (pName || '').trim().toLowerCase();
+
+      return (
+        (pId && pId === prodId) ||
+        (lowerSku && prodSku && lowerSku === prodSku) ||
+        (lowerBarcode && prodBarcode && lowerBarcode === prodBarcode) ||
+        (lowerName && prodName && lowerName === prodName)
+      );
+    };
+
+    // 1. Invoices / Sales from POS & Facturación
+    (invoices || []).forEach((inv) => {
+      if (!inv) return;
+      if (
+        inv.paymentStatus === 'ANULADA' || 
+        (inv as any).status === 'ANULADA' || 
+        inv.sriStatus === 'ANULADO' || 
+        inv.documentType === 'COTIZACION'
+      ) {
+        return;
+      }
+
       const invDate = inv.createdAt || (inv as any).date || new Date().toISOString();
       const timestamp = new Date(invDate).getTime() || Date.now();
-      const docNum = inv.series ? `${inv.series}-${inv.number || inv.fullNumber || inv.id}` : (inv.fullNumber || `#${inv.number || inv.id}`);
+      const docNum = inv.fullNumber || (inv.series && inv.number ? `${inv.series}-${String(inv.number).padStart(9, '0')}` : ((inv as any).invoiceNumber || `#${inv.number || inv.id || 'S/N'}`));
 
-      inv.items.forEach((item) => {
-        const itemProdId = item.productId || (item as any).product?.id;
-        const itemSku = item.sku || (item as any).product?.sku || '';
+      const items = Array.isArray(inv.items) ? inv.items : (Array.isArray((inv as any).detalles) ? (inv as any).detalles : []);
+      if (items.length === 0) return;
 
-        if (isTargetProduct(itemProdId, itemSku)) {
-          const matchedProd = productMap.get(itemProdId) || productMap.get(itemSku.toLowerCase());
-          const cost = selectedProduct ? (selectedProduct.costPrice || 0) : (matchedProd?.costPrice || (item as any).costPrice || 0);
-          const price = item.unitPrice || (item as any).price || (matchedProd?.price || cost);
+      items.forEach((item: any) => {
+        const itemProdId = item.productId || item.id || item.product?.id;
+        const itemSku = item.sku || item.code || item.product?.sku || item.product?.code || '';
+        const itemName = item.productName || item.name || item.description || item.product?.name || '';
+        const itemBarcode = item.barcode || item.product?.barcode || '';
+
+        if (isTargetProduct(itemProdId, itemSku, itemName, itemBarcode)) {
+          const matchedProd = 
+            (itemProdId ? productMap.get(itemProdId) : null) || 
+            (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
+            (itemBarcode ? productMap.get(itemBarcode.toLowerCase()) : null) ||
+            (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
+            (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName, itemBarcode) ? selectedProduct : null);
+
+          const cost = selectedProduct ? (selectedProduct.costPrice || 0) : (matchedProd?.costPrice || Number(item.costPrice || item.cost || 0));
+          const price = Number(item.unitPrice || item.price || item.precioUnitario || (matchedProd?.price || cost));
+          const qty = Number(item.quantity || item.cantidad || 1);
 
           rawMovements.push({
-            id: `sale-${inv.id}-${item.productId || Math.random()}`,
+            id: `sale-${inv.id || Math.random()}-${itemProdId || itemSku || Math.random()}-${Math.random()}`,
             timestamp,
-            dateStr: invDate.replace('T', ' ').substring(0, 16),
+            dateStr: toEcuadorDateTimeStr(invDate),
             type: 'VENTA',
-            typeLabel: inv.documentType === 'FACTURA' ? 'Venta Factura' : 'Venta POS',
+            typeLabel: inv.documentType === 'FACTURA' ? 'Venta Factura' : inv.documentType === 'BOLETA' ? 'Venta Boleta' : 'Venta POS',
             docNumber: docNum,
             warehouse: (inv as any).branch || 'Tienda POS / Salón de Ventas',
-            entityName: inv.customer?.name || 'Consumidor Final',
+            entityName: inv.customer?.name || (inv as any).customerName || 'Consumidor Final',
             user: inv.sellerName || 'Caja POS',
             productId: matchedProd?.id || itemProdId || '',
-            productName: matchedProd?.name || item.productName || item.description || 'Producto Varios',
+            productName: matchedProd?.name || itemName || 'Producto Varios',
             sku: matchedProd?.sku || itemSku || 'N/A',
-            unit: matchedProd?.unit || 'Unid',
-            qty: item.quantity,
+            unit: matchedProd?.unit || item.unit || 'Unid',
+            qty,
             cost,
             price,
-            notes: `Venta POS (${inv.paymentMethod || 'Contado'})`,
+            notes: `Venta POS (${inv.paymentMethod || 'Contado'})${inv.paymentReference ? ' Ref: ' + inv.paymentReference : ''}`,
           });
         }
       });
     });
 
     // 2. Purchase Invoices from Suppliers
-    purchases.forEach((purch) => {
+    (purchases || []).forEach((purch) => {
       const purchDate = purch.issueDate || purch.date || purch.createdAt || new Date().toISOString();
       const timestamp = new Date(purchDate).getTime() || Date.now();
       const docNum = purch.invoiceNumber || purch.orderNumber || `#${purch.id}`;
 
       if (purch.items && Array.isArray(purch.items)) {
         purch.items.forEach((item: any) => {
-          const itemProdId = item.productId;
-          const itemSku = item.sku || '';
+          const itemProdId = item.productId || item.id;
+          const itemSku = item.sku || item.code || '';
+          const itemName = item.name || item.productName || item.description || '';
+          const itemBarcode = item.barcode || '';
 
-          if (isTargetProduct(itemProdId, itemSku)) {
-            const matchedProd = productMap.get(itemProdId) || productMap.get(itemSku.toLowerCase());
-            const cost = item.costPrice || item.unitCost || matchedProd?.costPrice || 0;
-            const price = item.costPrice || item.unitCost || cost;
+          if (isTargetProduct(itemProdId, itemSku, itemName, itemBarcode)) {
+            const matchedProd = 
+              (itemProdId ? productMap.get(itemProdId) : null) || 
+              (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
+              (itemBarcode ? productMap.get(itemBarcode.toLowerCase()) : null) ||
+              (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
+              (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName, itemBarcode) ? selectedProduct : null);
+
+            const cost = Number(item.costPrice || item.unitCost || item.cost || matchedProd?.costPrice || 0);
+            const price = Number(item.costPrice || item.unitCost || cost);
+            const qty = Number(item.quantity || item.cantidad || 1);
 
             rawMovements.push({
-              id: `purch-${purch.id}-${item.productId || Math.random()}`,
+              id: `purch-${purch.id}-${itemProdId || Math.random()}-${Math.random()}`,
               timestamp,
-              dateStr: purchDate.replace('T', ' ').substring(0, 16),
+              dateStr: toEcuadorDateTimeStr(purchDate),
               type: 'COMPRA',
               typeLabel: 'Compra Proveedor',
               docNumber: docNum,
@@ -307,10 +358,10 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               entityName: purch.supplier?.name || 'Proveedor Directo',
               user: purch.receivedBy || 'Bodega',
               productId: matchedProd?.id || itemProdId || '',
-              productName: matchedProd?.name || item.name || item.description || 'Producto Varios',
+              productName: matchedProd?.name || itemName || 'Producto Varios',
               sku: matchedProd?.sku || itemSku || 'N/A',
-              unit: matchedProd?.unit || 'Unid',
-              qty: item.quantity,
+              unit: matchedProd?.unit || item.unit || 'Unid',
+              qty,
               cost,
               price,
               notes: `Ingreso factura proveedor (${purch.paymentCondition || 'Contado'})`,
@@ -321,9 +372,14 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     });
 
     // 3. Stock Adjustments (Physical audits, mermas, manual corrections)
-    stockAdjustments.forEach((adj) => {
-      if (isTargetProduct(adj.productId, adj.sku)) {
-        const matchedProd = productMap.get(adj.productId) || productMap.get((adj.sku || '').toLowerCase());
+    (stockAdjustments || []).forEach((adj) => {
+      if (isTargetProduct(adj.productId, adj.sku, adj.productName)) {
+        const matchedProd = 
+          (adj.productId ? productMap.get(adj.productId) : null) || 
+          (adj.sku ? productMap.get(adj.sku.toLowerCase()) : null) ||
+          (adj.productName ? productMap.get(adj.productName.trim().toLowerCase()) : null) ||
+          (selectedProduct && isTargetProduct(adj.productId, adj.sku, adj.productName) ? selectedProduct : null);
+
         const adjDate = adj.date || new Date().toISOString();
         const timestamp = new Date(adjDate).getTime() || Date.now();
         const isEntry = adj.qty > 0;
@@ -336,7 +392,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           reasonLower.includes('correccion sobrante') ||
           reasonLower.includes('correccion faltante');
         const isMerma = !isTomaFisica && (reasonLower.includes('merma') || reasonLower.includes('daño') || reasonLower.includes('robo'));
-        const cost = adj.costPrice || matchedProd?.costPrice || 0;
+        const cost = Number(adj.costPrice || matchedProd?.costPrice || 0);
 
         let movementType: KardexMovement['type'];
         let typeLabel: string;
@@ -362,7 +418,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         rawMovements.push({
           id: `adj-${adj.id}`,
           timestamp,
-          dateStr: adjDate.replace('T', ' ').substring(0, 16),
+          dateStr: toEcuadorDateTimeStr(adjDate),
           type: movementType,
           typeLabel,
           docNumber,
@@ -373,7 +429,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           productName: matchedProd?.name || adj.productName || 'Producto Varios',
           sku: matchedProd?.sku || adj.sku || 'N/A',
           unit: matchedProd?.unit || 'Unid',
-          qty: Math.abs(adj.qty),
+          qty: Math.abs(Number(adj.qty) || 0),
           cost,
           price: cost,
           notes: adj.reason || '',
@@ -382,32 +438,42 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     });
 
     // 4. Credit Notes / Customer Returns
-    creditNotes.forEach((cn) => {
+    (creditNotes || []).forEach((cn) => {
       const cnDate = cn.date || cn.createdAt || new Date().toISOString();
       const timestamp = new Date(cnDate).getTime() || Date.now();
 
       if (cn.items && Array.isArray(cn.items)) {
         cn.items.forEach((item: any) => {
-          if (isTargetProduct(item.productId, item.sku)) {
-            const matchedProd = productMap.get(item.productId) || productMap.get((item.sku || '').toLowerCase());
-            const cost = matchedProd?.costPrice || 0;
-            const price = item.unitPrice || (item as any).price || (matchedProd?.price || cost);
+          const itemProdId = item.productId || item.id;
+          const itemSku = item.sku || item.code || '';
+          const itemName = item.name || item.productName || item.description || '';
+
+          if (isTargetProduct(itemProdId, itemSku, itemName)) {
+            const matchedProd = 
+              (itemProdId ? productMap.get(itemProdId) : null) || 
+              (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
+              (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
+              (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName) ? selectedProduct : null);
+
+            const cost = Number(matchedProd?.costPrice || 0);
+            const price = Number(item.unitPrice || (item as any).price || (matchedProd?.price || cost));
+            const qty = Number(item.quantity || item.cantidad || 1);
 
             rawMovements.push({
               id: `cn-${cn.id}-${Math.random()}`,
               timestamp,
-              dateStr: cnDate.replace('T', ' ').substring(0, 16),
+              dateStr: toEcuadorDateTimeStr(cnDate),
               type: 'DEVOLUCION_VENTA',
               typeLabel: 'Devolución Cliente (+)',
               docNumber: cn.creditNoteNumber || `NC-${cn.id.substring(0, 8)}`,
               warehouse: 'Tienda POS / Salón de Ventas',
               entityName: cn.customerName || 'Cliente',
               user: cn.createdByName || 'Caja',
-              productId: matchedProd?.id || item.productId || '',
-              productName: matchedProd?.name || item.name || item.description || 'Producto Varios',
-              sku: matchedProd?.sku || item.sku || 'N/A',
+              productId: matchedProd?.id || itemProdId || '',
+              productName: matchedProd?.name || itemName || 'Producto Varios',
+              sku: matchedProd?.sku || itemSku || 'N/A',
               unit: matchedProd?.unit || 'Unid',
-              qty: item.quantity,
+              qty,
               cost,
               price,
               notes: cn.reason || 'Reingreso a inventario por devolución',
@@ -418,7 +484,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     });
 
     // 5. Inter-warehouse Transfers
-    transfers.forEach((trf: any) => {
+    (transfers || []).forEach((trf: any) => {
       if (trf.status === 'CANCELADA') return;
 
       const trfDate = trf.dispatchedAt || trf.date || trf.createdAt || new Date().toISOString();
@@ -430,24 +496,33 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
       if (trf.items && Array.isArray(trf.items)) {
         trf.items.forEach((item: any) => {
-          if (isTargetProduct(item.productId, item.sku)) {
-            const matchedProd = productMap.get(item.productId) || productMap.get((item.sku || '').toLowerCase());
+          const itemProdId = item.productId || item.id;
+          const itemSku = item.sku || item.code || '';
+          const itemName = item.name || item.productName || '';
+
+          if (isTargetProduct(itemProdId, itemSku, itemName)) {
+            const matchedProd = 
+              (itemProdId ? productMap.get(itemProdId) : null) || 
+              (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
+              (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
+              (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName) ? selectedProduct : null);
+
             const qty = Number(item.quantity) || 1;
-            const cost = item.costPrice || matchedProd?.costPrice || 0;
+            const cost = Number(item.costPrice || matchedProd?.costPrice || 0);
 
             rawMovements.push({
-              id: `trf-out-${trf.id}-${item.productId || Math.random()}`,
+              id: `trf-out-${trf.id}-${itemProdId || Math.random()}`,
               timestamp,
-              dateStr: trfDate.replace('T', ' ').substring(0, 16),
+              dateStr: toEcuadorDateTimeStr(trfDate),
               type: 'TRANSFERENCIA_SALIDA',
               typeLabel: trf.status === 'EN_TRANSITO' ? 'Traslado Salida (En Tránsito)' : 'Transferencia Salida (-)',
               docNumber: `${docNum}${guiaNum}`,
               warehouse: origin,
               entityName: `Despacho hacia ${destination}${trf.status === 'EN_TRANSITO' ? ' (En Tránsito)' : ''}`,
               user: trf.responsible || 'Bodega Origen',
-              productId: matchedProd?.id || item.productId || '',
-              productName: matchedProd?.name || item.name || 'Producto Varios',
-              sku: matchedProd?.sku || item.sku || 'N/A',
+              productId: matchedProd?.id || itemProdId || '',
+              productName: matchedProd?.name || itemName || 'Producto Varios',
+              sku: matchedProd?.sku || itemSku || 'N/A',
               unit: matchedProd?.unit || 'Unid',
               qty,
               cost,
@@ -463,18 +538,18 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
               const recQty = Number(item.receivedQuantity !== undefined ? item.receivedQuantity : qty);
 
               rawMovements.push({
-                id: `trf-in-${trf.id}-${item.productId || Math.random()}`,
+                id: `trf-in-${trf.id}-${itemProdId || Math.random()}`,
                 timestamp: recTimestamp,
-                dateStr: recDate.replace('T', ' ').substring(0, 16),
+                dateStr: toEcuadorDateTimeStr(recDate),
                 type: 'TRANSFERENCIA_ENTRADA',
                 typeLabel: 'Transferencia Entrada (+)',
                 docNumber: `${docNum}${guiaNum}`,
                 warehouse: destination,
                 entityName: `Recepción desde ${origin}`,
                 user: trf.receivedBy || 'Recepción Sucursal',
-                productId: matchedProd?.id || item.productId || '',
-                productName: matchedProd?.name || item.name || 'Producto Varios',
-                sku: matchedProd?.sku || item.sku || 'N/A',
+                productId: matchedProd?.id || itemProdId || '',
+                productName: matchedProd?.name || itemName || 'Producto Varios',
+                sku: matchedProd?.sku || itemSku || 'N/A',
                 unit: matchedProd?.unit || 'Unid',
                 qty: recQty,
                 cost,
@@ -491,7 +566,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     const movementsByProduct = new Map<string, typeof rawMovements>();
 
     rawMovements.forEach((m) => {
-      const pKey = m.productId || (m.sku || 'VARIOS').toLowerCase();
+      const pKey = m.productId || (m.sku && m.sku !== 'N/A' ? m.sku.toLowerCase() : m.productName.trim().toLowerCase());
       if (!movementsByProduct.has(pKey)) {
         movementsByProduct.set(pKey, []);
       }
@@ -505,7 +580,11 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       mList.sort((a, b) => a.timestamp - b.timestamp);
 
       const firstItem = mList[0];
-      const matchedProd = productMap.get(firstItem.productId) || productMap.get((firstItem.sku || '').toLowerCase()) || (selectedProduct?.id === firstItem.productId ? selectedProduct : null);
+      const matchedProd = 
+        (firstItem.productId ? productMap.get(firstItem.productId) : null) || 
+        (firstItem.sku ? productMap.get((firstItem.sku || '').toLowerCase()) : null) || 
+        (firstItem.productName ? productMap.get(firstItem.productName.trim().toLowerCase()) : null) || 
+        (selectedProduct?.id === firstItem.productId ? selectedProduct : null);
       const currentStock = matchedProd ? matchedProd.stock : 0;
       const initialCost = matchedProd ? (matchedProd.costPrice || 0) : firstItem.cost;
 

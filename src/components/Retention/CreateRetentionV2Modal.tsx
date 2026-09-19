@@ -52,7 +52,7 @@ import { SriRetentionXmlGenerator } from '../../services/retention/SriRetentionX
 import { RetentionDraftMapper } from '../../services/retention/retentionDraftMapper';
 import { RetentionApiClient } from '../../services/retention/retentionApiClient';
 import { Select } from '../Shared/Select';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, getEcuadorianDateTime } from '../../utils/formatters';
 
 interface CreateRetentionV2ModalProps {
   onClose: () => void;
@@ -93,10 +93,10 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
 
   // 0. Datos del Comprobante de Retención
   const [fechaEmisionRetencion, setFechaEmisionRetencion] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    getEcuadorianDateTime().dateStr
   );
   const [periodoFiscal, setPeriodoFiscal] = useState<string>(
-    `${String(new Date().getMonth() + 1).padStart(2, '0')}/${new Date().getFullYear()}`
+    `${getEcuadorianDateTime().month}/${getEcuadorianDateTime().year}`
   );
   const [parteRel, setParteRel] = useState<'SI' | 'NO'>('NO');
   const ambiente: '1' | '2' = (localStorage.getItem('ferreteria_settings_ambiente') as '1' | '2') || '1';
@@ -116,7 +116,7 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
   const [codDocSustento, setCodDocSustento] = useState<string>('01'); // Factura
   const [numDocSustento, setNumDocSustento] = useState<string>(''); // 001-001-000012345
   const [fechaEmisionDocSustento, setFechaEmisionDocSustento] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    getEcuadorianDateTime().dateStr
   );
   const [fechaRegistroContable, setFechaRegistroContable] = useState<string>('');
   const [numAutDocSustento, setNumAutDocSustento] = useState<string>('');
@@ -772,11 +772,11 @@ export const CreateRetentionV2Modal: React.FC<CreateRetentionV2ModalProps> = ({
           totalRetenidoIsd: totals.totalRetenidoIsd,
           totalRetenido: totals.totalRetenido,
           numeroAutorizacion: submitRes.numeroAutorizacion || definitiveClave,
-          fechaAutorizacion: submitRes.fechaAutorizacion || new Date().toISOString(),
+          fechaAutorizacion: submitRes.fechaAutorizacion || getEcuadorianDateTime().isoLocal,
           xmlGenerado: generated.xml,
           xmlAutorizado: submitRes.rawResponse,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: getEcuadorianDateTime().isoLocal,
+          updatedAt: getEcuadorianDateTime().isoLocal,
         };
 
         onSuccess(record);

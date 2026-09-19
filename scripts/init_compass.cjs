@@ -231,12 +231,47 @@ async function seedCompass() {
     {
       $set: {
         _id: 'fac-001',
+        id: 'fac-001',
+        documentType: 'FACTURA',
+        series: '001-001',
+        number: 1,
+        fullNumber: '001-001-000000001',
         invoiceNumber: '001-001-000000001',
+        createdAt: new Date().toISOString(),
+        customer: {
+          id: 'cf-default',
+          name: 'CONSUMIDOR FINAL',
+          docType: 'C.I.',
+          docNumber: '9999999999999',
+          creditLimit: 0,
+          currentBalance: 0,
+        },
         customerName: 'Consumidor Final',
         date: new Date().toISOString().split('T')[0],
+        items: [
+          {
+            productId: 'prod-001',
+            sku: 'FER-001',
+            productName: 'Cemento Selvalegre 50kg',
+            unit: 'BOLSA',
+            quantity: 3,
+            unitPrice: 8.50,
+            costPrice: 6.80,
+            discountPercent: 0,
+            subtotal: 25.50,
+            taxRate: 0,
+            taxAmount: 0,
+            total: 25.50,
+          }
+        ],
+        subtotal: 25.50,
+        discountTotal: 0,
+        taxTotal: 0,
         total: 25.50,
         paymentMethod: 'EFECTIVO',
+        paymentStatus: 'PAGADA',
         status: 'EMITIDA',
+        sellerName: 'Caja POS',
         _syncedAt: new Date()
       }
     },

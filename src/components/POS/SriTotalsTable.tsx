@@ -10,6 +10,7 @@ export interface SriTotalsBreakdown {
   subtotalNoObjeto: number;
   subtotalExento: number;
   totalDescuento: number;
+  totalDescuentoConIva?: number;
   valorIce: number;
   iva15: number;
   iva5: number;
@@ -64,7 +65,12 @@ export const SriTotalsTable: React.FC<SriTotalsTableProps> = ({
     { label: 'Subtotal 0%:', value: breakdown.subtotal0 },
     { label: 'Subtotal no objeto de IVA:', value: breakdown.subtotalNoObjeto },
     { label: 'Subtotal exento de IVA:', value: breakdown.subtotalExento },
-    { label: 'Total descuento:', value: breakdown.totalDescuento },
+    { 
+      label: breakdown.totalDescuentoConIva && breakdown.totalDescuentoConIva > breakdown.totalDescuento
+        ? `Total descuento (Sin IVA) [Ahorro con IVA: ${formatCurrency(breakdown.totalDescuentoConIva, currencySymbol)}]:`
+        : 'Total descuento (Sin IVA):', 
+      value: breakdown.totalDescuento 
+    },
     { label: 'Valor ICE:', value: breakdown.valorIce },
     { label: 'IVA 15.00% :', value: breakdown.iva15 },
     { label: 'IVA 5% :', value: breakdown.iva5 }

@@ -106,17 +106,11 @@ export const Header: React.FC<HeaderProps> = ({
     if (isSuperAdmin) return true;
     const direct = TAB_TO_PERMISSION_MAP[tabId];
     if (direct) {
-      // Respetar estrictamente la configuración explícita asignada al trabajador
-      if (typeof userPermissions[direct] === 'boolean') {
-        return userPermissions[direct];
-      }
-      if (can(direct)) {
-        return true;
-      }
+      return can(direct);
     }
-    // Si no hay configuración directa, permitir si tiene acceso general al módulo
-    if (modulePerm && can(modulePerm)) {
-      return true;
+    // Si no hay configuración directa, verificar si tiene acceso general al módulo
+    if (modulePerm) {
+      return can(modulePerm);
     }
     return false;
   };
@@ -487,23 +481,25 @@ export const Header: React.FC<HeaderProps> = ({
             );
           })}
 
-          {/* Arqueo de Caja — direct link, same style as module buttons */}
-          <button
-            onClick={() => handleNavClick('CASH_REGISTER')}
-            title={sidebarCollapsed ? 'Arqueo de Caja' : undefined}
-            className={`group w-full flex items-center gap-3 px-3 py-2.5 transition-all duration-150 cursor-pointer border-l-2
-              ${activeTab === 'CASH_REGISTER'
-                ? 'bg-orange-500/15 text-white border-orange-500'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-transparent'
-              }`}
-          >
-            <DollarSign className={`shrink-0 w-4 h-4 ${activeTab === 'CASH_REGISTER' ? 'text-orange-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-            {!sidebarCollapsed && (
-              <>
-                <span className="flex-1 text-left text-[11px] font-black uppercase tracking-wider">Arqueo de Caja</span>
-              </>
-            )}
-          </button>
+          {/* Arqueo de Caja — direct link, only visible if permitted */}
+          {(isSuperAdmin || can('cash.open_shift') || can('cash.close_shift') || can('nav.ventas.caja') || can('nav.reportes.caja')) && (
+            <button
+              onClick={() => handleNavClick('CASH_REGISTER')}
+              title={sidebarCollapsed ? 'Arqueo de Caja' : undefined}
+              className={`group w-full flex items-center gap-3 px-3 py-2.5 transition-all duration-150 cursor-pointer border-l-2
+                ${activeTab === 'CASH_REGISTER'
+                  ? 'bg-orange-500/15 text-white border-orange-500'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-transparent'
+                }`}
+            >
+              <DollarSign className={`shrink-0 w-4 h-4 ${activeTab === 'CASH_REGISTER' ? 'text-orange-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+              {!sidebarCollapsed && (
+                <>
+                  <span className="flex-1 text-left text-[11px] font-black uppercase tracking-wider">Arqueo de Caja</span>
+                </>
+              )}
+            </button>
+          )}
         </nav>
 
         {/* Bottom store address & branding/support info */}

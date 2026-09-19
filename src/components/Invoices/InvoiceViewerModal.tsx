@@ -323,59 +323,73 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
         fechaAutorizacion: now.toISOString(),
       };
 
-      // 1. TRANSMISIÓN REAL AL BACKEND SPRING BOOT (:8080)
-      // Firma XAdES-BES (/api/sri/firmar) -> Recepción SRI (/api/sri/recepcion) -> Autorización (/api/sri/autorizacion)
-      setAnularStepText('Transmitiendo Nota de Crédito al backend SRI (:8080)...');
-      try {
-        const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
-        const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+      const isConsumidorFinal =
+        (activeInvoice.customer?.docNumber || '').trim() === '9999999999999' ||
+        (activeInvoice.customer?.docNumber || '').trim() === '9999999999' ||
+        (activeInvoice.customer?.name || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+        (activeInvoice.customer?.name || '').toUpperCase().includes('PUBLICO GENERAL');
 
-        setAnularStepText('Firmando y enviando Nota de Crédito al SRI...');
-        const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
-          newCreditNote,
-          settings,
-          activeInvoice.createdAt,
-          estab,
-          ptoEmi,
-          (sriMode === 'PRODUCCION' ? '2' : '1'),
-          certBase64,
-          pass
+      if (isConsumidorFinal) {
+        newCreditNote.status = 'COMPROBANTE_INTERNO';
+        showToast(
+          `Factura a Consumidor Final anulada internamente y stock restituido al Kardex (según Res. SRI NAC-DGERCGC25-00000017 no se emite N/C electrónica).`,
+          'info'
         );
-
-        if (sriRes) {
-          if (sriRes.nuevoId) {
-            newCreditNote.id = sriRes.nuevoId;
-            newCreditNote.secNumber = sriRes.nuevoSecuencial;
-            newCreditNote.claveAcceso = sriRes.claveAcceso;
-          }
-          newCreditNote.status = sriRes.estado || 'PENDIENTE';
-          if (sriRes.numeroAutorizacion) {
-            newCreditNote.numeroAutorizacion = sriRes.numeroAutorizacion;
-          }
-          if (sriRes.fechaAutorizacion) {
-            newCreditNote.fechaAutorizacion = sriRes.fechaAutorizacion;
-          }
-          if (sriRes.xmlFirmado) {
-            (newCreditNote as any).sriXmlFirmado = sriRes.xmlFirmado;
-          }
-
-          if (sriRes.estado === 'AUTORIZADO') {
-            showToast(`Nota de Crédito ${newCreditNote.id} AUTORIZADA legalmente por el SRI`, 'success');
-          } else if (sriRes.estado === 'DEVUELTA') {
-            showToast(`SRI DEVUELTA: ${sriRes.mensaje || 'Comprobante devuelto'}`, 'warning');
-          } else if (sriRes.mensaje) {
-            showToast(sriRes.mensaje, 'info');
-          }
-        }
-      } catch (apiErr: any) {
-        console.warn('Advertencia en comunicación con API SRI:', apiErr);
-      }
-
-      // 2. Si el backend implementa endpoint /api/sri/anular, notificarlo también
-      if (claveAccesoCalculada) {
+      } else {
+        // 1. TRANSMISIÓN REAL AL BACKEND SPRING BOOT (:8080)
+        // Firma XAdES-BES (/api/sri/firmar) -> Recepción SRI (/api/sri/recepcion) -> Autorización (/api/sri/autorizacion)
+        setAnularStepText('Transmitiendo Nota de Crédito al backend SRI (:8080)...');
         try {
-          await SriBackendService.anularFactura(claveAccesoCalculada, activeInvoice.customer?.email);
-        } catch (_) {}
+          const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
+          const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
+
+          setAnularStepText('Firmando y enviando Nota de Crédito al SRI...');
+          const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
+            newCreditNote,
+            settings,
+            activeInvoice.createdAt,
+            estab,
+            ptoEmi,
+            (sriMode === 'PRODUCCION' ? '2' : '1'),
+            certBase64,
+            pass
+          );
+
+          if (sriRes) {
+            if (sriRes.nuevoId) {
+              newCreditNote.id = sriRes.nuevoId;
+              newCreditNote.secNumber = sriRes.nuevoSecuencial;
+              newCreditNote.claveAcceso = sriRes.claveAcceso;
+            }
+            newCreditNote.status = sriRes.estado || 'PENDIENTE';
+            if (sriRes.numeroAutorizacion) {
+              newCreditNote.numeroAutorizacion = sriRes.numeroAutorizacion;
+            }
+            if (sriRes.fechaAutorizacion) {
+              newCreditNote.fechaAutorizacion = sriRes.fechaAutorizacion;
+            }
+            if (sriRes.xmlFirmado) {
+              (newCreditNote as any).sriXmlFirmado = sriRes.xmlFirmado;
+            }
+
+            if (sriRes.estado === 'AUTORIZADO') {
+              showToast(`Nota de Crédito ${newCreditNote.id} AUTORIZADA legalmente por el SRI`, 'success');
+            } else if (sriRes.estado === 'DEVUELTA') {
+              showToast(`SRI DEVUELTA: ${sriRes.mensaje || 'Comprobante devuelto'}`, 'warning');
+            } else if (sriRes.mensaje) {
+              showToast(sriRes.mensaje, 'info');
+            }
+          }
+        } catch (apiErr: any) {
+          console.warn('Advertencia en comunicación con API SRI:', apiErr);
+        }
+
+        // 2. Si el backend implementa endpoint /api/sri/anular, notificarlo también
+        if (claveAccesoCalculada) {
+          try {
+            await SriBackendService.anularFactura(claveAccesoCalculada, activeInvoice.customer?.email);
+          } catch (_) {}
+        }
       }
 
       // 3. Reintegrar stock a inventario si está seleccionado
@@ -1307,34 +1321,68 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
           {/* Body */}
           <div className="p-6 space-y-4">
             {/* Info Box SRI */}
-            <div className="p-4 bg-rose-50/70 border border-rose-200/80 rounded-2xl text-xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-rose-950 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-rose-600" />
-                  SRI — Anulación Oficial
-                </span>
-                <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-md font-mono text-[10px] font-bold">
-                  Comprobante Tipo 04
-                </span>
-              </div>
-              <p className="text-[11px] text-rose-900 leading-relaxed">
-                En la normativa tributaria del Ecuador (SRI), la anulación de una factura se realiza mediante la emisión de una <strong>Nota de Crédito electrónica</strong> que anula el comprobante y revierte los valores correspondientes.
-              </p>
-              <div className="pt-2 border-t border-rose-200/60 grid grid-cols-2 gap-2 text-[11px]">
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Próxima Nota de Crédito:</span>
-                  <span className="font-mono font-bold text-slate-800">
-                    {(establishment || '001').padStart(3, '0')}-{(emissionPoint || '001').padStart(3, '0')}-{(secCreditNote || '000000001').padStart(9, '0')}
+            {((activeInvoice.customer?.docNumber || '').trim() === '9999999999999' ||
+              (activeInvoice.customer?.docNumber || '').trim() === '9999999999' ||
+              (activeInvoice.customer?.name || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+              (activeInvoice.customer?.name || '').toUpperCase().includes('PUBLICO GENERAL')) ? (
+              <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-2xl text-xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-600" />
+                    SRI — Factura a Consumidor Final
+                  </span>
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-mono text-[10px] font-bold">
+                    Control Interno
                   </span>
                 </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px]">Monto Total a Anular:</span>
-                  <span className="font-mono font-black text-rose-700">
-                    ${(activeInvoice.total || 0).toFixed(2)}
-                  </span>
+                <p className="text-[11px] text-amber-900 leading-relaxed">
+                  Por disposición del SRI (<strong>Resolución NAC-DGERCGC25-00000017</strong>), las facturas emitidas a <strong>Consumidor Final</strong> no admiten Notas de Crédito electrónicas autorizadas ante el SRI. La anulación se gestionará localmente para restituir el stock al inventario y registrar la anulación interna sin enviar al SRI (evitando rechazos de recepción).
+                </p>
+                <div className="pt-2 border-t border-amber-200/60 grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Comprobante Interno:</span>
+                    <span className="font-mono font-bold text-slate-800">
+                      {(establishment || '001').padStart(3, '0')}-{(emissionPoint || '001').padStart(3, '0')}-{(secCreditNote || '000000001').padStart(9, '0')}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Monto Total a Anular:</span>
+                    <span className="font-mono font-black text-rose-700">
+                      ${(activeInvoice.total || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="p-4 bg-rose-50/70 border border-rose-200/80 rounded-2xl text-xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-rose-950 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-rose-600" />
+                    SRI — Anulación Oficial
+                  </span>
+                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded-md font-mono text-[10px] font-bold">
+                    Comprobante Tipo 04
+                  </span>
+                </div>
+                <p className="text-[11px] text-rose-900 leading-relaxed">
+                  En la normativa tributaria del Ecuador (SRI), la anulación de una factura se realiza mediante la emisión de una <strong>Nota de Crédito electrónica</strong> que anula el comprobante y revierte los valores correspondientes.
+                </p>
+                <div className="pt-2 border-t border-rose-200/60 grid grid-cols-2 gap-2 text-[11px]">
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Próxima Nota de Crédito:</span>
+                    <span className="font-mono font-bold text-slate-800">
+                      {(establishment || '001').padStart(3, '0')}-{(emissionPoint || '001').padStart(3, '0')}-{(secCreditNote || '000000001').padStart(9, '0')}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">Monto Total a Anular:</span>
+                    <span className="font-mono font-black text-rose-700">
+                      ${(activeInvoice.total || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-black text-slate-700">Motivo de Anulación / Nota de Crédito *</label>

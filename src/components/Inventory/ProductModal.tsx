@@ -732,13 +732,23 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 No hay escalas configuradas para este producto. Haz clic en <strong>"+ Agregar Escala"</strong> si deseas ofrecer precio por docena, caja o mayorista.
               </div>
             ) : (
-              <div className="space-y-2.5">
-                {priceScales.map((scale, index) => {
+              <div className="space-y-2">
+                {/* Cabecera de columnas de la tabla de escalas */}
+                <div className="hidden sm:grid grid-cols-12 gap-2 px-3 py-1.5 bg-emerald-100/70 border border-emerald-200 rounded-xl text-[10px] font-black uppercase text-emerald-950 tracking-wider">
+                  <div className="col-span-3">Nombre / Rango</div>
+                  <div className="col-span-2 text-center">Cant. Desde</div>
+                  <div className="col-span-1 text-center">Hasta</div>
+                  <div className="col-span-2 text-center text-emerald-900">P. Unitario sin IVA ($)</div>
+                  <div className="col-span-2 text-center text-orange-900">P. Unitario con IVA ($)</div>
+                  <div className="col-span-1 text-center">Margen</div>
+                  <div className="col-span-1 text-right">Acción</div>
+                </div>
+
+                {priceScales.map((scale) => {
                   const scalePrice = parseFloat(scale.price?.toString() || '0') || 0;
                   const currentCost = parseFloat(costPrice) || 0;
                   const parsedTax = parseFloat(taxRate);
                   const currentTax = !isNaN(parsedTax) ? parsedTax : defaultTaxRate;
-                  const hasTax = currentTax > 0;
                   const scalePriceWithTaxDisplay = scale.priceWithTax !== undefined && scale.priceWithTax !== null
                     ? scale.priceWithTax
                     : (scalePrice > 0 ? (scalePrice * (1 + currentTax / 100)).toFixed(2) : '');
@@ -747,10 +757,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   return (
                     <div
                       key={scale.id}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 p-3 bg-white border border-emerald-200 rounded-xl items-center shadow-2xs text-xs"
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 bg-white border border-emerald-200/90 rounded-xl items-center shadow-2xs text-xs"
                     >
+                      {/* 1. Nombre / Rango */}
                       <div className="sm:col-span-3">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase mb-1">
                           Nombre / Rango
                         </label>
                         <input
@@ -762,8 +773,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         />
                       </div>
 
+                      {/* 2. Desde (Cant.) */}
                       <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                        <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase mb-1">
                           Desde (Cant.)
                         </label>
                         <input
@@ -773,12 +785,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           placeholder="1"
                           value={scale.minQty !== undefined && scale.minQty !== null ? scale.minQty : ''}
                           onChange={(e) => handleUpdateScale(scale.id, 'minQty', e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
 
+                      {/* 3. Hasta (Opcional) */}
                       <div className="sm:col-span-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 text-center">
+                        <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase mb-1 text-center">
                           Hasta
                         </label>
                         <input
@@ -787,14 +800,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           placeholder="∞"
                           value={scale.maxQty ? scale.maxQty : ''}
                           onChange={(e) => handleUpdateScale(scale.id, 'maxQty', e.target.value === '' ? undefined : parseFloat(e.target.value) || undefined)}
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          className="w-full px-1.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                           title="Cantidad máxima opcional (dejar vacío para sin límite)"
                         />
                       </div>
 
-                      <div className={hasTax ? "sm:col-span-2" : "sm:col-span-3"}>
-                        <label className="block text-[10px] font-bold text-emerald-800 uppercase mb-1">
-                          {hasTax ? 'Precio Unit. ($)' : 'Precio Unit. ($)'}
+                      {/* 4. P. Unitario sin IVA ($) */}
+                      <div className="sm:col-span-2">
+                        <label className="block sm:hidden text-[10px] font-bold text-emerald-800 uppercase mb-1">
+                          P. Unitario sin IVA ($)
                         </label>
                         <input
                           type="number"
@@ -804,53 +818,41 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                           value={scale.price !== undefined && scale.price !== null ? scale.price : ''}
                           onChange={(e) => handleScalePriceChange(scale.id, e.target.value)}
                           onBlur={() => handleScalePriceBlur(scale.id)}
-                          className="w-full px-2.5 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-800 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                          className="w-full px-2 py-1.5 bg-emerald-50/70 border border-emerald-300 text-emerald-800 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                           title="Precio unitario sin IVA (base imponible)"
                         />
-                        {!hasTax && currentCost > 0 && (
-                          <div className="mt-0.5 text-[9px] font-mono text-center">
-                            <span className={`font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                              Mg: {marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%
-                            </span>
-                          </div>
-                        )}
                       </div>
 
-                      {hasTax && (
-                        <div className="sm:col-span-3">
-                          <label className="block text-[10px] font-bold text-orange-700 uppercase mb-1 flex items-center justify-between">
-                            <span>P. Venta con IVA ($)</span>
-                            {currentCost > 0 && (
-                              <span className={`text-[9px] font-mono font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                                ({marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%)
-                              </span>
-                            )}
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="0.00"
-                            value={scalePriceWithTaxDisplay}
-                            onChange={(e) => handleScalePriceWithTaxChange(scale.id, e.target.value)}
-                            onBlur={() => handleScalePriceWithTaxBlur(scale.id)}
-                            className="w-full px-2.5 py-1.5 bg-white border border-orange-300 text-slate-900 font-mono font-bold rounded-lg text-xs focus:ring-2 focus:ring-orange-500 shadow-2xs"
-                            title="Precio de venta con IVA incluido para esta escala"
-                          />
-                        </div>
-                      )}
+                      {/* 5. P. Unitario con IVA ($) — ¡COLUMNA SOLICITADA! */}
+                      <div className="sm:col-span-2">
+                        <label className="block sm:hidden text-[10px] font-bold text-orange-700 uppercase mb-1 flex items-center justify-between">
+                          <span>P. Unitario con IVA ($)</span>
+                          <span className="text-[9px] font-mono text-orange-600 font-bold">({currentTax}%)</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={scalePriceWithTaxDisplay}
+                          onChange={(e) => handleScalePriceWithTaxChange(scale.id, e.target.value)}
+                          onBlur={() => handleScalePriceWithTaxBlur(scale.id)}
+                          className="w-full px-2 py-1.5 bg-orange-50/70 border border-orange-300 text-orange-950 font-mono font-bold text-center rounded-lg text-xs focus:ring-2 focus:ring-orange-500 shadow-2xs"
+                          title={`Precio unitario con IVA incluido (${currentTax}%)`}
+                        />
+                      </div>
 
-                      {!hasTax && (
-                        <div className="sm:col-span-2 text-center">
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                            Margen
-                          </label>
-                          <div className={`py-1 text-xs font-mono font-bold ${marginPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)}%
-                          </div>
+                      {/* 6. Margen % */}
+                      <div className="sm:col-span-1 text-center">
+                        <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          Margen
+                        </label>
+                        <div className={`py-1 text-[11px] font-mono font-black ${currentCost > 0 ? (marginPct < 0 ? 'text-rose-600' : 'text-emerald-600') : 'text-slate-400'}`}>
+                          {currentCost > 0 ? `${marginPct >= 0 ? '+' : ''}${marginPct.toFixed(0)}%` : '-'}
                         </div>
-                      )}
+                      </div>
 
+                      {/* 7. Acción */}
                       <div className="sm:col-span-1 flex justify-end items-center">
                         <button
                           type="button"

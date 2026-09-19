@@ -26,7 +26,8 @@ import {
   ArrowLeftRight,
   Lock,
   Unlock,
-  PackageCheck
+  PackageCheck,
+  Layers
 } from 'lucide-react';
 import { 
   CartItem, 
@@ -38,9 +39,10 @@ import {
   Product, 
   ProductCategory, 
   Promotion, 
-  StoreSettings 
+  StoreSettings,
+  PriceScale
 } from '../../types';
-import { formatCurrency, generateDocumentNumber } from '../../utils/formatters';
+import { formatCurrency, generateDocumentNumber, getEcuadorianDateTime } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
@@ -455,15 +457,30 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   };
 
   // Helper for Price Scales
-  const getPriceForQuantity = (product: Product, qty: number) => {
-    if (!product.priceScales || product.priceScales.length === 0) return product.price;
-    const sortedScales = [...product.priceScales].sort((a, b) => b.minQty - a.minQty);
+  const getActiveScaleForQuantity = (product: Product, qty: number): PriceScale | null => {
+    if (!product.priceScales || product.priceScales.length === 0) return null;
+    const sortedScales = [...product.priceScales]
+      .map((s) => ({
+        ...s,
+        minQty: Number(s.minQty) || 0,
+        maxQty: s.maxQty !== undefined && s.maxQty !== null && !isNaN(Number(s.maxQty)) ? Number(s.maxQty) : undefined,
+        price: Number(s.price) || 0,
+      }))
+      .filter((s) => s.minQty > 0 && s.price > 0)
+      .sort((a, b) => b.minQty - a.minQty);
+
     for (const scale of sortedScales) {
-      if (qty >= scale.minQty && (!scale.maxQty || qty <= scale.maxQty)) {
-        return scale.price;
+      if (qty >= scale.minQty && (scale.maxQty === undefined || qty <= scale.maxQty)) {
+        return scale;
       }
     }
-    return product.price;
+    return null;
+  };
+
+  const getPriceForQuantity = (product: Product, qty: number): number => {
+    const scale = getActiveScaleForQuantity(product, qty);
+    if (scale) return scale.price;
+    return Number(product.price) || 0;
   };
 
   // Cart operations
@@ -477,6 +494,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
       const taxRate = (typeof product.taxRate === 'number' ? product.taxRate : settings.defaultTaxRate) / 100;
       const baseUnitPrice = getPriceForQuantity(product, newQty);
+      const activeScale = getActiveScaleForQuantity(product, newQty);
+      const appliedScale = activeScale ? activeScale.name : undefined;
 
       const promo = getActivePromoForProduct(product, newQty);
       const manualDiscount = existing ? existing.discountPercent : 0;
@@ -498,14 +517,21 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         taxAmount: itemTaxAmount,
         total: itemTotal,
         appliedPromo,
+        appliedScale,
       };
 
       if (existing) {
+        if (activeScale && existing.appliedScale !== activeScale.name) {
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+        }
         if (promo && !existing.appliedPromo) {
           setTimeout(() => showToast(`🏷️ Promo aplicada: ${promo.name} (${promo.discountPercent}% OFF)`, 'success'), 0);
         }
         return prev.map((item) => (item.product.id === product.id ? updatedItem : item));
       } else {
+        if (activeScale) {
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+        }
         if (promo) {
           setTimeout(() => showToast(`🏷️ Promo aplicada: ${promo.name} (${promo.discountPercent}% OFF)`, 'success'), 0);
         }
@@ -522,6 +548,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         if (item.product.id !== productId) return item;
         const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
         const baseUnitPrice = getPriceForQuantity(item.product, newQty);
+        const activeScale = getActiveScaleForQuantity(item.product, newQty);
+        const appliedScale = activeScale ? activeScale.name : undefined;
+
+        if (activeScale && item.appliedScale !== activeScale.name) {
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+        } else if (!activeScale && item.appliedScale) {
+          setTimeout(() => showToast(`ℹ️ Cantidad menor al rango de escala. Aplicando precio regular.`, 'info'), 0);
+        }
 
         const promo = getActivePromoForProduct(item.product, newQty);
         let discountPct = item.discountPercent;
@@ -550,6 +584,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
           taxAmount: itemTaxAmount,
           total: itemTotal,
           appliedPromo,
+          appliedScale,
         };
       })
     );
@@ -784,7 +819,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       series: docInfo.series,
       number: docInfo.number,
       fullNumber: docInfo.fullNumber,
-      createdAt: new Date().toISOString(),
+      createdAt: getEcuadorianDateTime().isoLocal,
       customer: selectedCustomer,
       items: cartItems.map((item) => ({
         productId: item.product.id,
@@ -1367,6 +1402,12 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                     🔥 PROMO: {promo.discountPercent}% OFF · {promo.name || promo.code}
                                   </span>
                                 )}
+                                {p.priceScales && p.priceScales.length > 0 && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                                    <Layers className="w-3 h-3 text-indigo-500" />
+                                    {p.priceScales.length} {p.priceScales.length === 1 ? 'Escala' : 'Escalas'}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-slate-500 flex items-center gap-2 flex-wrap">
                                 <span>Cat: {p.category}</span>
@@ -1385,6 +1426,21 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                   </>
                                 )}
                               </div>
+                              {p.priceScales && p.priceScales.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-50/90 px-1.5 py-0.5 rounded border border-indigo-200/80">
+                                    Escalas x volumen:
+                                  </span>
+                                  {p.priceScales.map((scale, sIdx) => {
+                                    const sPriceWithTax = Number(scale.price) * (1 + taxRate / 100);
+                                    return (
+                                      <span key={sIdx} className="text-[9px] font-mono font-bold bg-white text-indigo-950 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs">
+                                        {scale.name || `E${sIdx+1}`} ({scale.minQty}+ {p.unit}): <strong className="text-indigo-700">{formatCurrency(sPriceWithTax, settings.currencySymbol)}</strong>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                             <div className="text-right pl-3 shrink-0">
                               {promo ? (
@@ -1407,6 +1463,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                   <div className="text-[10px] text-slate-400 font-mono">
                                     Sin IVA: {formatCurrency(p.price, settings.currencySymbol)}
                                   </div>
+                                  {p.priceScales && p.priceScales.length > 0 && (
+                                    <div className="text-[9px] text-indigo-600 font-extrabold font-mono">
+                                      Desde {formatCurrency(Math.min(...p.priceScales.map(s => Number(s.price))) * (1 + taxRate / 100), settings.currencySymbol)} x mayor
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               <span className="block text-[10px] text-emerald-600 font-bold mt-0.5">
@@ -1481,67 +1542,139 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    cartItems.map((item) => (
-                      <tr key={item.product.id} className="hover:bg-slate-50/80 transition">
-                        {/* Descripción */}
-                        <td className="py-2.5 px-3">
-                          <div className="font-bold text-slate-900 leading-tight">{item.product.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
-                            <span>SKU: {item.product.sku}</span>
-                            {item.product.stock !== undefined && (
-                              <span className="text-slate-500">Stock: {item.product.stock} {item.product.unit}</span>
-                            )}
-                            {item.appliedPromo && (
-                              <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100/90 border border-emerald-300 px-1.5 py-0.5 rounded font-black text-[10px] shadow-2xs">
-                                🔥 {item.appliedPromo}
-                              </span>
-                            )}
-                          </div>
-                        </td>
+                    cartItems.map((item) => {
+                      const hasScales = item.product.priceScales && item.product.priceScales.length > 0;
+                      const activeScale = hasScales ? getActiveScaleForQuantity(item.product, item.quantity) : null;
+                      const nextScale = hasScales
+                        ? [...item.product.priceScales!]
+                            .map((s) => ({ ...s, minQty: Number(s.minQty), price: Number(s.price) }))
+                            .filter((s) => s.minQty > item.quantity)
+                            .sort((a, b) => a.minQty - b.minQty)[0]
+                        : null;
 
-                        {/* Cantidad */}
-                        <td className="py-2.5 px-2 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nextQty = item.quantity <= 1 ? Math.max(0.1, +(item.quantity - 0.25).toFixed(2)) : +(item.quantity - 1).toFixed(2);
-                                handleUpdateQuantity(item.product.id, nextQty);
-                              }}
-                              className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
-                            >
-                              -
-                            </button>
+                      return (
+                        <tr key={item.product.id} className="hover:bg-slate-50/80 transition">
+                          {/* Descripción */}
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900 leading-tight">{item.product.name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span>SKU: {item.product.sku}</span>
+                              {item.product.stock !== undefined && (
+                                <span className="text-slate-500">Stock: {item.product.stock} {item.product.unit}</span>
+                              )}
+                              {item.appliedPromo && (
+                                <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-100/90 border border-emerald-300 px-1.5 py-0.5 rounded font-black text-[10px] shadow-2xs">
+                                  🔥 {item.appliedPromo}
+                                </span>
+                              )}
+                              {activeScale && (
+                                <span className="inline-flex items-center gap-1 text-indigo-900 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded font-black text-[10px] shadow-2xs" title={`Escala activa: ${activeScale.name}. Precio unitario base: $${activeScale.price.toFixed(2)} (normal: $${item.product.price.toFixed(2)})`}>
+                                  <Layers className="w-3 h-3 text-indigo-600" />
+                                  ✨ Escala: {activeScale.name} ({activeScale.minQty}+ {item.product.unit})
+                                </span>
+                              )}
+                              {item.discountPercent > 0 && (() => {
+                                const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                                const discSinIva = item.subtotal * (item.discountPercent / 100);
+                                const discConIva = discSinIva * (1 + taxR);
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold text-[10px]" title={`Descuento base SRI: -$${discSinIva.toFixed(2)} | Ahorro al cliente: -$${discConIva.toFixed(2)}`}>
+                                    Ahorro: -${discConIva.toFixed(2)} con IVA
+                                  </span>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Escalas disponibles con botón de acción rápida para fijar cantidad */}
+                            {hasScales && (
+                              <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                                <span className="inline-flex items-center gap-1 text-slate-500 font-extrabold text-[9px] uppercase tracking-wider">
+                                  <Layers className="w-2.5 h-2.5 text-indigo-500" />
+                                  Escalas ({item.product.priceScales!.length}):
+                                </span>
+                                {item.product.priceScales!.map((scale, sIdx) => {
+                                  const isThisActive = activeScale?.id === scale.id || (activeScale && activeScale.name === scale.name);
+                                  const scaleMin = Number(scale.minQty);
+                                  const scaleP = Number(scale.price);
+                                  const itemTaxRate = typeof item.product.taxRate === 'number' ? item.product.taxRate : (settings.defaultTaxRate ?? 15);
+                                  const scalePWithTax = scaleP * (1 + itemTaxRate / 100);
+                                  return (
+                                    <button
+                                      key={sIdx}
+                                      type="button"
+                                      onClick={() => handleUpdateQuantity(item.product.id, scaleMin)}
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border transition cursor-pointer ${
+                                        isThisActive
+                                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                                          : 'bg-indigo-50/70 hover:bg-indigo-100 text-indigo-900 border-indigo-200/90'
+                                      }`}
+                                      title={`Fijar cantidad a ${scaleMin} para aplicar ${scale.name || `Escala ${sIdx + 1}`}: $${scaleP.toFixed(2)} sin IVA ($${scalePWithTax.toFixed(2)} con IVA)`}
+                                    >
+                                      {isThisActive ? '✓ ' : ''}{scale.name || `Escala ${sIdx + 1}`} ({scaleMin}+): ${scaleP.toFixed(2)}{itemTaxRate > 0 ? ` ($${scalePWithTax.toFixed(2)} c/IVA)` : ''}
+                                    </button>
+                                  );
+                                })}
+                                {!activeScale && nextScale && (
+                                  <span className="text-[9px] text-amber-700 font-semibold ml-1">
+                                    (Faltan {Math.max(0, +(nextScale.minQty - item.quantity).toFixed(2))} {item.product.unit} para activar {nextScale.name})
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Cantidad */}
+                          <td className="py-2.5 px-2 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextQty = item.quantity <= 1 ? Math.max(0.1, +(item.quantity - 0.25).toFixed(2)) : +(item.quantity - 1).toFixed(2);
+                                  handleUpdateQuantity(item.product.id, nextQty);
+                                }}
+                                className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
+                              >
+                                -
+                              </button>
+                              <DecimalInput
+                                value={item.quantity}
+                                onChange={(newQty) => handleUpdateQuantity(item.product.id, newQty)}
+                                onBlurFallback={1}
+                                min={0.0001}
+                                className="w-14 text-center font-black font-mono border border-slate-200 rounded py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextQty = item.quantity < 1 ? +(item.quantity + 0.25).toFixed(2) : +(item.quantity + 1).toFixed(2);
+                                  handleUpdateQuantity(item.product.id, nextQty);
+                                }}
+                                className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* Precio Unitario */}
+                          <td className="py-2.5 px-2 text-right">
                             <DecimalInput
-                              value={item.quantity}
-                              onChange={(newQty) => handleUpdateQuantity(item.product.id, newQty)}
-                              onBlurFallback={1}
-                              min={0.0001}
-                              className="w-14 text-center font-black font-mono border border-slate-200 rounded py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              value={item.unitPrice}
+                              onChange={(newPrice) => handleUpdateUnitPrice(item.product.id, newPrice)}
+                              onBlurFallback={0}
+                              min={0}
+                              className="w-20 text-right font-bold font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:ring-1 focus:ring-orange-500 focus:outline-none"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nextQty = item.quantity < 1 ? +(item.quantity + 0.25).toFixed(2) : +(item.quantity + 1).toFixed(2);
-                                handleUpdateQuantity(item.product.id, nextQty);
-                              }}
-                              className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer text-xs"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </td>
-
-                        {/* Precio Unitario */}
-                        <td className="py-2.5 px-2 text-right">
-                          <DecimalInput
-                            value={item.unitPrice}
-                            onChange={(newPrice) => handleUpdateUnitPrice(item.product.id, newPrice)}
-                            onBlurFallback={0}
-                            min={0}
-                            className="w-20 text-right font-bold font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:ring-1 focus:ring-orange-500 focus:outline-none"
-                          />
-                        </td>
+                            {activeScale ? (
+                              <span className="text-[9px] font-bold text-indigo-600 block text-right font-mono" title={`Precio de escala "${activeScale.name}" aplicado automáticamente`}>
+                                ⚡ {activeScale.name}
+                              </span>
+                            ) : hasScales ? (
+                              <span className="text-[9px] text-slate-400 block text-right font-mono" title="Este producto cuenta con escalas de precio">
+                                {item.product.priceScales!.length} escalas disp.
+                              </span>
+                            ) : null}
+                          </td>
 
                         {/* Tarifa IVA (Custom Popover Dropdown) */}
                         <td className="py-2.5 px-2 text-center">
@@ -1609,16 +1742,39 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                               }`}
                             />
                             {item.discountPercent > 0 && (
-                              <span className="text-[9px] font-black text-emerald-700 mt-0.5">
-                                {item.appliedPromo ? '🏷️ Promo' : '% desc.'}
-                              </span>
+                              <div className="mt-0.5 text-center">
+                                <span className="text-[9px] font-black text-emerald-700 block whitespace-nowrap">
+                                  {item.appliedPromo ? '🏷️ Promo' : '% desc.'}
+                                </span>
+                                {(() => {
+                                  const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                                  const discSinIva = item.subtotal * (item.discountPercent / 100);
+                                  const discConIva = discSinIva * (1 + taxR);
+                                  return (
+                                    <span className="text-[9px] font-bold text-emerald-600 font-mono block whitespace-nowrap" title={`Descuento Sin IVA: -$${discSinIva.toFixed(2)} | Ahorro Con IVA: -$${discConIva.toFixed(2)}`}>
+                                      -${discConIva.toFixed(2)}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                             )}
                           </div>
                         </td>
 
                         {/* Valor Total */}
-                        <td className="py-2.5 px-3 text-right font-black font-mono text-slate-900 text-sm">
-                          {formatCurrency(item.total, settings.currencySymbol)}
+                        <td className="py-2.5 px-3 text-right">
+                          {item.discountPercent > 0 && (() => {
+                            const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                            const originalTotalConIva = (item.quantity * item.unitPrice) * (1 + taxR);
+                            return (
+                              <span className="block text-[10px] font-mono text-slate-400 line-through">
+                                {formatCurrency(originalTotalConIva, settings.currencySymbol)}
+                              </span>
+                            );
+                          })()}
+                          <span className="font-black font-mono text-slate-900 text-sm block">
+                            {formatCurrency(item.total, settings.currencySymbol)}
+                          </span>
                         </td>
 
                         {/* Eliminar */}
@@ -1633,7 +1789,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                           </button>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1905,12 +2062,34 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
             <div className="border-t border-slate-100 my-2" />
 
-            <div className="flex justify-between text-slate-600 font-medium">
-              <span>Total descuento:</span>
-              <span className="font-mono font-bold text-rose-600">
-                {formatCurrency(sriBreakdown.totalDescuento, settings.currencySymbol)}
-              </span>
-            </div>
+            {sriBreakdown.totalDescuento > 0 ? (
+              <div className="p-2.5 bg-rose-50/70 border border-rose-200/80 rounded-2xl space-y-1 my-1">
+                <div className="flex justify-between items-center text-slate-700 font-bold">
+                  <span className="flex items-center gap-1 text-rose-700">
+                    <Tag className="w-3.5 h-3.5" />
+                    <span>Total descuento (Base SRI):</span>
+                  </span>
+                  <span className="font-mono font-black text-rose-600">
+                    -{formatCurrency(sriBreakdown.totalDescuento, settings.currencySymbol)}
+                  </span>
+                </div>
+                {sriBreakdown.totalDescuentoConIva && sriBreakdown.totalDescuentoConIva > 0 && (
+                  <div className="flex justify-between items-center text-[11px] text-emerald-700 font-black pt-1 border-t border-rose-200/60">
+                    <span>🎉 Ahorro real del cliente (Con IVA):</span>
+                    <span className="font-mono font-black text-emerald-600">
+                      -{formatCurrency(sriBreakdown.totalDescuentoConIva, settings.currencySymbol)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex justify-between text-slate-600 font-medium">
+                <span>Total descuento:</span>
+                <span className="font-mono font-bold text-slate-400">
+                  {formatCurrency(0, settings.currencySymbol)}
+                </span>
+              </div>
+            )}
 
             <div className="flex justify-between text-slate-600 font-medium">
               <span>Valor ICE:</span>

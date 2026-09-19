@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { CreditCard, X, AlertCircle, FileText, User } from 'lucide-react';
 import { Invoice, StoreSettings, CreditNoteData } from '../../types';
 import { Select } from '../Shared/Select';
+import { getEcuadorianDateTime } from '../../utils/formatters';
 
 interface CreateCreditNoteModalProps {
   onClose: () => void;
@@ -98,10 +99,10 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
     const subtotal = Math.round(selectedInvoice.subtotal * ratio * 100) / 100;
     const tax = Math.round((amountVal - subtotal) * 100) / 100;
 
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
+    const ecDateTime = getEcuadorianDateTime();
+    const day = ecDateTime.day;
+    const month = ecDateTime.month;
+    const year = ecDateTime.year;
     const dateStr = `${day}${month}${year}`;
     const ruc = (settings.taxId || '1790012345001').padStart(13, '0');
     const ambiente = '1';
@@ -120,6 +121,12 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
     const dv = rem === 0 ? 0 : rem === 1 ? 1 : 11 - rem;
     const claveAcceso = `${baseKey}${dv}`;
 
+    const isConsumidorFinal =
+      (selectedInvoice.customer?.docNumber || '').trim() === '9999999999999' ||
+      (selectedInvoice.customer?.docNumber || '').trim() === '9999999999' ||
+      (selectedInvoice.customer?.name || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+      (selectedInvoice.customer?.name || '').toUpperCase().includes('PUBLICO GENERAL');
+
     onSave({
       id: `${establishment}-${emissionPoint}-${secCreditNote}`,
       invoiceRef: selectedInvoice.fullNumber || selectedInvoice.id,
@@ -135,14 +142,14 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
       subtotal,
       tax,
       items: selectedInvoice.items,
-      date: now.toISOString(),
-      status: 'AUTORIZADO',
+      date: ecDateTime.isoLocal,
+      status: isConsumidorFinal ? 'COMPROBANTE_INTERNO' : 'AUTORIZADO',
       establishment,
       emissionPoint,
       secNumber: secCreditNote,
       claveAcceso,
       numeroAutorizacion: claveAcceso,
-      fechaAutorizacion: now.toISOString(),
+      fechaAutorizacion: ecDateTime.isoLocal,
       restoreStock,
     });
   };
@@ -211,6 +218,24 @@ export const CreateCreditNoteModal: React.FC<CreateCreditNoteModalProps> = ({
                 <p className="text-slate-500">Monto Original Factura: <span className="font-mono font-black text-slate-900">${selectedInvoice.total.toFixed(2)}</span></p>
                 <p className="text-slate-500">Fecha de Emisión: {new Date(selectedInvoice.createdAt).toLocaleDateString()}</p>
               </div>
+            )}
+
+            {selectedInvoice && (
+              ((selectedInvoice.customer?.docNumber || '').trim() === '9999999999999' ||
+              (selectedInvoice.customer?.docNumber || '').trim() === '9999999999' ||
+              (selectedInvoice.customer?.name || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+              (selectedInvoice.customer?.name || '').toUpperCase().includes('PUBLICO GENERAL')) && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start gap-2.5 text-xs text-amber-900 animate-fadeIn">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-amber-950">Aviso SRI — Factura a Consumidor Final</p>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Según la <strong>Resolución SRI NAC-DGERCGC25-00000017</strong>, las facturas a <strong>Consumidor Final</strong> no admiten Notas de Crédito electrónicas autorizadas ante el SRI.
+                      Esta acción registrará un <strong>Comprobante Interno de Devolución</strong> para restituir el stock al inventario y registrar la anulación interna sin enviar al SRI (evitando rechazos y errores de recepción).
+                    </p>
+                  </div>
+                </div>
+              )
             )}
 
             <div className="space-y-1.5">

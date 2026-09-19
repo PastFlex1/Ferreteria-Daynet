@@ -56,6 +56,7 @@ export interface CartItem {
   taxAmount: number;
   total: number;
   appliedPromo?: string; // nombre/código de la promo aplicada automáticamente
+  appliedScale?: string; // nombre de la escala de precios por volumen aplicada
 }
 
 export interface PromotionItem {

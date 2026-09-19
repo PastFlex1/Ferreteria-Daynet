@@ -14,6 +14,7 @@ export function calculateSriTotals(
   let subtotalNoObjeto = 0;
   let subtotalExento = 0;
   let totalDescuento = 0;
+  let totalDescuentoConIva = 0;
   let iva15 = 0;
   let iva5 = 0;
   let ivaEspecial = 0;
@@ -43,6 +44,9 @@ export function calculateSriTotals(
       const calcPct = Math.round((item.taxAmount / baseAfterDiscount) * 100);
       taxRate = calcPct;
     }
+
+    const itemDiscountConIva = Math.round((itemDiscount * (1 + (taxRate / 100))) * 100) / 100;
+    totalDescuentoConIva = Math.round((totalDescuentoConIva + itemDiscountConIva) * 100) / 100;
 
     const calculatedTax = item.taxAmount !== undefined && item.taxAmount >= 0
       ? Math.round(item.taxAmount * 100) / 100
@@ -83,6 +87,7 @@ export function calculateSriTotals(
     subtotalNoObjeto,
     subtotalExento,
     totalDescuento,
+    totalDescuentoConIva,
     valorIce: valorICE,
     iva15,
     iva5,

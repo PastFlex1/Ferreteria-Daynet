@@ -9,7 +9,8 @@ import {
   CreditCard,
   Send,
   RefreshCw,
-  ShieldCheck 
+  ShieldCheck,
+  AlertCircle 
 } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import { CreditNoteData, Invoice, StoreSettings } from '../../types';
@@ -47,8 +48,22 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
 
   const claveAcceso = creditNote?.claveAcceso || creditNote?.numeroAutorizacion || '040920260417900123450011001001000000001123456781';
 
+  const isConsumidorFinal =
+    (creditNote?.customerRuc || '').trim() === '9999999999999' ||
+    (creditNote?.customerRuc || '').trim() === '9999999999' ||
+    (creditNote?.customer || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+    (creditNote?.customer || '').toUpperCase().includes('PUBLICO GENERAL');
+
   const handleTransmitSri = async () => {
     if (!creditNote) return;
+    if (isConsumidorFinal) {
+      showAlert(
+        'Por disposición del SRI (Resolución NAC-DGERCGC25-00000017), las facturas emitidas a "Consumidor Final" no pueden ser anuladas ni modificadas mediante Notas de Crédito electrónicas autorizadas ante el SRI.\n\nEste documento opera válidamente como Comprobante Interno de Devolución para reingresar mercadería al Kardex y registrar el movimiento en caja.',
+        'Aviso SRI: Consumidor Final',
+        'warning'
+      );
+      return;
+    }
     setIsTransmitting(true);
     showToast('Conectando con backend Java (:8080) para firmar y enviar al SRI...', 'info');
     try {
@@ -151,10 +166,18 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-black tracking-tight text-white">
-                  Nota de Crédito Electrónica
+                  Nota de Crédito {isConsumidorFinal ? 'Interna' : 'Electrónica'}
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                  {creditNote.status || 'AUTORIZADO'}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                  isConsumidorFinal || creditNote.status === 'COMPROBANTE_INTERNO'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                    : creditNote.status === 'AUTORIZADO'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                }`}>
+                  {isConsumidorFinal || creditNote.status === 'COMPROBANTE_INTERNO'
+                    ? 'COMPROBANTE INTERNO (DEVOLUCIÓN)'
+                    : (creditNote.status || 'AUTORIZADO')}
                 </span>
               </div>
               <p className="text-xs font-mono text-slate-400 font-bold mt-0.5">
@@ -164,7 +187,7 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {creditNote.status !== 'AUTORIZADO' && (
+            {creditNote.status !== 'AUTORIZADO' && !isConsumidorFinal && creditNote.status !== 'COMPROBANTE_INTERNO' && (
               <button
                 type="button"
                 onClick={handleTransmitSri}
@@ -179,6 +202,13 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
                 )}
                 <span>{isTransmitting ? 'Transmitiendo...' : 'Transmitir SRI'}</span>
               </button>
+            )}
+
+            {isConsumidorFinal && (
+              <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-[11px] font-bold hidden sm:inline-flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                No Transmitible SRI
+              </span>
             )}
 
             <button
@@ -224,6 +254,19 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
         {/* Modal Body: Standard RIDE SRI format */}
         <div className="p-6 sm:p-8 overflow-y-auto space-y-5 bg-white text-slate-900 text-xs">
           
+          {/* Top Info Banner for Consumidor Final */}
+          {isConsumidorFinal && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200/90 rounded-2xl flex items-start gap-2.5 text-xs text-amber-900 print:hidden">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black text-amber-950">DOCUMENTO DE CONTROL INTERNO — CONSUMIDOR FINAL</p>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  Según la <strong>Resolución SRI NAC-DGERCGC25-00000017</strong>, las facturas emitidas a Consumidor Final no admiten emisión ni autorización de Notas de Crédito electrónicas ante el SRI. Este comprobante opera legalmente para <strong>devolución de inventario en Kardex</strong> y anulación de valores en caja.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Top Section: Issuer Info + Official SRI Box */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
             

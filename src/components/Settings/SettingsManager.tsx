@@ -649,9 +649,50 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     e.preventDefault();
     if (!newUser.name || !newUser.email || !newUser.username || !newUser.password) return;
     if (editingUser) {
+      const roleChanged = (editingUser.role || '').toLowerCase() !== (newUser.role || '').toLowerCase();
+      let newPermissions = editingUser.permissions;
+      let hasCustomPermissions = editingUser.hasCustomPermissions;
+
+      if (roleChanged) {
+        // Al cambiar de rol, re-sincronizar permisos con la definición del nuevo rol
+        const foundRole = rolesList.find(
+          (r) => r.name.toLowerCase() === newUser.role.toLowerCase() || r.id === newUser.role
+        );
+        const rolePerms = foundRole?.permissions || ROLE_PRESETS[newUser.role]?.permissions || {};
+        newPermissions = {};
+        ALL_PERMISSIONS.forEach((p) => {
+          newPermissions[p.id] = !!rolePerms[p.id];
+        });
+        hasCustomPermissions = false;
+      }
+
+      const updatedUser = {
+        ...editingUser,
+        ...newUser,
+        permissions: newPermissions,
+        hasCustomPermissions
+      };
+
       setUsersList(
-        usersList.map(u => u.id === editingUser.id ? { ...u, ...newUser } : u)
+        usersList.map(u => u.id === editingUser.id ? updatedUser : u)
       );
+
+      // Si el usuario editado es el usuario en sesión activa, actualizar sesión de inmediato
+      if (currentUser && (currentUser.id === editingUser.id || currentUser.username === editingUser.username)) {
+        const updatedCurr = { 
+          ...currentUser, 
+          ...newUser, 
+          permissions: newPermissions,
+          hasCustomPermissions
+        };
+        if (setCurrentUser) {
+          setCurrentUser(updatedCurr);
+        }
+        try {
+          sessionStorage.setItem('ferreteria_current_user', JSON.stringify(updatedCurr));
+        } catch (e) {}
+      }
+
       showToast('Usuario actualizado correctamente', 'success');
     } else {
       const foundRole = rolesList.find(
@@ -673,7 +714,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           role: newUser.role,
           status: 'Activo',
           password: newUser.password,
-          permissions: newMap
+          permissions: newMap,
+          hasCustomPermissions: false
         }
       ]);
       showToast('Usuario creado correctamente', 'success');
@@ -691,6 +733,39 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       const updated = [...rolesList];
       updated[existingIndex] = role;
       setRolesList(updated);
+
+      // Propagar en tiempo real los permisos actualizados a todos los usuarios asignados a este rol
+      setUsersList((prevUsers: any[]) =>
+        prevUsers.map((u: any) => {
+          if ((u.role || '').toLowerCase() === role.name.toLowerCase() && !u.hasCustomPermissions) {
+            const newPerms: Record<string, boolean> = {};
+            ALL_PERMISSIONS.forEach((p) => {
+              newPerms[p.id] = !!role.permissions[p.id];
+            });
+            return { ...u, permissions: newPerms };
+          }
+          return u;
+        })
+      );
+
+      // Si el usuario en sesión activa tiene este rol, actualizar su sesión en tiempo real
+      if (currentUser && (currentUser.role || '').toLowerCase() === role.name.toLowerCase() && !(currentUser as any).hasCustomPermissions) {
+        const newPerms: Record<string, boolean> = {};
+        ALL_PERMISSIONS.forEach((p) => {
+          newPerms[p.id] = !!role.permissions[p.id];
+        });
+        const updatedCurr = {
+          ...currentUser,
+          permissions: newPerms
+        };
+        if (setCurrentUser) {
+          setCurrentUser(updatedCurr);
+        }
+        try {
+          sessionStorage.setItem('ferreteria_current_user', JSON.stringify(updatedCurr));
+        } catch (e) {}
+      }
+
       showToast(`Rol "${role.name}" actualizado correctamente.`, 'success');
     } else {
       setRolesList([...rolesList, role]);
@@ -777,7 +852,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setUsersList((prev: any[]) =>
       prev.map((u: any) =>
         u.id === userId
-          ? { ...u, permissions: updatedPermissions, ...(newRole ? { role: newRole } : {}) }
+          ? { ...u, permissions: updatedPermissions, ...(newRole ? { role: newRole } : {}), hasCustomPermissions: true }
           : u
       )
     );
@@ -787,7 +862,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       const updatedCurr = { 
         ...currentUser, 
         permissions: updatedPermissions, 
-        ...(newRole ? { role: newRole } : {}) 
+        ...(newRole ? { role: newRole } : {}),
+        hasCustomPermissions: true
       };
       if (setCurrentUser) {
         setCurrentUser(updatedCurr);

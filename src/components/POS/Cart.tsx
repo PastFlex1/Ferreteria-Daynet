@@ -333,14 +333,30 @@ export const Cart: React.FC<CartProps> = ({
 
                 {/* Item Total */}
                 <div className="text-right">
-                  {item.appliedPromo && item.discountPercent > 0 && (
-                    <span className="block text-[9px] font-mono text-slate-400 line-through">
-                      {formatCurrency(item.quantity * item.unitPrice, settings.currencySymbol)}
+                  {item.discountPercent > 0 && (() => {
+                    const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                    const originalTotalConIva = (item.quantity * item.unitPrice) * (1 + taxR);
+                    const discSinIva = item.subtotal * (item.discountPercent / 100);
+                    const discConIva = discSinIva * (1 + taxR);
+                    return (
+                      <>
+                        <span className="block text-[9px] font-mono text-slate-400 line-through">
+                          {formatCurrency(originalTotalConIva, settings.currencySymbol)}
+                        </span>
+                        <span className="font-mono font-black text-slate-950 text-sm block">
+                          {formatCurrency(item.total, settings.currencySymbol)}
+                        </span>
+                        <span className="block text-[9px] font-bold text-emerald-600 font-mono" title={`Descuento Sin IVA: -$${discSinIva.toFixed(2)} | Ahorro Con IVA: -$${discConIva.toFixed(2)}`}>
+                          Ahorro: -{formatCurrency(discConIva, settings.currencySymbol)}
+                        </span>
+                      </>
+                    );
+                  })()}
+                  {item.discountPercent <= 0 && (
+                    <span className="font-mono font-black text-slate-950 text-sm block">
+                      {formatCurrency(item.total, settings.currencySymbol)}
                     </span>
                   )}
-                  <span className="font-mono font-black text-slate-950 text-sm">
-                    {formatCurrency(item.total, settings.currencySymbol)}
-                  </span>
                 </div>
               </div>
             </div>
@@ -359,9 +375,17 @@ export const Cart: React.FC<CartProps> = ({
           </div>
 
           {discountTotal > 0 && (
-            <div className="flex justify-between text-rose-400 font-medium text-[11px]">
-              <span>Descuento aplicado:</span>
-              <span className="font-mono font-bold">-{formatCurrency(discountTotal, settings.currencySymbol)}</span>
+            <div className="space-y-0.5">
+              <div className="flex justify-between text-rose-400 font-medium text-[11px]">
+                <span>Descuento SRI (Sin IVA):</span>
+                <span className="font-mono font-bold">-{formatCurrency(discountTotal, settings.currencySymbol)}</span>
+              </div>
+              {sriBreakdown.totalDescuentoConIva && (
+                <div className="flex justify-between text-emerald-400 font-bold text-[11px]">
+                  <span>🎉 Ahorro con IVA:</span>
+                  <span className="font-mono font-black">-{formatCurrency(sriBreakdown.totalDescuentoConIva, settings.currencySymbol)}</span>
+                </div>
+              )}
             </div>
           )}
 

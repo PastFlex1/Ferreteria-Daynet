@@ -62,7 +62,7 @@ import {
   defaultSellers,
   defaultCategories
 } from './data/initialData';
-import { generateDocumentNumber } from './utils/formatters';
+import { generateDocumentNumber, getEcuadorianDateTime } from './utils/formatters';
 import { useModal } from './context/ModalContext';
 import { Lock, LogOut } from 'lucide-react';
 
@@ -77,10 +77,7 @@ const AuthorizedTabContent: React.FC<{
   const isTabPermitted = (tab: string): boolean => {
     if (isSuperAdmin) return true;
     const perm = TAB_TO_PERMISSION_MAP[tab];
-    if (!perm) return true;
-    if (typeof userPermissions[perm] === 'boolean') {
-      return userPermissions[perm];
-    }
+    if (!perm) return false;
     return can(perm);
   };
 
@@ -314,6 +311,41 @@ export default function App() {
       showToast(`Pedido ${targetOrderId} facturado con éxito con ${newInvoice.fullNumber}`, 'success');
     }
 
+    // Actualizar sesión de caja en tiempo real si está abierta y no es cotización
+    if (newInvoice.documentType !== 'COTIZACION') {
+      setCashSession((prev) => {
+        if (prev.status !== 'ABIERTA') return prev;
+        const total = Number(newInvoice.total) || 0;
+        let newCash = prev.totalSalesCash;
+        let newTransfer = prev.totalSalesTransfer;
+        let newCard = prev.totalSalesCard;
+        let newCredit = prev.totalSalesCredit;
+
+        const method = newInvoice.paymentMethod;
+        if (method === 'EFECTIVO' || method === '01') {
+          newCash += total;
+        } else if (method === 'TRANSFERENCIA' || method === '20') {
+          newTransfer += total;
+        } else if (method === 'TARJETA_DEBITO' || method === 'TARJETA_CREDITO' || method === '16' || method === '19') {
+          newCard += total;
+        } else if (method === 'CREDITO_CLIENTE') {
+          newCredit += total;
+        } else {
+          newCash += total;
+        }
+
+        return {
+          ...prev,
+          totalSalesCash: newCash,
+          totalSalesTransfer: newTransfer,
+          totalSalesCard: newCard,
+          totalSalesCredit: newCredit,
+          expectedCash: prev.initialCash + newCash,
+          totalInvoicesCount: (prev.totalInvoicesCount || 0) + 1,
+        };
+      });
+    }
+
     // If customer paid on credit, update customer debt balance
     if (newInvoice.paymentMethod === 'CREDITO_CLIENTE') {
       setCustomers((prev) =>
@@ -512,7 +544,7 @@ export default function App() {
   };
 
   const handleOpenCashRegister = (initialCash: number) => {
-    const nowIso = new Date().toISOString();
+    const nowIso = getEcuadorianDateTime().isoLocal;
     setCashSession({
       id: `session-${Date.now()}`,
       openedAt: nowIso,
@@ -557,7 +589,7 @@ export default function App() {
 
     const closedSession = {
       ...cashSession,
-      closedAt: new Date().toISOString(),
+      closedAt: getEcuadorianDateTime().isoLocal,
       actualCash: actualCashCount,
       expectedCash: expected,
       totalSalesCash: salesCash,
@@ -826,6 +858,7 @@ export default function App() {
             onDeleteProduct={handleDeleteProduct}
             onStockAdjust={handleStockAdjust}
             onBulkImportProducts={handleBulkImportProducts}
+            invoices={invoices}
           />
         )}
 

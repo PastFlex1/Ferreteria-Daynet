@@ -131,7 +131,18 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
               No hay escalas definidas. Haz clic en "Agregar Escala" para comenzar.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
+              {/* Cabecera de columnas para las escalas */}
+              <div className="hidden sm:grid grid-cols-12 gap-2 px-3 py-1.5 bg-slate-200/80 border border-slate-300 rounded-lg text-[10px] font-black uppercase text-slate-700 tracking-wider">
+                <div className="col-span-2">Nombre</div>
+                <div className="col-span-2 text-center">Cant. Desde</div>
+                <div className="col-span-2 text-center">Cant. Hasta</div>
+                <div className="col-span-2 text-center text-emerald-800">P. Unitario sin IVA ($)</div>
+                <div className="col-span-2 text-center text-orange-800">P. Unitario con IVA ($)</div>
+                <div className="col-span-1 text-center">Margen</div>
+                <div className="col-span-1 text-right">Acción</div>
+              </div>
+
               {priceScales.map((scale) => {
                 const scalePriceParsed = parseFloat(scale.price.toString()) || 0;
                 const scaleCostParsed = parseFloat(product.costPrice.toString()) || 0;
@@ -142,9 +153,9 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                 const allowFractional = product.allowFractional;
 
                 return (
-                  <div key={scale.id} className="grid grid-cols-1 sm:grid-cols-12 gap-3 p-3 bg-white border border-slate-200 rounded-xl items-center relative shadow-sm">
+                  <div key={scale.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-2.5 bg-white border border-slate-200 rounded-xl items-center relative shadow-2xs">
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre</label>
+                      <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre</label>
                       <input
                         type="text"
                         value={scale.name}
@@ -154,40 +165,41 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Desde</label>
+                      <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Desde</label>
                       <input
                         type="number"
                         step="any"
                         min="0.0001"
                         value={scale.minQty}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'minQty', e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 font-mono rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 font-mono text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Hasta</label>
+                      <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Cant. Hasta</label>
                       <input
                         type="number"
                         step="any"
                         placeholder="∞"
                         value={scale.maxQty || ''}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'maxQty', e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 font-mono rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 font-mono text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">Precio Un. ($)</label>
+                      <label className="block sm:hidden text-[10px] font-bold text-emerald-700 uppercase tracking-wider mb-1">P. Unitario sin IVA ($)</label>
                       <input
                         type="number"
                         step="0.01"
                         min="0"
                         value={scale.price}
                         onChange={(e) => handleUpdatePriceScale(scale.id, 'price', e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                        className="w-full px-2 py-1.5 bg-emerald-50/80 border border-emerald-300 text-emerald-800 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                        title="Precio unitario sin IVA (base)"
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-orange-700 uppercase tracking-wider mb-1">Precio con IVA ($)</label>
+                      <label className="block sm:hidden text-[10px] font-bold text-orange-700 uppercase tracking-wider mb-1">P. Unitario con IVA ($)</label>
                       <input
                         type="number"
                         step="0.01"
@@ -195,13 +207,13 @@ export const PriceScaleModal: React.FC<PriceScaleModalProps> = ({
                         placeholder="0.00"
                         value={scale.priceWithTax !== undefined && scale.priceWithTax !== null ? scale.priceWithTax : (scalePriceParsed > 0 ? scalePriceWithTax.toFixed(2) : '')}
                         onChange={(e) => handleScalePriceWithTax(scale.id, e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white border border-orange-300 text-slate-900 font-mono font-bold rounded-lg text-xs focus:ring-1 focus:ring-orange-500 shadow-2xs"
-                        title="Precio de venta con IVA incluido"
+                        className="w-full px-2 py-1.5 bg-orange-50/80 border border-orange-300 text-orange-950 font-mono font-bold text-center rounded-lg text-xs focus:ring-1 focus:ring-orange-500 shadow-2xs"
+                        title="Precio de venta unitario con IVA incluido"
                       />
                     </div>
-                    <div className="sm:col-span-1">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Ganancia</label>
-                      <div className={`px-1 py-1.5 font-bold rounded-lg text-[11px] ${scaleGananciaPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <div className="sm:col-span-1 text-center">
+                      <label className="block sm:hidden text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Margen</label>
+                      <div className={`px-1 py-1.5 font-bold rounded-lg text-[11px] font-mono ${scaleGananciaPct < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                         {scaleGananciaPct.toFixed(0)}%
                       </div>
                     </div>

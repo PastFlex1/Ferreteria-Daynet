@@ -1318,6 +1318,7 @@ export const TAB_TO_PERMISSION_MAP: Record<string, string> = {
   CAJA_CHICA: 'nav.finanzas.caja_chica',
   ACTIVOS_FIJOS: 'nav.activos',
   PRESUPUESTO: 'nav.finanzas.presupuesto',
+  CASH_REGISTER: 'cash.close_shift',
 
   // Contabilidad
   CONTABILIDAD_RESUMEN: 'nav.contabilidad.resumen',
@@ -1404,4 +1405,88 @@ export const DEFAULT_TAB_PRIORITY: string[] = [
   'REP_VENTAS',
   'CFG_EMPRESA',
 ];
+
+/**
+ * Auto-enlaza dependencias lógicas de permisos al activar una opción.
+ * Por ejemplo, si se activa emitir facturas en POS (pos.create_invoice), automáticamente
+ * habilita el acceso a la pantalla de Caja (nav.ventas.caja) y al módulo de Ventas (nav.ventas).
+ */
+export function autoLinkPermissionDependencies(
+  permissionId: string,
+  nextValue: boolean,
+  currentMap: PermissionMap
+): PermissionMap {
+  const next = { ...currentMap, [permissionId]: nextValue };
+  if (!nextValue) return next;
+
+  // Auto-activación de módulos contenedores y navegación correspondiente
+  if (permissionId.startsWith('pos.')) {
+    next['nav.ventas'] = true;
+    next['nav.ventas.caja'] = true;
+  } else if (permissionId.startsWith('sales.')) {
+    next['nav.ventas'] = true;
+    if (permissionId === 'sales.create_credit_note') next['nav.ventas.nota_credito'] = true;
+    else if (permissionId === 'sales.create_retention') next['nav.ventas.retencion'] = true;
+    else if (permissionId === 'sales.convert_quote' || permissionId === 'sales.delete_quote') next['nav.ventas.cotizaciones'] = true;
+    else next['nav.ventas.facturas'] = true;
+  } else if (permissionId.startsWith('inventory.')) {
+    next['nav.inventario'] = true;
+    next['nav.inventario.productos'] = true;
+    if (permissionId === 'inventory.bulk_price_update') next['nav.inventario.precios_masivos'] = true;
+    if (permissionId === 'inventory.stock_manual_adjust') next['nav.inventario.ajustes'] = true;
+  } else if (permissionId.startsWith('customers.')) {
+    next['nav.clientes'] = true;
+    next['nav.clientes.lista'] = true;
+    if (permissionId === 'customers.collect_payment' || permissionId === 'customers.edit_credit_limit') {
+      next['nav.clientes.cuentas_cobrar'] = true;
+    }
+  } else if (permissionId.startsWith('cash.')) {
+    next['nav.ventas'] = true;
+    next['nav.ventas.caja'] = true;
+  } else if (permissionId.startsWith('purchases.')) {
+    next['nav.compras'] = true;
+    next['nav.compras.facturas'] = true;
+    if (permissionId === 'purchases.create_order') next['nav.compras.ordenes'] = true;
+  } else if (permissionId.startsWith('suppliers.')) {
+    next['nav.proveedores'] = true;
+    next['nav.proveedores.directorio'] = true;
+    if (permissionId === 'suppliers.pay_debt') next['nav.proveedores.cuentas_pagar'] = true;
+  } else if (permissionId.startsWith('finance.')) {
+    next['nav.finanzas'] = true;
+    next['nav.finanzas.bancos'] = true;
+  } else if (permissionId.startsWith('accounting.')) {
+    next['nav.contabilidad'] = true;
+    next['nav.contabilidad.resumen'] = true;
+    if (permissionId === 'accounting.journal_entries') next['nav.contabilidad.asientos'] = true;
+    if (permissionId === 'accounting.ats_export') next['nav.contabilidad.ats'] = true;
+  } else if (permissionId.startsWith('hr.')) {
+    next['nav.rrhh'] = true;
+    if (permissionId === 'hr.calculate_payroll') next['nav.rrhh.roles'] = true;
+    else next['nav.rrhh.empleados'] = true;
+  } else if (permissionId.startsWith('reports.')) {
+    next['nav.reportes'] = true;
+    if (permissionId === 'reports.view_sales') next['nav.reportes.ventas'] = true;
+    else if (permissionId === 'reports.view_profits') next['nav.reportes.rentabilidad'] = true;
+    else if (permissionId === 'reports.view_inventory_valuation') next['nav.reportes.inventario'] = true;
+    else if (permissionId === 'reports.view_commissions') next['nav.reportes.ventas'] = true;
+  } else if (permissionId.startsWith('settings.')) {
+    next['nav.configuracion'] = true;
+    if (permissionId === 'settings.company_info') next['nav.configuracion.empresa'] = true;
+    if (permissionId === 'settings.users_manage') next['nav.configuracion.usuarios'] = true;
+    if (permissionId === 'settings.sri_signature') next['nav.configuracion.firma'] = true;
+  } else if (permissionId.startsWith('nav.')) {
+    const parts = permissionId.split('.');
+    if (parts.length > 2) {
+      const parentNav = parts.slice(0, 2).join('.');
+      next[parentNav] = true;
+    }
+    if (permissionId === 'nav.ventas.caja') {
+      next['nav.ventas'] = true;
+      next['pos.create_invoice'] = true;
+    }
+  }
+
+  return next;
+}
+
 

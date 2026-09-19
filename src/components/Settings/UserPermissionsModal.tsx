@@ -22,7 +22,8 @@ import {
   PermissionMap, 
   PermissionDefinition,
   SystemRole,
-  getCombinedRolePresets
+  getCombinedRolePresets,
+  autoLinkPermissionDependencies
 } from '../../types/permissions';
 import { SystemUser } from '../../types';
 
@@ -110,28 +111,11 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
     return map;
   }, [filteredPermissions]);
 
-  // Manejo de toggle individual con auto-activación de módulo padre
+  // Manejo de toggle individual con auto-activación de dependencias
   const handleTogglePermission = (permissionId: string) => {
     setPermissions((prev) => {
       const nextVal = !prev[permissionId];
-      const next = {
-        ...prev,
-        [permissionId]: nextVal,
-      };
-
-      // Si activamos una subsección (ej: nav.ventas.caja, nav.reportes.ventas),
-      // asegurar que el módulo contenedor esté habilitado para que se muestre en el menú
-      if (nextVal && permissionId.startsWith('nav.')) {
-        const parts = permissionId.split('.');
-        if (parts.length > 2) {
-          const parentNav = parts.slice(0, 2).join('.');
-          if (ALL_PERMISSIONS.some(p => p.id === parentNav)) {
-            next[parentNav] = true;
-          }
-        }
-      }
-
-      return next;
+      return autoLinkPermissionDependencies(permissionId, nextVal, prev);
     });
   };
 
@@ -161,9 +145,9 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
   const handleToggleModuleAll = (moduleId: string, select: boolean) => {
     const modulePermissions = ALL_PERMISSIONS.filter((p) => p.module === moduleId);
     setPermissions((prev) => {
-      const next = { ...prev };
+      let next = { ...prev };
       modulePermissions.forEach((p) => {
-        next[p.id] = select;
+        next = autoLinkPermissionDependencies(p.id, select, next);
       });
       return next;
     });

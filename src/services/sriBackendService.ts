@@ -503,6 +503,25 @@ export class SriBackendService {
     let attempts = 0;
     const MAX_ATTEMPTS = 15;
 
+    const isConsumidorFinal =
+      (currentNC.customerRuc || '').trim() === '9999999999999' ||
+      (currentNC.customerRuc || '').trim() === '9999999999' ||
+      (currentNC.customer || '').toUpperCase().includes('CONSUMIDOR FINAL') ||
+      (currentNC.customer || '').toUpperCase().includes('PUBLICO GENERAL');
+
+    if (isConsumidorFinal) {
+      console.warn(`[SRI N/C] Omisión de transmisión al SRI: Las facturas a Consumidor Final no admiten emisión de Notas de Crédito electrónicas según Resolución SRI NAC-DGERCGC25-00000017.`);
+      return {
+        success: false,
+        claveAcceso: currentNC.claveAcceso || '',
+        estado: 'DEVUELTA',
+        xmlOriginal: '',
+        mensaje: 'Por normativa del SRI (Resolución NAC-DGERCGC25-00000017), las facturas emitidas a "Consumidor Final" no admiten emisión de Notas de Crédito electrónicas ante el SRI. El comprobante se registra como devolución interna para control de stock.',
+        nuevoSecuencial: currentNC.secNumber,
+        nuevoId: currentNC.id,
+      };
+    }
+
     while (attempts < MAX_ATTEMPTS) {
       attempts++;
       const formattedSec = String(currentSecNum).padStart(9, '0');

@@ -374,6 +374,27 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                         </span>
                       )}
                     </div>
+                    {product.priceScales && product.priceScales.length > 0 && (
+                      <div className="mb-2 p-1.5 bg-indigo-50/80 border border-indigo-200/90 rounded-xl space-y-1">
+                        <div className="flex items-center justify-between text-[10px] font-black text-indigo-900">
+                          <span className="flex items-center gap-1 uppercase tracking-wider">
+                            <Layers className="w-3 h-3 text-indigo-600" />
+                            {product.priceScales.length} {product.priceScales.length === 1 ? 'Escala de precio' : 'Escalas de precios'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {product.priceScales.map((scale, sIdx) => {
+                            const sTaxRate = typeof product.taxRate === 'number' ? product.taxRate : defaultTaxRate;
+                            const sPriceWithTax = Number(scale.price) * (1 + sTaxRate / 100);
+                            return (
+                              <span key={sIdx} className="inline-flex items-center text-[9px] font-mono font-bold bg-white text-indigo-950 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs">
+                                {scale.name || `Escala ${sIdx + 1}`} ({scale.minQty}+ {product.unit}): <strong className="ml-1 text-indigo-700">{formatCurrency(sPriceWithTax, currencySymbol)}</strong>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 space-y-2">
@@ -510,6 +531,22 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                           <span className="block text-[10px] text-slate-400 font-normal">
                             Ubicación: {product.location}
                           </span>
+                        )}
+                        {product.priceScales && product.priceScales.length > 0 && (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              <Layers className="w-2.5 h-2.5" />
+                              {product.priceScales.length} {product.priceScales.length === 1 ? 'Escala' : 'Escalas'}:
+                            </span>
+                            {product.priceScales.map((scale, sIdx) => {
+                              const sPriceWithTax = Number(scale.price) * (1 + taxRate / 100);
+                              return (
+                                <span key={sIdx} className="text-[9px] font-mono font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                                  {scale.name || `E${sIdx+1}`} ({scale.minQty}+): {formatCurrency(sPriceWithTax, currencySymbol)}
+                                </span>
+                              );
+                            })}
+                          </div>
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-slate-500 font-medium">{product.category}</td>
