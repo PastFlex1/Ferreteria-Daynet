@@ -738,8 +738,8 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  creditNotes.map((nc) => (
-                    <tr key={nc.id} className="hover:bg-slate-50/80 transition text-slate-800 font-medium">
+                  creditNotes.map((nc, idx) => (
+                    <tr key={`${nc.id || 'nc'}-${idx}`} className="hover:bg-slate-50/80 transition text-slate-800 font-medium">
                       <td className="py-3 px-4 font-mono font-bold text-slate-950">{nc.id}</td>
                       <td className="py-3 px-4 font-mono font-bold text-orange-600">{nc.invoiceRef}</td>
                       <td className="py-3 px-4 font-bold text-slate-900">{nc.customer}</td>

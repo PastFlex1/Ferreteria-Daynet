@@ -177,14 +177,27 @@ export default function App() {
   const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [rolesList, setRolesList] = useFirestoreSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
 
+  const normalizeUser = (u: any) => {
+    if (!u) return null;
+    if (typeof u.role === 'object' && u.role) {
+      return { ...u, role: u.role.name || u.role.label || 'Administrador' };
+    }
+    return u;
+  };
+
   const [currentUser, setCurrentUser] = useState<any>(() => {
-    const saved = sessionStorage.getItem('ferreteria_current_user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = sessionStorage.getItem('ferreteria_current_user');
+      return saved ? normalizeUser(JSON.parse(saved)) : null;
+    } catch {
+      return null;
+    }
   });
 
   const handleLogin = (user: any) => {
-    setCurrentUser(user);
-    sessionStorage.setItem('ferreteria_current_user', JSON.stringify(user));
+    const cleanUser = normalizeUser(user);
+    setCurrentUser(cleanUser);
+    sessionStorage.setItem('ferreteria_current_user', JSON.stringify(cleanUser));
   };
 
   const handleLogout = () => {
@@ -197,17 +210,51 @@ export default function App() {
     handleLogout();
   };
 
-  // Migration logic to ensure existing Firestore users have username & password
+  // Migration and cleanup logic: purge filler dummy users and ensure credentials exist
   useEffect(() => {
     if (usersList && usersList.length > 0) {
+      const hasMockFiller = usersList.some(
+        (u) =>
+          ['USR-02', 'USR-03', 'USR-04'].includes(u.id) ||
+          (u.name && (
+            u.name.includes('Juan Pérez') ||
+            u.name.includes('María López') ||
+            u.name.includes('Carlos Ruiz')
+          ))
+      );
+
+      if (hasMockFiller) {
+        const cleaned = usersList.filter(
+          (u) =>
+            !['USR-02', 'USR-03', 'USR-04'].includes(u.id) &&
+            !(u.name && (
+              u.name.includes('Juan Pérez') ||
+              u.name.includes('María López') ||
+              u.name.includes('Carlos Ruiz')
+            ))
+        );
+        setUsersList(cleaned.length > 0 ? cleaned : defaultUsersList);
+        return;
+      }
+
+      const hasObjectRole = usersList.some(u => typeof u.role === 'object' && u.role);
+      if (hasObjectRole) {
+        const cleanedRoles = usersList.map(u => ({
+          ...u,
+          role: typeof u.role === 'object' && u.role ? u.role.name || u.role.label || 'Vendedor' : u.role
+        }));
+        setUsersList(cleanedRoles);
+        return;
+      }
+
       const needsMigration = usersList.some(u => !u.username || !u.password);
       if (needsMigration) {
         const migrated = usersList.map(u => {
           const defaultUser = defaultUsersList.find(d => d.id === u.id || d.email === u.email);
           return {
             ...u,
-            username: u.username || defaultUser?.username || '1724567890',
-            password: u.password || defaultUser?.password || '1234'
+            username: u.username || defaultUser?.username || '1799999999001',
+            password: u.password || defaultUser?.password || 'admin'
           };
         });
         setUsersList(migrated);
@@ -239,6 +286,16 @@ export default function App() {
   const [customers, setCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
   const dbCustomers = customers.filter(c => c.id !== 'cust-general');
   const allCustomers = [CONSUMIDOR_FINAL, ...dbCustomers];
+
+  // Purge filler customer (cust-1) if present
+  useEffect(() => {
+    if (customers && customers.length > 1) {
+      const hasMockCust = customers.some(c => c.id === 'cust-1' || c.docNumber === '1792345678001');
+      if (hasMockCust) {
+        setCustomers(customers.filter(c => c.id !== 'cust-1' && c.docNumber !== '1792345678001'));
+      }
+    }
+  }, [customers, setCustomers]);
   const [invoices, setInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', initialInvoices);
   const [orders, setOrders] = useFirestoreSync<Order[]>('ferreteria_orders', []);
   const [posInvoicingOrder, setPosInvoicingOrder] = useState<Order | null>(null);

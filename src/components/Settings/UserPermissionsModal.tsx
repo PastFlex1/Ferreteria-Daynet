@@ -48,9 +48,11 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
     return getCombinedRolePresets(rolesList);
   }, [rolesList]);
 
+  const userRoleStr = typeof user.role === 'object' && user.role ? (user.role as any).name || (user.role as any).label || 'Cajero' : (user.role || 'Cajero');
+
   // Inicializar estado local de permisos con valores booleanos explícitos para cada permiso del sistema
   const [permissions, setPermissions] = useState<PermissionMap>(() => {
-    const basePreset = combinedPresets[user.role]?.permissions || ROLE_PRESETS[user.role]?.permissions || {};
+    const basePreset = combinedPresets[userRoleStr]?.permissions || ROLE_PRESETS[userRoleStr]?.permissions || {};
     const existing = user.permissions || {};
     const initialMap: PermissionMap = {};
     ALL_PERMISSIONS.forEach(p => {
@@ -65,7 +67,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
     return initialMap;
   });
 
-  const [selectedRole, setSelectedRole] = useState<string>(user.role || 'Cajero');
+  const [selectedRole, setSelectedRole] = useState<string>(userRoleStr);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeModuleFilter, setActiveModuleFilter] = useState<string>('ALL');
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>(() => {
@@ -440,7 +442,7 @@ export const UserPermissionsModal: React.FC<UserPermissionsModalProps> = ({
                 {activePermissionsCount} de {totalPermissionsCount} permisos asignados
               </div>
               <div className="text-[11px] text-slate-400">
-                Rol actual: <strong className="text-orange-400 font-bold">{selectedRole}</strong>
+                Rol actual: <strong className="text-orange-400 font-bold">{typeof selectedRole === 'object' ? (selectedRole as any)?.name || (selectedRole as any)?.label || 'Cajero' : selectedRole}</strong>
               </div>
             </div>
           </div>

@@ -61,10 +61,17 @@ export class SriBackendService {
    */
   public static getBaseUrl(): string {
     const saved = localStorage.getItem('ferreteria_sri_api_url');
+    let target = this.defaultBaseUrl;
     if (saved && saved.trim() !== '') {
-      return saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
+      target = saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     }
-    return this.defaultBaseUrl;
+    // Si estamos en el navegador y el host objetivo es localhost:8080 o 127.0.0.1:8080,
+    // devolver '' para que las peticiones se enruten vía proxy de Vite (/api/sri)
+    // eliminando problemas de CORS en desarrollo local.
+    if (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.0\.0\.1):8080$/i.test(target)) {
+      return '';
+    }
+    return target;
   }
 
   /**
@@ -79,8 +86,14 @@ export class SriBackendService {
    * Prueba la conectividad con el backend Java local (Spring Boot).
    */
   public static async testConnection(targetUrl?: string): Promise<{ ok: boolean; message: string; urlUsed: string }> {
-    const baseUrl = targetUrl ? targetUrl.replace(/\/$/, '') : this.getBaseUrl();
+    const rawTarget = targetUrl || localStorage.getItem('ferreteria_sri_api_url') || this.defaultBaseUrl;
+    const displayUrl = rawTarget.trim().replace(/\/$/, '');
+    let baseUrl = targetUrl ? targetUrl.replace(/\/$/, '').replace(/\/api\/sri\/?$/, '') : this.getBaseUrl();
     
+    if (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.0\.0\.1):8080$/i.test(baseUrl)) {
+      baseUrl = '';
+    }
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -90,28 +103,35 @@ export class SriBackendService {
         headers: { 'Accept': 'application/json, text/plain, */*' },
         signal: controller.signal,
       }).catch(async () => {
-        return await fetch(`${baseUrl}`, { method: 'GET', signal: controller.signal });
+        return await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
       });
 
       clearTimeout(timeoutId);
 
-      if (response && response.status < 500) {
+      if (response && response.status === 200) {
         return { 
           ok: true, 
-          message: `Conexión con Backend Java local exitosa (${response.status} OK).`,
-          urlUsed: baseUrl
+          message: `Conexión con Backend Java local exitosa (200 OK).`,
+          urlUsed: displayUrl
+        };
+      }
+      if (response && response.status === 404) {
+        return {
+          ok: false,
+          message: `El servidor en ${displayUrl} respondió 404 Not Found. Asegúrese de que el backend Java Spring Boot esté en ejecución en ese puerto.`,
+          urlUsed: displayUrl
         };
       }
       return { 
         ok: false, 
-        message: `El servidor local respondió con código HTTP: ${response ? response.status : 'desconocido'}`,
-        urlUsed: baseUrl 
+        message: `El servidor respondió con código HTTP: ${response ? response.status : 'desconocido'}`,
+        urlUsed: displayUrl 
       };
     } catch (err: any) {
       return { 
         ok: false, 
-        message: `No se pudo conectar con ${baseUrl}. Asegúrese de ejecutar su proyecto Spring Boot local (C:\\Users\\Alex Palma\\Desktop\\API - copia - copia (2)\\API-SRI).`,
-        urlUsed: baseUrl
+        message: `No se pudo conectar con ${displayUrl}. Asegúrese de ejecutar su proyecto Spring Boot local.`,
+        urlUsed: displayUrl
       };
     }
   }

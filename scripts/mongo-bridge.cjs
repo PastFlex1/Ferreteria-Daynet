@@ -71,7 +71,6 @@ async function syncToFriendlyCompassCollection(db, docId, data) {
   try {
     const col = db.collection(friendlyName);
     if (Array.isArray(data)) {
-      await col.deleteMany({});
       if (data.length > 0) {
         const docsToInsert = data.map((item, index) => {
           const itemCopy = typeof item === 'object' && item !== null ? { ...item } : { value: item };
@@ -82,7 +81,20 @@ async function syncToFriendlyCompassCollection(db, docId, data) {
             _syncedAt: new Date()
           };
         });
-        await col.insertMany(docsToInsert, { ordered: false });
+
+        const bulkOps = docsToInsert.map((doc) => ({
+          replaceOne: {
+            filter: { _id: doc._id },
+            replacement: doc,
+            upsert: true
+          }
+        }));
+        await col.bulkWrite(bulkOps, { ordered: false });
+
+        const activeIds = docsToInsert.map((d) => d._id);
+        await col.deleteMany({ _id: { $nin: activeIds } });
+      } else {
+        await col.deleteMany({});
       }
     } else if (typeof data === 'object' && data !== null) {
       await col.updateOne(

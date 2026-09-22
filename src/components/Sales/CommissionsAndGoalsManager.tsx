@@ -112,12 +112,13 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
       const usrName = (usr.name || usr.fullName || '').trim();
       if (!usrName) return;
       const key = usrName.toLowerCase();
+      const roleStr = typeof usr.role === 'object' && usr.role ? (usr.role as any).name || 'USR' : (usr.role || 'USR');
       if (!map.has(key)) {
         map.set(key, {
           id: usr.id,
           name: usrName,
-          code: usr.role || 'USR',
-          position: usr.role || 'Ventas',
+          code: roleStr,
+          position: roleStr || 'Ventas',
           department: 'Operaciones',
           status: usr.status === 'Activo' ? 'ACTIVO' : 'ACTIVO',
         });

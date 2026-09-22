@@ -1,8 +1,8 @@
 import { Select } from '../Shared/Select';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useModal } from '../../context/ModalContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
-import { defaultUsersList, defaultPaymentMethods, defaultTaxRates } from '../../data/initialData';
+import { defaultUsersList, defaultPaymentMethods, defaultTaxRates, initialStoreSettings } from '../../data/initialData';
 import { 
   SettingsSubTab, 
   StoreSettings,
@@ -52,6 +52,7 @@ import {
   User,
   Mail,
   Shield,
+  Search,
   AlertCircle
 } from 'lucide-react';
 
@@ -91,12 +92,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   setCurrentUser,
 }) => {
   const { showAlert, showConfirm, showToast } = useModal();
-  const [formData, setFormData] = useState<StoreSettings>({ ...settings });
+  const [formData, setFormData] = useState<StoreSettings>({ ...initialStoreSettings, ...settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Sync when settings prop updates
   useEffect(() => {
-    setFormData({ ...settings });
+    setFormData({ ...initialStoreSettings, ...settings });
   }, [settings]);
 
   // Digital Signature (.p12 / Base64) State
@@ -166,6 +167,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [newUser, setNewUser] = useState({ name: '', email: '', username: '', role: 'Vendedor', password: '' });
   const [userForPermissions, setUserForPermissions] = useState<any | null>(null);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('ALL');
+  const [userStatusFilter, setUserStatusFilter] = useState('ALL');
 
   // Payment Methods State
   const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
@@ -876,10 +880,32 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     showToast('Permisos de trabajador guardados y actualizados correctamente', 'success');
   };
 
+  const filteredUsers = useMemo(() => {
+    return (usersList || []).filter((u: any) => {
+      const q = (userSearchTerm || '').trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.ruc || u.identification || '').toLowerCase().includes(q);
+
+      const matchesRole =
+        userRoleFilter === 'ALL' ||
+        (u.role || '').toLowerCase() === userRoleFilter.toLowerCase();
+
+      const matchesStatus =
+        userStatusFilter === 'ALL' ||
+        (userStatusFilter === 'Activo' ? u.status === 'Activo' : u.status !== 'Activo');
+
+      return matchesSearch && matchesRole && matchesStatus;
+    });
+  }, [usersList, userSearchTerm, userRoleFilter, userStatusFilter]);
+
   const currentTab = subTab === 'SETTINGS' ? 'CFG_EMPRESA' : subTab;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="w-full space-y-6 max-w-[1600px] mx-auto">
       {/* SUCCESS ALERTS */}
       {savedSuccess && (
         <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl text-xs font-black flex items-center justify-between shadow-lg animate-fadeIn">
@@ -1075,14 +1101,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 {/* Obligado a llevar contabilidad (SI / NO) */}
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">Obligado a Llevar Contabilidad *</label>
-                  <select
+                  <Select
                     value={formData.accountingRequired ? 'SI' : 'NO'}
-                    onChange={(e) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 text-white rounded-xl text-xs font-bold focus:outline-none focus:border-orange-500"
+                    onChange={(e: any) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
+                    className="w-full bg-slate-950 border-slate-800 text-white font-bold"
                   >
                     <option value="NO">NO</option>
                     <option value="SI">SI</option>
-                  </select>
+                  </Select>
                 </div>
 
                 {/* N° Contribuyente Especial */}
@@ -1262,10 +1288,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       </div>
                       <div>
                         <h4 className="text-xs font-black text-white font-mono">
-                          {signatureFileName || 'firma_electronica.p12'}
+                          {(typeof signatureFileName === 'string' && signatureFileName) || 'firma_electronica.p12'}
                         </h4>
                         <p className="text-[10px] text-slate-400">
-                          Tamaño: <strong>{signatureFileSize || 'N/A'}</strong> • Convertido a Base64 ({signatureBase64.length.toLocaleString()} caracteres)
+                          Tamaño: <strong>{(typeof signatureFileSize === 'string' && signatureFileSize) || 'N/A'}</strong> • Convertido a Base64 ({typeof signatureBase64 === 'string' ? signatureBase64.length.toLocaleString() : 0} caracteres)
                         </p>
                       </div>
                     </div>
@@ -1810,15 +1836,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                 <label className="block text-xs font-bold text-slate-300">Tasa de IVA Predeterminada (%) *</label>
                 <Select
-                  value={formData.defaultTaxRate.toString()}
-                  onChange={(e) => {
+                  value={(formData?.defaultTaxRate ?? 15).toString()}
+                  onChange={(e: any) => {
                     const val = parseFloat(e.target.value) || 0;
                     setFormData({ ...formData, defaultTaxRate: val });
                   }}
                   className="w-full bg-slate-900 border border-slate-800 text-emerald-400 font-mono font-black text-sm rounded-xl py-2 px-3 focus:outline-none focus:border-emerald-500"
                 >
                   {taxRates.map((t) => (
-                    <option key={t.id} value={t.rate.toString()}>
+                    <option key={t.id} value={(t.rate ?? 0).toString()}>
                       {t.name} ({t.rate}%)
                     </option>
                   ))}
@@ -2271,81 +2297,62 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
       {/* 6. USUARIOS Y ROLES */}
       {currentTab === 'CFG_USUARIOS' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-          {/* Header con Sub-tabs */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+          {/* Cabecera Principal con Título y Botones de Acción */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200/80">
             <div className="flex items-center space-x-3.5">
-              <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-2xl border border-cyan-500/20">
-                <Users className="w-6 h-6" />
+              <div className="p-3 bg-gradient-to-br from-cyan-500/15 to-blue-500/10 text-cyan-600 rounded-2xl border border-cyan-500/25 shadow-xs shrink-0">
+                <Users className="w-6 h-6 stroke-[2.5]" />
               </div>
               <div>
-                <h2 className="text-lg font-black text-white">Gestión de Usuarios & Roles</h2>
-                <p className="text-xs text-slate-400 font-medium">Control de acceso, perfiles de trabajo y permisos granulares del personal</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight">Gestión de Usuarios & Roles</h2>
+                  <span className="px-2.5 py-0.5 bg-cyan-50 border border-cyan-200 text-cyan-700 text-[10px] font-black rounded-full uppercase tracking-wider">
+                    Control de Acceso
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Control de acceso, perfiles de trabajo y permisos granulares del personal para facturación, caja y módulos.
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Selector de Sub-tab */}
-              <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setUserSubTab('users')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    userSubTab === 'users'
-                      ? 'bg-cyan-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Usuarios ({usersList.length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUserSubTab('roles')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                    userSubTab === 'roles'
-                      ? 'bg-cyan-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>Roles & Perfiles ({rolesList.length})</span>
-                </button>
-              </div>
-
-              {/* Botón de Acción Principal según sub-tab */}
+            {/* Botones de Acción principales */}
+            <div className="flex items-center gap-2.5 shrink-0 self-start lg:self-center">
               {userSubTab === 'users' ? (
-                <div className="flex items-center gap-2">
+                <>
                   <button
                     type="button"
                     onClick={() => {
                       setEditingRole(null);
                       setShowRoleModal(true);
                     }}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-black rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs active:scale-95"
                   >
-                    <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                    <Shield className="w-4 h-4 text-indigo-600" />
                     <span>+ NUEVO ROL</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setEditingUser(null);
                       setNewUser({ name: '', email: '', username: '', role: rolesList[0]?.name || 'Vendedor', password: '' });
                       setShowAddUserModal(true);
                     }}
-                    className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
+                    className="px-4 py-2.5 bg-gradient-to-r from-orange-500 via-amber-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white text-xs font-black rounded-xl transition shadow-md shadow-orange-500/20 flex items-center gap-2 cursor-pointer active:scale-95"
                   >
                     <UserPlus className="w-4 h-4" />
-                    <span>NUEVO USUARIO</span>
+                    <span>+ NUEVO USUARIO</span>
                   </button>
-                </div>
+                </>
               ) : (
                 <button
+                  type="button"
                   onClick={() => {
                     setEditingRole(null);
                     setShowRoleModal(true);
                   }}
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition shadow-lg shadow-cyan-600/20 flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-black rounded-xl transition shadow-md shadow-indigo-500/20 flex items-center gap-2 cursor-pointer active:scale-95"
                 >
                   <Shield className="w-4 h-4" />
                   <span>+ CREAR NUEVO ROL</span>
@@ -2354,114 +2361,288 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </div>
           </div>
 
+          {/* Sub-navegación: Pestañas limpias y separadas */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="inline-flex p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 gap-1.5 shadow-inner">
+              <button
+                type="button"
+                onClick={() => setUserSubTab('users')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                  userSubTab === 'users'
+                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-4 h-4 text-cyan-600" />
+                <span>Usuarios ({usersList.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setUserSubTab('roles')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                  userSubTab === 'roles'
+                    ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Shield className="w-4 h-4 text-indigo-600" />
+                <span>Roles & Perfiles ({rolesList.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick KPI Stats Strip */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between shadow-2xs">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total Usuarios</span>
+                <span className="text-xl font-black text-slate-900 mt-0.5 block">{usersList.length}</span>
+              </div>
+              <div className="p-2.5 bg-cyan-100 text-cyan-700 rounded-xl">
+                <Users className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between shadow-2xs">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Usuarios Activos</span>
+                <span className="text-xl font-black text-emerald-600 mt-0.5 block">
+                  {usersList.filter((u) => u.status === 'Activo').length}
+                </span>
+              </div>
+              <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between shadow-2xs">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Roles & Plantillas</span>
+                <span className="text-xl font-black text-indigo-600 mt-0.5 block">{rolesList.length}</span>
+              </div>
+              <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between shadow-2xs">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Seguridad SRI</span>
+                <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md mt-1 inline-block">
+                  Granular Activa
+                </span>
+              </div>
+              <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl">
+                <Lock className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
           {/* VISTA 1: TABLA DE USUARIOS */}
           {userSubTab === 'users' && (
-            <div className="overflow-hidden rounded-2xl border border-slate-800">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="px-3 py-2.5">Usuario</th>
-                    <th className="px-3 py-2.5">Cédula / RUC</th>
-                    <th className="px-3 py-2.5">Rol Asignado</th>
-                    <th className="px-3 py-2.5 text-center">Estado</th>
-                    <th className="px-3 py-2.5 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-medium">
-                  {usersList.map((u) => {
-                    const isActive = u.status === 'Activo';
-                    const roleDef = rolesList.find(
-                      (r) => r.name.toLowerCase() === (u.role || '').toLowerCase() || r.id === u.role
-                    );
+            <div className="space-y-4">
+              {/* Barra de Búsqueda y Filtros */}
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={userSearchTerm}
+                    onChange={(e) => setUserSearchTerm(e.target.value)}
+                    placeholder="Buscar por nombre, cédula o correo electrónico..."
+                    className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 text-slate-900 rounded-xl text-xs font-medium placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  {userSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setUserSearchTerm('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
-                    return (
-                      <tr key={u.id} className="hover:bg-slate-800/40 transition">
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/25 text-cyan-400 flex items-center justify-center text-[10px] font-black shrink-0">
-                              {(u.name || '?').trim().charAt(0).toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-bold text-white truncate">{u.name}</div>
-                              <div className="text-[10px] text-slate-500 font-mono truncate">{u.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 font-mono text-amber-500 font-bold whitespace-nowrap">{u.username || 'N/A'}</td>
-                        <td className="px-3 py-2">
-                          <div className="space-y-0.5">
-                            <span className="px-2.5 py-0.5 bg-slate-950 border border-slate-800 rounded-md text-slate-200 text-[10px] font-bold whitespace-nowrap inline-flex items-center gap-1.5 shadow-sm">
-                              <span>{roleDef?.label || u.role}</span>
-                            </span>
-                            {u.permissions && Object.keys(u.permissions).length > 0 && (
-                              <div className="text-[9px] font-mono text-orange-400 font-semibold flex items-center gap-1">
-                                <span>Personalizado ({Object.values(u.permissions).filter(Boolean).length} act.)</span>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleUserStatus(u)}
-                            title={isActive ? 'Deshabilitar usuario' : 'Habilitar usuario'}
-                            className={`relative inline-flex items-center w-9 h-4.5 rounded-full transition cursor-pointer ${
-                              isActive ? 'bg-emerald-500/80' : 'bg-slate-700'
-                            }`}
-                          >
-                            <span className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} />
-                          </button>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center justify-end gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-44">
+                    <Select
+                      value={userRoleFilter}
+                      onChange={(e: any) => setUserRoleFilter(e.target.value)}
+                      className="bg-white border-slate-200 font-bold text-xs"
+                    >
+                      <option value="ALL">Todos los Roles</option>
+                      {rolesList.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  <div className="w-36">
+                    <Select
+                      value={userStatusFilter}
+                      onChange={(e: any) => setUserStatusFilter(e.target.value)}
+                      className="bg-white border-slate-200 font-bold text-xs"
+                    >
+                      <option value="ALL">Todos los Estados</option>
+                      <option value="Activo">Solo Activos</option>
+                      <option value="Inactivo">Solo Inactivos</option>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla de Usuarios */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-xs bg-white">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-50/90 text-slate-600 uppercase text-[10px] font-black tracking-wider border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3.5">Usuario / Colaborador</th>
+                      <th className="px-4 py-3.5">Cédula / RUC</th>
+                      <th className="px-4 py-3.5">Rol Asignado</th>
+                      <th className="px-4 py-3.5 text-center">Estado</th>
+                      <th className="px-4 py-3.5 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {filteredUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-slate-400">
+                          <Users className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                          <p className="font-bold text-slate-600">No se encontraron usuarios</p>
+                          <p className="text-xs text-slate-400 mt-0.5">Intente ajustar los términos de búsqueda o filtros.</p>
+                          {(userSearchTerm || userRoleFilter !== 'ALL' || userStatusFilter !== 'ALL') && (
                             <button
                               type="button"
                               onClick={() => {
-                                setUserForPermissions(u);
-                                setShowPermissionsModal(true);
+                                setUserSearchTerm('');
+                                setUserRoleFilter('ALL');
+                                setUserStatusFilter('ALL');
                               }}
-                              title="Configurar Permisos Detallados del Trabajador"
-                              className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white rounded-lg transition text-[10px] font-black flex items-center gap-1 border border-orange-500/25 cursor-pointer shadow-sm"
+                              className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
                             >
-                              <Shield className="w-3 h-3" />
-                              <span>Permisos</span>
+                              Limpiar Filtros
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleEditUser(u)}
-                              title="Editar usuario"
-                              className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteUser(u)}
-                              title="Eliminar usuario"
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          )}
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    ) : (
+                      filteredUsers.map((u) => {
+                        const isActive = u.status === 'Activo';
+                        const roleDef = rolesList.find(
+                          (r) => r.name.toLowerCase() === (u.role || '').toLowerCase() || r.id === u.role
+                        );
+
+                        return (
+                          <tr key={u.id} className="hover:bg-slate-50/80 transition">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-100 to-blue-100 border border-cyan-200 text-cyan-800 flex items-center justify-center text-xs font-black shrink-0 shadow-2xs">
+                                  {(u.name || '?').trim().charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-black text-slate-900 text-xs sm:text-sm truncate">{u.name}</div>
+                                  <div className="text-[11px] text-slate-500 font-mono truncate">{u.email}</div>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                                {u.username || 'N/A'}
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="space-y-1">
+                                <span className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs">
+                                  <span>{roleDef?.label || (typeof u.role === 'object' ? u.role?.name || u.role?.label || 'Sin Rol' : u.role)}</span>
+                                </span>
+                                {u.permissions && Object.keys(u.permissions).length > 0 && (
+                                  <div className="text-[10px] font-mono text-amber-700 font-bold flex items-center gap-1">
+                                    <span>• Personalizado ({Object.values(u.permissions).filter(Boolean).length} act.)</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-4 py-3 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleUserStatus(u)}
+                                title={isActive ? 'Deshabilitar usuario' : 'Habilitar usuario'}
+                                className="inline-flex items-center gap-1.5 cursor-pointer group"
+                              >
+                                <span
+                                  className={`relative inline-flex items-center w-10 h-5 rounded-full transition-colors ${
+                                    isActive ? 'bg-emerald-500' : 'bg-slate-300'
+                                  }`}
+                                >
+                                  <span
+                                    className={`inline-block w-4 h-4 rounded-full bg-white shadow-md transform transition-transform ${
+                                      isActive ? 'translate-x-5' : 'translate-x-0.5'
+                                    }`}
+                                  />
+                                </span>
+                                <span className={`text-[11px] font-bold ${isActive ? 'text-emerald-700' : 'text-slate-500'}`}>
+                                  {isActive ? 'Activo' : 'Inactivo'}
+                                </span>
+                              </button>
+                            </td>
+
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUserForPermissions(u);
+                                    setShowPermissionsModal(true);
+                                  }}
+                                  title="Configurar Permisos Detallados del Trabajador"
+                                  className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 hover:text-amber-900 rounded-xl transition text-xs font-bold flex items-center gap-1.5 border border-amber-200/90 cursor-pointer shadow-2xs"
+                                >
+                                  <Shield className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Permisos</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditUser(u)}
+                                  title="Editar usuario"
+                                  className="p-2 text-slate-400 hover:text-cyan-700 hover:bg-cyan-50 rounded-xl transition cursor-pointer"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteUser(u)}
+                                  title="Eliminar usuario"
+                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
           {/* VISTA 2: CATÁLOGO DE ROLES & PERFILES */}
           {userSubTab === 'roles' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-400">
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 text-xs text-slate-600 leading-relaxed">
                 <p>
-                  Defina perfiles y plantillas de acceso para el personal (cajeros, auditores, vendedores, bodegueros, supervisores). Al crear un usuario, heredará automáticamente los permisos de su rol asignado.
+                  Defina plantillas de acceso por perfil de puesto (cajeros, auditores, vendedores, bodegueros, supervisores). Al crear o editar un usuario, este heredará automáticamente los permisos del rol asignado.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4.5">
                 {rolesList.map((role) => {
                   const assignedCount = usersList.filter(
                     (u) => (u.role || '').toLowerCase() === role.name.toLowerCase() || u.role === role.id
@@ -2469,16 +2650,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   const activePermsCount = Object.values(role.permissions || {}).filter(Boolean).length;
                   const totalPerms = ALL_PERMISSIONS.length;
 
-                  // Mapeo de colores
-                  const colorClassMap: Record<string, { bg: string; border: string; text: string }> = {
-                    amber: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400' },
-                    emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400' },
-                    cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', text: 'text-cyan-400' },
-                    purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-400' },
-                    blue: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400' },
-                    rose: { bg: 'bg-rose-500/10', border: 'border-rose-500/30', text: 'text-rose-400' },
-                    orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-400' },
-                    indigo: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', text: 'text-indigo-400' },
+                  // Mapeo de colores claros
+                  const colorClassMap: Record<string, { bg: string; border: string; text: string; badge: string }> = {
+                    amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-800' },
+                    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' },
+                    cyan: { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', badge: 'bg-cyan-100 text-cyan-800' },
+                    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', badge: 'bg-purple-100 text-purple-800' },
+                    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
+                    rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-100 text-rose-800' },
+                    orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', badge: 'bg-orange-100 text-orange-800' },
+                    indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-100 text-indigo-800' },
                   };
                   const theme = colorClassMap[role.color || 'cyan'] || colorClassMap.cyan;
                   const emojiChar = role.label.match(/^(\p{Extended_Pictographic}|\S+)/u)?.[1] || '🛡️';
@@ -2486,30 +2667,30 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   return (
                     <div
                       key={role.id}
-                      className="bg-slate-950/70 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 flex flex-col justify-between space-y-4 transition shadow-md hover:shadow-xl group"
+                      className="bg-white border border-slate-200/90 hover:border-cyan-400 rounded-2xl p-5 flex flex-col justify-between space-y-4 transition shadow-xs hover:shadow-md group"
                     >
                       <div>
                         {/* Header Tarjeta */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <div className={`w-9 h-9 rounded-xl ${theme.bg} border ${theme.border} ${theme.text} flex items-center justify-center text-base shrink-0 shadow-inner`}>
+                            <div className={`w-10 h-10 rounded-xl ${theme.bg} border ${theme.border} ${theme.text} flex items-center justify-center text-lg shrink-0 shadow-2xs`}>
                               {emojiChar}
                             </div>
                             <div className="min-w-0">
-                              <h3 className="font-bold text-white text-sm truncate flex items-center gap-1.5">
-                                <span>{role.name}</span>
+                              <h3 className="font-black text-slate-900 text-sm truncate">
+                                {role.name}
                               </h3>
-                              <span className="text-[10px] font-mono text-slate-500 block truncate">
+                              <span className="text-[10px] font-mono text-slate-400 block truncate">
                                 {role.id}
                               </span>
                             </div>
                           </div>
 
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 border ${
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 border ${
                               role.isSystem
-                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                                : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
+                                ? 'bg-amber-50 border-amber-200 text-amber-700'
+                                : 'bg-cyan-50 border-cyan-200 text-cyan-700'
                             }`}
                           >
                             {role.isSystem ? 'Sistema' : 'Personalizado'}
@@ -2517,24 +2698,24 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         </div>
 
                         {/* Descripción */}
-                        <p className="text-xs text-slate-400 mt-3 line-clamp-2 min-h-[32px] leading-relaxed">
+                        <p className="text-xs text-slate-500 mt-3 line-clamp-2 min-h-[32px] leading-relaxed">
                           {role.description || 'Sin descripción detallada para este rol.'}
                         </p>
 
                         {/* Stats */}
-                        <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-800/80 text-xs">
-                          <div className="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
-                            <span className="text-[10px] text-slate-500 font-medium block">Permisos Activos</span>
-                            <div className="font-bold text-white text-xs mt-0.5 flex items-center gap-1">
+                        <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-100 text-xs">
+                          <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/80">
+                            <span className="text-[10px] text-slate-500 font-bold block">Permisos Activos</span>
+                            <div className="font-black text-slate-900 text-xs mt-0.5 flex items-center gap-1">
                               <span className={theme.text}>{activePermsCount}</span>
-                              <span className="text-slate-500 text-[10px]">/ {totalPerms}</span>
+                              <span className="text-slate-400 text-[10px]">/ {totalPerms}</span>
                             </div>
                           </div>
 
-                          <div className="bg-slate-900/90 rounded-xl p-2 border border-slate-800/80">
-                            <span className="text-[10px] text-slate-500 font-medium block">Usuarios Asignados</span>
-                            <div className="font-bold text-white text-xs mt-0.5 flex items-center gap-1">
-                              <Users className="w-3.5 h-3.5 text-cyan-400" />
+                          <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/80">
+                            <span className="text-[10px] text-slate-500 font-bold block">Usuarios Asignados</span>
+                            <div className="font-black text-slate-900 text-xs mt-0.5 flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5 text-cyan-600" />
                               <span>{assignedCount}</span>
                             </div>
                           </div>
@@ -2542,16 +2723,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       </div>
 
                       {/* Botones de Acción */}
-                      <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2">
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                         <button
                           type="button"
                           onClick={() => {
                             setEditingRole(role);
                             setShowRoleModal(true);
                           }}
-                          className="flex-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-cyan-500/40 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                          className="flex-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 hover:border-cyan-400 text-slate-800 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
                         >
-                          <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                          <Shield className="w-3.5 h-3.5 text-cyan-600" />
                           <span>Configurar Permisos</span>
                         </button>
 
@@ -2560,9 +2741,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                             type="button"
                             onClick={() => handleDeleteRole(role)}
                             title="Eliminar rol personalizado"
-                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-900 rounded-xl transition cursor-pointer border border-transparent hover:border-rose-500/30"
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer border border-transparent hover:border-rose-200"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -2575,27 +2756,27 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
           {/* ADD / EDIT USER MODAL */}
           {showAddUserModal && (
-            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-              <div className="bg-slate-900 border border-slate-750/90 ring-1 ring-white/10 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 max-w-lg w-full space-y-5 shadow-2xl relative animate-scaleUp">
                 {/* Header */}
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
-                  <div className="flex items-center gap-3.5">
-                    <div className="p-3 bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/30 rounded-2xl text-cyan-400 shadow-inner">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-2xl text-cyan-700">
                       <UserPlus className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="text-base font-black text-white tracking-wide">
+                      <h3 className="text-base font-black text-slate-900">
                         {editingUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
                       </h3>
-                      <p className="text-[11px] text-slate-400 font-medium">
-                        {editingUser ? 'Modifique las credenciales y rol asignado al trabajador' : 'Asigne credenciales y perfil de rol para el trabajador'}
+                      <p className="text-xs text-slate-500 font-medium">
+                        {editingUser ? 'Modifique las credenciales y rol del colaborador' : 'Asigne credenciales y perfil de acceso para el colaborador'}
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowAddUserModal(false)}
-                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                    className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -2604,8 +2785,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
                   {/* Nombre Completo */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
-                      <User className="w-3.5 h-3.5 text-cyan-400" />
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      <User className="w-3.5 h-3.5 text-cyan-600" />
                       <span>Nombre Completo *</span>
                     </label>
                     <input 
@@ -2614,15 +2795,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       placeholder="ej: Alexander Palma"
                       value={newUser.name}
                       onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                      className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-medium placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-cyan-500 transition"
                     />
                   </div>
 
                   {/* Grid: Cédula/RUC + Rol Dinámico */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
-                      <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
-                        <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-amber-600" />
                         <span>Cédula o RUC *</span>
                       </label>
                       <input 
@@ -2631,24 +2812,24 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         placeholder="1725389454"
                         value={newUser.username}
                         onChange={(e) => setNewUser({ ...newUser, username: e.target.value.trim() })}
-                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-cyan-500 transition"
                       />
                       {newUser.username && (() => {
                         const val = validateEcuadorianDocument('AUTO', newUser.username);
                         return (
                           <div className={`mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 border ${
                             val.isValid 
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                              : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
                           }`}>
                             {val.isValid ? (
                               <>
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
                                 <span>{val.type} Válido</span>
                               </>
                             ) : (
                               <>
-                                <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <AlertCircle className="w-3 h-3 text-rose-600 shrink-0" />
                                 <span>{val.message}</span>
                               </>
                             )}
@@ -2659,8 +2840,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                          <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                        <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                          <Shield className="w-3.5 h-3.5 text-indigo-600" />
                           <span>Rol Asignado *</span>
                         </label>
                         <button
@@ -2669,16 +2850,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                             setEditingRole(null);
                             setShowRoleModal(true);
                           }}
-                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-0.5 cursor-pointer transition hover:underline"
+                          className="text-[10px] text-cyan-600 hover:text-cyan-700 font-bold flex items-center gap-0.5 cursor-pointer transition hover:underline"
                           title="Crear un nuevo rol personalizado con permisos a medida"
                         >
                           <span>+ Crear Rol</span>
                         </button>
                       </div>
-                      <select
+                      <Select
                         value={newUser.role}
-                        onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:border-cyan-500 transition [color-scheme:dark]"
+                        onChange={(e: any) => setNewUser({ ...newUser, role: e.target.value })}
+                        className="w-full bg-slate-50 border-slate-200 text-slate-900 font-bold"
                       >
                         <optgroup label="Roles del Sistema">
                           {rolesList.filter((r) => r.isSystem).map((r) => (
@@ -2696,14 +2877,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                             ))}
                           </optgroup>
                         )}
-                      </select>
+                      </Select>
                     </div>
                   </div>
 
                   {/* Correo Electrónico */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
-                      <Mail className="w-3.5 h-3.5 text-cyan-400" />
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      <Mail className="w-3.5 h-3.5 text-cyan-600" />
                       <span>Correo Electrónico *</span>
                     </label>
                     <input 
@@ -2713,14 +2894,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       placeholder="usuario@empresa.com"
                       value={newUser.email}
                       onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                      className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl px-3.5 py-2.5 text-xs font-medium placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-cyan-500 transition"
                     />
                   </div>
 
                   {/* Contraseña */}
                   <div>
-                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-1.5">
-                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                      <Lock className="w-3.5 h-3.5 text-amber-600" />
                       <span>Contraseña de Acceso *</span>
                     </label>
                     <div className="relative">
@@ -2731,12 +2912,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         placeholder="••••••••"
                         value={newUser.password}
                         onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                        className="w-full bg-slate-950/80 border border-slate-800 text-white rounded-xl pl-3.5 pr-10 py-2.5 text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition [color-scheme:dark]"
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl pl-3.5 pr-10 py-2.5 text-xs font-mono placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-cyan-500 transition"
                       />
                       <button
                         type="button"
                         onClick={() => setShowNewUserPassword(!showNewUserPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition p-1"
                         title={showNewUserPassword ? "Ocultar contraseña" : "Ver contraseña"}
                       >
                         {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -2745,17 +2926,17 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   </div>
 
                   {/* Botones de Acción */}
-                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800/80">
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                     <button 
                       type="button"
                       onClick={() => setShowAddUserModal(false)}
-                      className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700/80 text-slate-300 text-xs font-bold rounded-xl transition cursor-pointer"
+                      className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
                     >
                       Cancelar
                     </button>
                     <button 
                       type="submit"
-                      className="px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black rounded-xl shadow-lg shadow-cyan-500/25 transition active:scale-95 flex items-center gap-2 cursor-pointer"
+                      className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white text-xs font-black rounded-xl shadow-md shadow-orange-500/20 transition active:scale-95 flex items-center gap-2 cursor-pointer"
                     >
                       <Save className="w-4 h-4" />
                       <span>{editingUser ? 'Actualizar Usuario' : 'Guardar Usuario'}</span>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { Select } from '../Shared/Select';
 import { 
   Shield, 
   X, 
@@ -293,17 +294,18 @@ export const RoleModal: React.FC<RoleModalProps> = ({
               <div className="sm:col-span-2">
                 <label className="text-[11px] font-bold text-slate-300 block mb-1.5">Ícono / Emoji</label>
                 <div className="flex items-center gap-1.5">
-                  <select
+                  <Select
                     value={roleEmoji}
-                    onChange={(e) => setRoleEmoji(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-2 py-2 text-lg text-center font-bold focus:outline-none focus:border-cyan-500 transition [color-scheme:dark]"
+                    onChange={(e: any) => setRoleEmoji(e.target.value)}
+                    searchable={false}
+                    className="w-full bg-slate-900 border-slate-800 text-white text-lg text-center font-bold"
                   >
                     {EMOJI_OPTIONS.map((em) => (
                       <option key={em} value={em}>
                         {em}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -366,10 +368,10 @@ export const RoleModal: React.FC<RoleModalProps> = ({
                   <Copy className="w-3 h-3 text-amber-400" />
                   <span>Copiar Permisos de:</span>
                 </label>
-                <select
+                <Select
                   value={cloneSource}
-                  onChange={(e) => handleClonePermissions(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-cyan-500 transition [color-scheme:dark]"
+                  onChange={(e: any) => handleClonePermissions(e.target.value)}
+                  className="w-full bg-slate-900 border-slate-800 text-white font-bold"
                 >
                   <option value="">-- Personalizar desde cero --</option>
                   {existingRoles.map((r) => (
@@ -377,7 +379,7 @@ export const RoleModal: React.FC<RoleModalProps> = ({
                       {r.label || r.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
             </div>
           </div>

@@ -117,6 +117,7 @@ const COMPASS_COLLECTIONS: Record<string, string> = {
 
   // Configuración del Sistema
   ferreteria_settings_users_list: 'usuarios_sistema',
+  ferreteria_settings_roles: 'roles_sistema',
   ferreteria_settings: 'configuracion_empresa',
   ferreteria_settings_payment_methods: 'formas_pago',
   ferreteria_settings_tax_rates: 'tarifas_impuestos',
@@ -156,7 +157,6 @@ async function syncToFriendlyCompassCollection(db: any, docId: string, data: any
     if (Array.isArray(data)) {
       // Synchronize list items individually so Compass displays them as distinct documents
       if (data.length > 0) {
-        await col.deleteMany({});
         const docsToInsert = data.map((item: any, index: number) => {
           const itemCopy = typeof item === 'object' && item !== null ? { ...item } : { value: item };
           const customId = itemCopy.id || itemCopy.code || itemCopy.sku || itemCopy.cedula || itemCopy.ruc || `item_${index + 1}`;
@@ -174,7 +174,21 @@ async function syncToFriendlyCompassCollection(db: any, docId: string, data: any
             _syncedAt: new Date()
           };
         });
-        await col.insertMany(docsToInsert, { ordered: false });
+
+        // Use bulkWrite with replaceOne + upsert to eliminate E11000 race conditions during rapid concurrent syncs
+        const bulkOps = docsToInsert.map((doc: any) => ({
+          replaceOne: {
+            filter: { _id: doc._id },
+            replacement: doc,
+            upsert: true
+          }
+        }));
+        await col.bulkWrite(bulkOps, { ordered: false });
+
+        const activeIds = docsToInsert.map((d: any) => d._id);
+        await col.deleteMany({ _id: { $nin: activeIds } });
+      } else {
+        await col.deleteMany({});
       }
     } else if (typeof data === 'object' && data !== null) {
       const docKey = friendlyName === 'configuracion_empresa' ? 'general_config' : docId;
@@ -371,6 +385,16 @@ export function viteMongoPlugin(): Plugin {
                       { upsert: true }
                     );
                     return sendJson(res, 200, { exists: true, data: cleanData, updatedAt: _syncedAt || new Date() });
+                  }
+                } else if (friendlyName === 'configuracion_parametros') {
+                  const paramDoc = await friendlyCol.findOne({ _id: docId });
+                  if (paramDoc && paramDoc.value !== undefined) {
+                    await db.collection('app_state').updateOne(
+                      { _id: docId } as any,
+                      { $set: { data: paramDoc.value, updatedAt: new Date() } },
+                      { upsert: true }
+                    );
+                    return sendJson(res, 200, { exists: true, data: paramDoc.value, updatedAt: paramDoc._syncedAt || new Date() });
                   }
                 } else {
                   const items = await friendlyCol.find({}).toArray();

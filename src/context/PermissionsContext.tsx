@@ -45,9 +45,17 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
     return found || currentUser;
   }, [currentUser, usersList]);
 
+  // Helper: extract role string safely (role could be a string or a SystemRole object from corrupted data)
+  const getRoleStr = (r: any): string => {
+    if (!r) return '';
+    if (typeof r === 'string') return r;
+    if (typeof r === 'object') return r.name || r.label || r.id || '';
+    return String(r);
+  };
+
   const isSuperAdmin = useMemo(() => {
     if (!activeUser) return true;
-    const role = (activeUser.role || '').toLowerCase();
+    const role = getRoleStr(activeUser.role).toLowerCase();
     return role === 'administrador' || role === 'admin';
   }, [activeUser]);
 
@@ -59,10 +67,11 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
       return ROLE_PRESETS.Administrador.permissions;
     }    // 1. Obtener la plantilla según su rol asignado (soporta roles personalizados creados dinámicamente)
     const combinedPresets = getCombinedRolePresets(rolesList);
+    const userRoleStr = getRoleStr(activeUser.role);
     const matchedRole = rolesList.find(
-      (r) => r.name.toLowerCase() === (activeUser.role || '').toLowerCase() || r.id === activeUser.role
+      (r) => r.name.toLowerCase() === userRoleStr.toLowerCase() || r.id === userRoleStr
     );
-    const basePreset = matchedRole?.permissions || combinedPresets[activeUser.role]?.permissions || {};
+    const basePreset = matchedRole?.permissions || combinedPresets[userRoleStr]?.permissions || {};
 
     // 2. Si el rol existe y el usuario no tiene una configuración explícita guardada como 'hasCustomPermissions',
     // los permisos efectivos provienen 100% de la definición de su rol asignado.

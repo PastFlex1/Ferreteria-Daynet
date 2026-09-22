@@ -155,6 +155,44 @@ export interface JournalEntry {
   status: 'ASENTADO' | 'BORRADOR';
 }
 
+export const normalizeJournalEntry = (je: any): JournalEntry => {
+  let items: JournalEntryItem[] = Array.isArray(je?.items) ? je.items : [];
+  const debit = Number(je?.totalDebit ?? je?.debit ?? 0);
+  const credit = Number(je?.totalCredit ?? je?.credit ?? 0);
+
+  if (items.length === 0 && (debit > 0 || credit > 0)) {
+    items = [
+      {
+        accountCode: '1.01.01.01',
+        accountName: 'Caja General',
+        debit: debit,
+        credit: 0
+      },
+      {
+        accountCode: '3.01.01.01',
+        accountName: 'Capital Social / Patrimonio',
+        debit: 0,
+        credit: credit
+      }
+    ];
+  }
+
+  const numVal = je?.entryNumber || (je?.number ? `ASI-2026-${String(je.number).padStart(4, '0')}` : `ASI-2026-${String(je?.id || '1').replace(/\D/g, '').padStart(4, '0')}`);
+
+  return {
+    ...je,
+    id: je?.id || je?._id || `je-${Date.now()}`,
+    entryNumber: numVal,
+    date: je?.date || new Date().toISOString().split('T')[0],
+    concept: je?.concept || 'Asiento contable',
+    type: je?.type || 'DIARIO',
+    items,
+    totalDebit: debit,
+    totalCredit: credit,
+    status: je?.status || 'ASENTADO'
+  };
+};
+
 export interface AccountingVoucher {
   id: string;
   voucherNumber: string; // ej: CI-2026-0001 o CE-2026-0001
@@ -249,6 +287,10 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
 
   // 4. Asientos Contables / Libro Diario
   const [journalEntries, setJournalEntries] = useFirestoreSync<JournalEntry[]>('ferreteria_journal_entries', []);
+
+  const normalizedJournalEntries = useMemo(() => {
+    return (journalEntries || []).map(normalizeJournalEntry);
+  }, [journalEntries]);
 
   // 5. Plan de Cuentas NIIF (Oficial 5 Niveles)
   const [accountPlan, setAccountPlan] = useFirestoreSync<AccountPlanItem[]>('ferreteria_account_plan', OFFICIAL_NIIF_ACCOUNT_PLAN);
@@ -456,9 +498,9 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
       balances[a.code] = Number(a.balance || 0);
     });
 
-    journalEntries.forEach(je => {
+    normalizedJournalEntries.forEach(je => {
       if (je.status === 'ASENTADO') {
-        je.items.forEach(it => {
+        (je.items || []).forEach(it => {
           const acc = accountPlan.find(a => a.code === it.accountCode);
           const nature = acc ? acc.nature : (it.accountCode.startsWith('1') || it.accountCode.startsWith('5') ? 'DEUDORA' : 'ACREEDORA');
           const current = balances[it.accountCode] || 0;
@@ -472,7 +514,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     });
 
     return balances;
-  }, [accountPlan, journalEntries]);
+  }, [accountPlan, normalizedJournalEntries]);
 
   // Dynamic Metrics NIIF
   const totalActivos = React.useMemo(() => {
@@ -1248,7 +1290,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     if (!acc) return;
 
     // Check if account has movements in journal entries
-    const hasMovements = journalEntries.some(je => je.items.some(it => it.accountCode === code));
+    const hasMovements = normalizedJournalEntries.some(je => (je.items || []).some(it => it.accountCode === code));
     if (hasMovements) {
       showAlert('Cuenta con Movimientos', `La cuenta ${code} (${acc.name}) ya tiene asientos contables registrados en el Libro Diario y no puede ser eliminada para preservar la trazabilidad NIIF.`);
       return;
@@ -1644,10 +1686,10 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
 
         // Reversar asiento contable si existe
         if (cr.journalEntryId) {
-          const targetEntry = journalEntries.find(j => j.id === cr.journalEntryId);
+          const targetEntry = normalizedJournalEntries.find(j => j.id === cr.journalEntryId);
           if (targetEntry) {
             const nextEntryNum = `AS-REV-${new Date().getFullYear()}-${String(journalEntries.length + 1).padStart(4, '0')}`;
-            const revItems: JournalEntryItem[] = targetEntry.items.map(it => ({
+            const revItems: JournalEntryItem[] = (targetEntry.items || []).map(it => ({
               accountCode: it.accountCode,
               accountName: `${it.accountName} (REVERSA)`,
               debit: it.credit,
@@ -4042,15 +4084,15 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
           </div>
 
           <div className="space-y-4">
-            {journalEntries.length === 0 ? (
+            {normalizedJournalEntries.length === 0 ? (
               <div className="py-12 bg-slate-50 rounded-2xl border border-slate-200 text-center text-slate-400 text-xs font-medium space-y-2">
                 <Calculator className="w-8 h-8 text-slate-300 mx-auto" />
                 <p>No hay asientos contables registrados en el libro diario.</p>
                 <p className="text-[11px] text-slate-400">Haz clic en "Nuevo Asiento" para registrar el primer movimiento con partida doble.</p>
               </div>
             ) : (
-              journalEntries.map((entry) => (
-                <div key={entry.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+              normalizedJournalEntries.map((entry, entryIdx) => (
+                <div key={`${entry.id || 'je'}-${entryIdx}`} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                     <div className="flex items-center space-x-3">
                       <span className="font-mono font-black text-slate-900 text-xs">{entry.entryNumber}</span>
@@ -4077,7 +4119,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-[11px]">
-                        {entry.items.map((item, idx) => (
+                        {(entry.items || []).map((item, idx) => (
                           <tr key={idx}>
                             <td className="py-1.5 px-3 font-bold text-slate-600">{item.accountCode}</td>
                             <td className="py-1.5 px-3 font-sans text-slate-800">{item.accountName}</td>
@@ -4093,8 +4135,8 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                       <tfoot className="bg-slate-50 font-black border-t border-slate-200 text-[11px]">
                         <tr>
                           <td colSpan={2} className="py-2 px-3 text-right uppercase">Totales Parti. Doble:</td>
-                          <td className="py-2 px-3 text-right text-emerald-600">{formatCurrency(entry.totalDebit, settings.currencySymbol)}</td>
-                          <td className="py-2 px-3 text-right text-rose-600">{formatCurrency(entry.totalCredit, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right text-emerald-600">{formatCurrency(entry.totalDebit || 0, settings.currencySymbol)}</td>
+                          <td className="py-2 px-3 text-right text-rose-600">{formatCurrency(entry.totalCredit || 0, settings.currencySymbol)}</td>
                         </tr>
                       </tfoot>
                     </table>
@@ -7505,7 +7547,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                     <span className="text-indigo-400 font-black">{entry.entryNumber}</span>
                   </div>
                   <div className="space-y-1">
-                    {entry.items.map((it, idx) => (
+                    {(entry.items || []).map((it, idx) => (
                       <div key={idx} className="flex justify-between text-[11px]">
                         <span className="text-slate-300 truncate max-w-xs">{it.accountCode} - {it.accountName}</span>
                         <span>
@@ -7934,7 +7976,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                    {selectedVoucherForPrint.items.map((it, idx) => (
+                    {(selectedVoucherForPrint.items || []).map((it, idx) => (
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className="py-2 px-3 font-bold text-indigo-600">{it.accountCode}</td>
                         <td className="py-2 px-3 font-sans font-bold text-slate-900">{it.accountName}</td>

@@ -1858,7 +1858,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                               </div>
                               <div>
                                 <span className="block leading-tight text-slate-900 font-bold">{w.name}</span>
-                                <span className="text-[10px] font-normal text-slate-400 font-mono">{w.role} • {w.code}</span>
+                                <span className="text-[10px] font-normal text-slate-400 font-mono">{typeof w.role === 'object' ? w.role?.name || '' : w.role} • {w.code}</span>
                               </div>
                             </td>
                             <td className="py-3 px-4 text-center">
@@ -2180,7 +2180,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                         Comprobantes Emitidos por {selectedWorkerVouchersModal.name}
                       </h3>
                       <p className="text-xs text-slate-400">
-                        {selectedWorkerVouchersModal.role || 'Cajero'} • Período: {startDate} al {endDate}
+                        {typeof selectedWorkerVouchersModal.role === 'object' ? selectedWorkerVouchersModal.role?.name || '' : (selectedWorkerVouchersModal.role || 'Cajero')} • Período: {startDate} al {endDate}
                       </p>
                     </div>
                   </div>
@@ -2800,7 +2800,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                     commissionsSummary.map((c, idx) => (
                       <tr key={idx} className="hover:bg-slate-50 transition">
                         <td className="py-3 px-4 font-sans font-bold text-slate-900">{c.name}</td>
-                        <td className="py-3 px-4 text-slate-500">{c.role}</td>
+                        <td className="py-3 px-4 text-slate-500">{typeof c.role === 'object' ? c.role?.name || '' : c.role}</td>
                         <td className="py-3 px-4 text-center font-black text-indigo-600">{c.invoicesCount}</td>
                         <td className="py-3 px-4 text-right text-slate-600">{formatCurrency(c.goal, settings.currencySymbol)}</td>
                         <td className="py-3 px-4 text-right font-black text-slate-900 text-sm">{formatCurrency(c.salesTotal, settings.currencySymbol)}</td>

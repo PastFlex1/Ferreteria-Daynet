@@ -90,18 +90,7 @@ export const CONSUMIDOR_FINAL: Customer = {
 };
 
 export const initialCustomers: Customer[] = [
-  CONSUMIDOR_FINAL,
-  {
-    id: 'cust-1',
-    docType: 'RUC',
-    docNumber: '1792345678001',
-    name: 'Constructora del Valle Cía. Ltda.',
-    email: 'compras@valle.ec',
-    phone: '022345678',
-    address: 'Av. Simón Bolívar Km 4',
-    creditLimit: 5000,
-    currentBalance: 0
-  }
+  CONSUMIDOR_FINAL
 ];
 
 export const initialProducts: Product[] = [
@@ -231,91 +220,12 @@ export const defaultPaymentMethods = [
 ];
 
 export const defaultUsersList = [
-  { id: 'USR-01', name: 'Administrador Principal', email: 'admin@ferreteria.com', username: '1799999999001', role: 'Administrador', status: 'Activo', password: 'admin' },
-  { id: 'USR-02', name: 'Juan Pérez (Caja 1)', email: 'juan.perez@ferreteria.com', username: '1724567890', role: 'Cajero', status: 'Activo', password: '1234' },
-  { id: 'USR-03', name: 'María López (Ventas)', email: 'maria.lopez@ferreteria.com', username: '1724567891', role: 'Vendedor', status: 'Activo', password: '1234' },
-  { id: 'USR-04', name: 'Carlos Ruiz (Contabilidad)', email: 'carlos.ruiz@ferreteria.com', username: '1724567892', role: 'Contador', status: 'Activo', password: '1234' }
+  { id: 'USR-01', name: 'Administrador Principal', email: 'admin@ferreteria.com', username: '1799999999001', role: 'Administrador', status: 'Activo', password: 'admin' }
 ];
 
-export const defaultSellers = [
-  { id: 'v-1', code: 'V-001', name: 'Juan Pérez', commissionRatePercent: 2 },
-  { id: 'v-2', code: 'V-002', name: 'María López', commissionRatePercent: 2.5 }
-];
+export const defaultSellers: any[] = [];
 
-export const defaultEmployees = [
-  {
-    id: 'emp-1',
-    code: 'EMP-001',
-    idNumber: '1724567890',
-    fullName: 'Juan Pérez',
-    email: 'juan.perez@ferreteria.com',
-    phone: '0987654321',
-    departmentId: 'dep-1',
-    departmentName: 'Ventas y Mostrador',
-    positionId: 'pos-1',
-    positionName: 'Cajero / Asesor de Ventas',
-    hireDate: '2023-01-15',
-    baseSalary: 650,
-    contractType: 'INDEFINIDO',
-    iessAffiliationNumber: '1724567890001',
-    bankAccount: '2100876543 - Banco Pichincha',
-    status: 'ACTIVO'
-  },
-  {
-    id: 'emp-2',
-    code: 'EMP-002',
-    idNumber: '1724567891',
-    fullName: 'María López',
-    email: 'maria.lopez@ferreteria.com',
-    phone: '0987654322',
-    departmentId: 'dep-1',
-    departmentName: 'Ventas y Mostrador',
-    positionId: 'pos-2',
-    positionName: 'Ejecutiva de Ventas y Proyectos',
-    hireDate: '2023-03-01',
-    baseSalary: 700,
-    contractType: 'INDEFINIDO',
-    iessAffiliationNumber: '1724567891001',
-    bankAccount: '0012876451 - Banco Guayaquil',
-    status: 'ACTIVO'
-  },
-  {
-    id: 'emp-3',
-    code: 'EMP-003',
-    idNumber: '1724567892',
-    fullName: 'Carlos Ruiz',
-    email: 'carlos.ruiz@ferreteria.com',
-    phone: '0987654323',
-    departmentId: 'dep-2',
-    departmentName: 'Contabilidad y Finanzas',
-    positionId: 'pos-3',
-    positionName: 'Contador General',
-    hireDate: '2022-06-10',
-    baseSalary: 950,
-    contractType: 'INDEFINIDO',
-    iessAffiliationNumber: '1724567892001',
-    bankAccount: '3100554433 - Banco Internacional',
-    status: 'ACTIVO'
-  },
-  {
-    id: 'emp-4',
-    code: 'EMP-004',
-    idNumber: '1724567893',
-    fullName: 'Roberto Gómez',
-    email: 'roberto.gomez@ferreteria.com',
-    phone: '0987654324',
-    departmentId: 'dep-3',
-    departmentName: 'Bodega y Despacho',
-    positionId: 'pos-4',
-    positionName: 'Jefe de Bodega y Logística',
-    hireDate: '2023-05-20',
-    baseSalary: 600,
-    contractType: 'INDEFINIDO',
-    iessAffiliationNumber: '1724567893001',
-    bankAccount: '1100998877 - Banco Bolivariano',
-    status: 'ACTIVO'
-  }
-];
+export const defaultEmployees: any[] = [];
 
 export const defaultCountries = [
   'Ecuador',

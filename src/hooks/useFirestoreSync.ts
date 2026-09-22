@@ -43,12 +43,37 @@ function ensureSharedEventSource() {
 }
 
 export function useFirestoreSync<T>(docId: string, initialValue: T) {
+  const isValidType = (val: any): boolean => {
+    if (val === undefined || val === null) return false;
+    if (typeof initialValue === 'string') {
+      return typeof val === 'string';
+    }
+    if (typeof initialValue === 'boolean') {
+      return typeof val === 'boolean';
+    }
+    if (typeof initialValue === 'number') {
+      return typeof val === 'number' && !isNaN(val);
+    }
+    if (Array.isArray(initialValue)) {
+      return Array.isArray(val);
+    }
+    if (typeof initialValue === 'object' && initialValue !== null) {
+      return typeof val === 'object' && !Array.isArray(val) && val !== null;
+    }
+    return true;
+  };
+
   // 1. Estado Inicial: desde caché local o initialValue (cero parpadeo en pantalla)
   const [data, setData] = useState<T>(() => {
     try {
       const cached = localStorage.getItem(docId);
       if (cached) {
-        return typeof initialValue === 'string' ? (cached as any) : JSON.parse(cached);
+        const parsed = typeof initialValue === 'string' ? (cached as any) : JSON.parse(cached);
+        if (isValidType(parsed)) {
+          return parsed as T;
+        } else {
+          localStorage.removeItem(docId);
+        }
       }
     } catch {}
     return initialValue;
@@ -69,14 +94,18 @@ export function useFirestoreSync<T>(docId: string, initialValue: T) {
     }
     const onRemoteUpdate = (incomingData: any) => {
       if (!isMountedRef.current) return;
-      setData(incomingData);
+      if (isValidType(incomingData)) {
+        setData(incomingData);
+      }
     };
     docListeners.add(onRemoteUpdate);
 
     // 3. Suscribirse a mensajes de otras pestañas en la misma máquina
     const onBroadcastMessage = (event: MessageEvent) => {
       if (event.data?.docId === docId && isMountedRef.current) {
-        setData(event.data.data);
+        if (isValidType(event.data.data)) {
+          setData(event.data.data);
+        }
       }
     };
     broadcastChannel?.addEventListener('message', onBroadcastMessage);
@@ -90,17 +119,30 @@ export function useFirestoreSync<T>(docId: string, initialValue: T) {
       .then((resData) => {
         if (!isMountedRef.current) return;
         if (resData && resData.exists && resData.data !== undefined && resData.data !== null) {
-          setData(resData.data);
-          try {
-            localStorage.setItem(docId, typeof resData.data === 'string' ? resData.data : JSON.stringify(resData.data));
-          } catch {}
+          if (isValidType(resData.data)) {
+            setData(resData.data);
+            try {
+              localStorage.setItem(docId, typeof resData.data === 'string' ? resData.data : JSON.stringify(resData.data));
+            } catch {}
+          } else {
+            // Datos corruptos en backend: purgar caché y auto-reparar en backend
+            try { localStorage.removeItem(docId); } catch {}
+            fetch(`/api/mongo/doc/${encodeURIComponent(docId)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: initialValue })
+            }).catch(() => {});
+          }
         } else {
           // El documento aún no está en MongoDB, poblar con el valor inicial/caché
           let currentVal = initialValue;
           try {
             const cached = localStorage.getItem(docId);
             if (cached) {
-              currentVal = typeof initialValue === 'string' ? (cached as any) : JSON.parse(cached);
+              const parsed = typeof initialValue === 'string' ? (cached as any) : JSON.parse(cached);
+              if (isValidType(parsed)) {
+                currentVal = parsed;
+              }
             }
           } catch {}
 

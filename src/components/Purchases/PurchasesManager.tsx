@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { useModal } from '../../context/ModalContext';
 import { 
@@ -358,7 +358,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   // Open Edit Modal
   const handleOpenEditOrder = (oc: PurchaseOrder) => {
     setEditingOrder(oc);
-    setEditOrderSupplierId(oc.supplier.id || suppliers[0]?.id || '');
+    setEditOrderSupplierId(oc.supplier?.id || (oc as any).supplierId || suppliers[0]?.id || '');
     setEditOrderExpectedDate(oc.expectedDelivery || new Date().toISOString().split('T')[0]);
     setEditOrderStatus(oc.status || 'BORRADOR');
     setEditOrderNotes(oc.notes || '');
@@ -432,7 +432,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     setSelectedOrderView(null);
 
     // Populate the purchase form with order data
-    setSelectedSupplierId(oc.supplier.id);
+    setSelectedSupplierId(oc.supplier?.id || (oc as any).supplierId || '');
     setPurchaseItems(oc.items.map(item => ({ ...item })));
     setInvoiceNumberInput(`FAC-${oc.orderNumber.replace(/[^0-9]/g, '') || Date.now().toString().slice(-6)}`);
     
@@ -546,11 +546,48 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   const [historyStartDate, setHistoryStartDate] = useState('');
   const [historyEndDate, setHistoryEndDate] = useState('');
 
-  const totalPurchasesAmount = (purchasesHistory || []).reduce((acc, inv) => acc + (inv.total || 0), 0);
-  const totalPaidAmount = (purchasesHistory || []).reduce((acc, inv) => acc + (inv.amountPaid || 0), 0);
+  const normalizedPurchasesHistory = useMemo(() => {
+    return (purchasesHistory || []).map((inv: any): PurchaseInvoice => {
+      const supplierObj = inv.supplier && typeof inv.supplier === 'object'
+        ? inv.supplier
+        : {
+            id: inv.supplierId || 'sup-gen',
+            name: inv.supplierName || (typeof inv.supplier === 'string' ? inv.supplier : 'Proveedor General'),
+            taxId: inv.supplierTaxId || inv.supplierRuc || '9999999999001',
+            phone: inv.supplierPhone || '',
+            email: inv.supplierEmail || '',
+            address: inv.supplierAddress || '',
+            paymentDays: 30
+          };
+
+      const totalVal = Number(inv.total) || 0;
+      const amountPaidVal = inv.amountPaid !== undefined
+        ? Number(inv.amountPaid)
+        : (inv.paymentCondition === 'CONTADO' || inv.paymentStatus === 'PAGADA' ? totalVal : 0);
+
+      return {
+        ...inv,
+        id: inv.id || inv._id || `pur-${inv.invoiceNumber || Date.now()}`,
+        invoiceNumber: inv.invoiceNumber || inv.purchaseNumber || 'FAC-000-000',
+        purchaseDate: inv.purchaseDate || inv.date || new Date().toISOString().split('T')[0],
+        dueDate: inv.dueDate || inv.purchaseDate || inv.date || new Date().toISOString().split('T')[0],
+        supplier: supplierObj,
+        items: Array.isArray(inv.items) ? inv.items : [],
+        subtotal: Number(inv.subtotal) || (totalVal ? +(totalVal / 1.15).toFixed(2) : 0),
+        taxTotal: Number(inv.taxTotal) || (totalVal ? +(totalVal - totalVal / 1.15).toFixed(2) : 0),
+        total: totalVal,
+        amountPaid: amountPaidVal,
+        paymentStatus: inv.paymentStatus || (inv.paymentCondition === 'CONTADO' ? 'PAGADA' : 'CREDITO_PENDIENTE'),
+        registeredBy: inv.registeredBy || 'Administrador POS'
+      };
+    });
+  }, [purchasesHistory]);
+
+  const totalPurchasesAmount = normalizedPurchasesHistory.reduce((acc, inv) => acc + (inv.total || 0), 0);
+  const totalPaidAmount = normalizedPurchasesHistory.reduce((acc, inv) => acc + (inv.amountPaid || 0), 0);
   const totalPendingAmount = Math.max(0, totalPurchasesAmount - totalPaidAmount);
 
-  const filteredPurchasesHistory = (purchasesHistory || []).filter((inv) => {
+  const filteredPurchasesHistory = normalizedPurchasesHistory.filter((inv) => {
     if (historyStatusFilter !== 'TODOS' && inv.paymentStatus !== historyStatusFilter) return false;
     if (historyStartDate && inv.purchaseDate < historyStartDate) return false;
     if (historyEndDate && inv.purchaseDate > historyEndDate) return false;
@@ -794,7 +831,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     if (payables && payables.length > 0) {
       setPayables(
         payables.map((p: any) => {
-          if (p.invoiceNumber === selectedInvoiceView.invoiceNumber && (p.supplierId === selectedInvoiceView.supplier.id || p.supplierTaxId === selectedInvoiceView.supplier.taxId)) {
+          const supId = selectedInvoiceView.supplier?.id || (selectedInvoiceView as any).supplierId;
+          const supTax = selectedInvoiceView.supplier?.taxId || (selectedInvoiceView as any).supplierTaxId;
+          if (p.invoiceNumber === selectedInvoiceView.invoiceNumber && (!supId || p.supplierId === supId || p.supplierTaxId === supTax)) {
             const paid = p.paidAmount + abono;
             return {
               ...p,
@@ -811,7 +850,9 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
     if (suppliers && suppliers.length > 0) {
       setSuppliers(
         suppliers.map((s: any) => {
-          if (s.id === selectedInvoiceView.supplier.id || s.taxId === selectedInvoiceView.supplier.taxId) {
+          const supId = selectedInvoiceView.supplier?.id || (selectedInvoiceView as any).supplierId;
+          const supTax = selectedInvoiceView.supplier?.taxId || (selectedInvoiceView as any).supplierTaxId;
+          if ((supId && s.id === supId) || (supTax && s.taxId === supTax)) {
             return {
               ...s,
               currentBalance: Math.max(0, (s.currentBalance || 0) - abono)
@@ -1659,17 +1700,19 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {filteredPurchasesHistory.map((inv) => {
+                    {filteredPurchasesHistory.map((inv, idx) => {
                       const saldo = Math.max(0, (inv.total || 0) - (inv.amountPaid || 0));
                       return (
-                        <tr key={inv.id} className="hover:bg-slate-50 transition">
+                        <tr key={`${inv.id || inv.invoiceNumber || 'purchase'}-${idx}`} className="hover:bg-slate-50 transition">
                           <td className="py-3 px-4 font-black text-slate-900">
                             <span className="font-mono text-blue-600 text-[11px] block font-black">{inv.invoiceNumber}</span>
                             <span className="text-slate-500 font-normal">{inv.purchaseDate}</span>
                           </td>
                           <td className="py-3 px-4 font-bold text-slate-800">
-                            {inv.supplier.name}
-                            <span className="block text-[10px] text-slate-400 font-mono font-normal">RUC: {inv.supplier.taxId}</span>
+                            {inv.supplier?.name || (inv as any).supplierName || 'Proveedor General'}
+                            <span className="block text-[10px] text-slate-400 font-mono font-normal">
+                              RUC: {inv.supplier?.taxId || (inv as any).supplierTaxId || (inv as any).supplierRuc || 'S/N'}
+                            </span>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono font-bold text-[10px]">
@@ -1739,8 +1782,12 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
             <div className="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-4 rounded-xl">
               <div>
                 <div className="text-slate-400 font-bold uppercase text-[10px]">Proveedor</div>
-                <div className="font-black text-slate-900 text-sm">{selectedInvoiceView.supplier.name}</div>
-                <div className="text-slate-600 font-mono">RUC: {selectedInvoiceView.supplier.taxId}</div>
+                <div className="font-black text-slate-900 text-sm">
+                  {selectedInvoiceView.supplier?.name || (selectedInvoiceView as any).supplierName || 'Proveedor General'}
+                </div>
+                <div className="text-slate-600 font-mono">
+                  RUC: {selectedInvoiceView.supplier?.taxId || (selectedInvoiceView as any).supplierTaxId || (selectedInvoiceView as any).supplierRuc || 'S/N'}
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-slate-400 font-bold uppercase text-[10px]">Fecha Emisión</div>
@@ -1846,13 +1893,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {purchaseOrders.map((oc) => (
-                  <tr key={oc.id} className="hover:bg-slate-50 transition">
+                {purchaseOrders.map((oc, idx) => (
+                  <tr key={`${oc.id || 'oc'}-${idx}`} className="hover:bg-slate-50 transition">
                     <td className="py-3 px-4 font-black text-slate-900">
                       <span className="font-mono text-purple-600 text-[11px] block">{oc.orderNumber}</span>
                       {oc.createdAt}
                     </td>
-                    <td className="py-3 px-4 font-bold text-slate-800">{oc.supplier.name}</td>
+                    <td className="py-3 px-4 font-bold text-slate-800">{oc.supplier?.name || (oc as any).supplierName || 'Proveedor General'}</td>
                     <td className="py-3 px-4 text-center font-mono font-bold text-slate-900">{oc.items.length} prod.</td>
                     <td className="py-3 px-4 text-right font-mono font-black text-emerald-600">
                       {formatCurrency(oc.totalAmount, settings.currencySymbol)}
@@ -3257,13 +3304,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
                 <div className="p-4 bg-purple-50/50 border border-purple-200/80 rounded-2xl space-y-1.5">
                   <span className="text-[10px] font-black uppercase text-purple-600 tracking-wider block">Datos del Proveedor</span>
-                  <h4 className="text-sm font-black text-slate-900">{selectedOrderView.supplier.name}</h4>
-                  <p className="text-slate-600">RUC / CI: <strong className="text-slate-900 font-mono">{selectedOrderView.supplier.taxId}</strong></p>
-                  {selectedOrderView.supplier.contactPerson && (
+                  <h4 className="text-sm font-black text-slate-900">{selectedOrderView.supplier?.name || (selectedOrderView as any).supplierName || 'Proveedor General'}</h4>
+                  <p className="text-slate-600">RUC / CI: <strong className="text-slate-900 font-mono">{selectedOrderView.supplier?.taxId || (selectedOrderView as any).supplierTaxId || 'S/N'}</strong></p>
+                  {selectedOrderView.supplier?.contactPerson && (
                     <p className="text-slate-600">Contacto: {selectedOrderView.supplier.contactPerson}</p>
                   )}
-                  <p className="text-slate-600">Teléfono: {selectedOrderView.supplier.phone || 'S/N'} • Email: {selectedOrderView.supplier.email || 'S/N'}</p>
-                  <p className="text-slate-600">Dirección: {selectedOrderView.supplier.address || 'S/N'}</p>
+                  <p className="text-slate-600">Teléfono: {selectedOrderView.supplier?.phone || 'S/N'} • Email: {selectedOrderView.supplier?.email || 'S/N'}</p>
+                  <p className="text-slate-600">Dirección: {selectedOrderView.supplier?.address || 'S/N'}</p>
                 </div>
               </div>
 
@@ -3305,7 +3352,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Observaciones / Condiciones</span>
                   <p className="text-xs text-slate-700">{selectedOrderView.notes || 'Sin observaciones registradas.'}</p>
                   <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-200">
-                    Condición de Pago: <strong>{selectedOrderView.supplier.paymentDays ? `${selectedOrderView.supplier.paymentDays} días de crédito` : 'Contado'}</strong>
+                    Condición de Pago: <strong>{selectedOrderView.supplier?.paymentDays ? `${selectedOrderView.supplier.paymentDays} días de crédito` : 'Contado'}</strong>
                   </p>
                 </div>
 

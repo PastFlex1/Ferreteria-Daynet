@@ -367,7 +367,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2 border-l border-slate-800 pl-3">
               <div className="hidden sm:flex flex-col text-right">
                 <span className="text-[11px] font-black text-white leading-tight">{currentUser.name}</span>
-                <span className="text-[9px] font-black text-orange-400 uppercase tracking-wider">{currentUser.role}</span>
+                <span className="text-[9px] font-black text-orange-400 uppercase tracking-wider">{typeof currentUser.role === 'object' ? currentUser.role?.name || currentUser.role?.label || 'Sin Rol' : currentUser.role}</span>
               </div>
               <button
                 onClick={onLogout}

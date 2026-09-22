@@ -105,7 +105,10 @@ export const Select: React.FC<SelectProps> = (props) => {
     const typeStr = typeof child.type === 'string' ? child.type.toLowerCase() : '';
     if (typeStr === 'option' || child.type === 'option') {
       extractOption(child as React.ReactElement<any>);
-    } else if (child.type === React.Fragment && (child.props as any)?.children) {
+    } else if (
+      (child.type === React.Fragment || typeStr === 'optgroup' || child.type === 'optgroup' || (!(child.props as any)?.value && (child.props as any)?.children)) &&
+      (child.props as any)?.children
+    ) {
       React.Children.toArray((child.props as any).children).forEach(processChild);
     } else if ((child.props as any)?.value !== undefined && (child.props as any)?.children !== undefined) {
       extractOption(child as React.ReactElement<any>);

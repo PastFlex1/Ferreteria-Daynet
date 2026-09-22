@@ -49,6 +49,7 @@ export interface StockAdjustmentRecord {
 export interface KardexMovement {
   id: string;
   seqId: number;
+  timestamp?: number;
   date: string;
   dateOnly: string;
   timeOnly: string;
@@ -81,10 +82,14 @@ export interface KardexMovement {
   notes?: string;
 }
 
-const getMotivo = (type: KardexMovement['type']): string => {
+const getMotivo = (type: KardexMovement['type'], typeLabel?: string): string => {
   switch (type) {
     case 'VENTA':
-      return 'Venta';
+      return typeLabel && (typeLabel.includes('Electrónica') || typeLabel.includes('SRI'))
+        ? 'Venta Factura Electrónica'
+        : typeLabel && (typeLabel.includes('Boleta') || typeLabel.includes('Nota de Venta'))
+        ? 'Venta Nota de Venta'
+        : 'Venta';
     case 'COMPRA':
       return 'Compra';
     case 'TOMA_FISICA_ENTRADA':
@@ -107,9 +112,15 @@ const getMotivo = (type: KardexMovement['type']): string => {
   }
 };
 
-const getReferencia = (type: KardexMovement['type'], isInput: boolean, docNumber: string): string => {
+const getReferencia = (type: KardexMovement['type'], isInput: boolean, docNumber: string, typeLabel?: string): string => {
   const cleanDoc = (docNumber || '').replace(/^#/, '').trim();
   if (type === 'VENTA') {
+    if (typeLabel && (typeLabel.includes('Electrónica') || typeLabel.includes('SRI'))) {
+      return `FAC ELECTRÓNICA ${cleanDoc}`;
+    }
+    if (typeLabel && (typeLabel.includes('Boleta') || typeLabel.includes('Nota de Venta'))) {
+      return `NOTA VENTA ${cleanDoc}`;
+    }
     return cleanDoc.toUpperCase().startsWith('FACTURA') ? cleanDoc : `FACTURA ${cleanDoc}`;
   }
   if (type === 'COMPRA') {
@@ -156,7 +167,23 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
   // ── Sync with Real Database Collections ────────────────────────────────────
   const [syncInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
-  const invoices = propsInvoices ?? syncInvoices;
+
+  // Combinar reactivamente las facturas de props y las de base de datos MongoDB sin perder ninguna
+  const invoices = useMemo(() => {
+    const map = new Map<string, Invoice>();
+    (syncInvoices || []).forEach((inv) => {
+      if (!inv) return;
+      const key = String(inv.id || (inv as any)._id || inv.fullNumber || (inv.series && inv.number ? `${inv.series}-${inv.number}` : '') || Math.random());
+      map.set(key, inv);
+    });
+    (propsInvoices || []).forEach((inv) => {
+      if (!inv) return;
+      const key = String(inv.id || (inv as any)._id || inv.fullNumber || (inv.series && inv.number ? `${inv.series}-${inv.number}` : '') || Math.random());
+      map.set(key, inv);
+    });
+    return Array.from(map.values());
+  }, [propsInvoices, syncInvoices]);
+
   const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
   const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
   const [stockAdjustments, setStockAdjustments] = useFirestoreSync<StockAdjustmentRecord[]>(
@@ -199,7 +226,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
   const selectedProduct = useMemo(() => {
     if (!selectedProductId) return null;
-    return products.find((p) => p.id === selectedProductId) || null;
+    return products.find((p) => p.id === selectedProductId || (p as any)._id === selectedProductId) || null;
   }, [products, selectedProductId]);
 
   // ── Fast Product Lookup Map ────────────────────────────────────────────────
@@ -207,9 +234,10 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     const map = new Map<string, Product>();
     products.forEach((p) => {
       if (p.id) map.set(p.id, p);
-      if (p.sku) map.set(p.sku.toLowerCase(), p);
-      if ((p as any).code) map.set(String((p as any).code).toLowerCase(), p);
-      if (p.barcode) map.set(p.barcode.toLowerCase(), p);
+      if ((p as any)._id) map.set(String((p as any)._id), p);
+      if (p.sku) map.set(p.sku.toLowerCase().trim(), p);
+      if ((p as any).code) map.set(String((p as any).code).toLowerCase().trim(), p);
+      if (p.barcode) map.set(p.barcode.toLowerCase().trim(), p);
       if (p.name) map.set(p.name.trim().toLowerCase(), p);
     });
     return map;
@@ -243,26 +271,27 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     };
 
     const isSingleProduct = !!selectedProduct;
-    const prodId = selectedProduct?.id;
-    const prodSku = (selectedProduct?.sku || '').toLowerCase();
-    const prodBarcode = (selectedProduct?.barcode || '').toLowerCase();
+    const prodId = selectedProduct?.id || (selectedProduct as any)?._id || '';
+    const prodSku = (selectedProduct?.sku || (selectedProduct as any)?.code || '').toLowerCase().trim();
+    const prodBarcode = (selectedProduct?.barcode || '').toLowerCase().trim();
     const prodName = (selectedProduct?.name || '').trim().toLowerCase();
 
     const isTargetProduct = (pId?: string, pSku?: string, pName?: string, pBarcode?: string) => {
       if (!isSingleProduct) return true;
-      const lowerSku = (pSku || '').toLowerCase();
-      const lowerBarcode = (pBarcode || '').toLowerCase();
-      const lowerName = (pName || '').trim().toLowerCase();
+      const cleanId = String(pId || '').trim();
+      const cleanSku = String(pSku || '').toLowerCase().trim();
+      const cleanBarcode = String(pBarcode || '').toLowerCase().trim();
+      const cleanName = String(pName || '').trim().toLowerCase();
 
-      return (
-        (pId && pId === prodId) ||
-        (lowerSku && prodSku && lowerSku === prodSku) ||
-        (lowerBarcode && prodBarcode && lowerBarcode === prodBarcode) ||
-        (lowerName && prodName && lowerName === prodName)
-      );
+      if (cleanId && (cleanId === prodId || ((selectedProduct as any)?._id && cleanId === String((selectedProduct as any)._id)))) return true;
+      if (cleanSku && prodSku && (cleanSku === prodSku || cleanSku === prodId.toLowerCase())) return true;
+      if (cleanBarcode && prodBarcode && cleanBarcode === prodBarcode) return true;
+      if (cleanName && prodName && (cleanName === prodName || cleanName.includes(prodName) || prodName.includes(cleanName))) return true;
+
+      return false;
     };
 
-    // 1. Invoices / Sales from POS & Facturación
+    // 1. Invoices / Sales from POS & Facturación Electrónica SRI
     (invoices || []).forEach((inv) => {
       if (!inv) return;
       if (
@@ -274,37 +303,101 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         return;
       }
 
-      const invDate = inv.createdAt || (inv as any).date || new Date().toISOString();
+      const invDate = inv.createdAt || (inv as any).date || (inv as any).fechaEmision || new Date().toISOString();
       const timestamp = new Date(invDate).getTime() || Date.now();
-      const docNum = inv.fullNumber || (inv.series && inv.number ? `${inv.series}-${String(inv.number).padStart(9, '0')}` : ((inv as any).invoiceNumber || `#${inv.number || inv.id || 'S/N'}`));
 
-      const items = Array.isArray(inv.items) ? inv.items : (Array.isArray((inv as any).detalles) ? (inv as any).detalles : []);
-      if (items.length === 0) return;
+      // Formato y resolución de número de comprobante electrónico
+      const isSriElectronic = !!(
+        inv.sriNumeroAutorizacion || 
+        inv.sriClaveAcceso || 
+        (inv as any).accessKey || 
+        inv.sriStatus === 'AUTORIZADO' ||
+        inv.documentType === 'FACTURA' ||
+        (inv as any).documentType === 'FACTURA_ELECTRONICA'
+      );
 
-      items.forEach((item: any) => {
-        const itemProdId = item.productId || item.id || item.product?.id;
-        const itemSku = item.sku || item.code || item.product?.sku || item.product?.code || '';
-        const itemName = item.productName || item.name || item.description || item.product?.name || '';
-        const itemBarcode = item.barcode || item.product?.barcode || '';
+      let docNum = inv.fullNumber;
+      if (!docNum && inv.series && inv.number) {
+        docNum = `${inv.series}-${String(inv.number).padStart(9, '0')}`;
+      }
+      if (!docNum && (inv as any).establecimiento && (inv as any).puntoEmision && (inv as any).secuencial) {
+        docNum = `${(inv as any).establecimiento}-${(inv as any).puntoEmision}-${String((inv as any).secuencial).padStart(9, '0')}`;
+      }
+      if (!docNum) {
+        docNum = (inv as any).invoiceNumber || (inv as any).numeroFactura || `#${inv.number || inv.id || (inv as any)._id || 'S/N'}`;
+      }
+
+      // Extracción robusta de ítems desde múltiples estructuras (API, MongoDB, XML parseado)
+      let rawItems: any[] = [];
+      if (Array.isArray(inv.items)) {
+        rawItems = inv.items;
+      } else if (Array.isArray((inv as any).detalles)) {
+        rawItems = (inv as any).detalles;
+      } else if ((inv as any).detalles && Array.isArray((inv as any).detalles.detalle)) {
+        rawItems = (inv as any).detalles.detalle;
+      } else if ((inv as any).detalles && typeof (inv as any).detalles.detalle === 'object' && (inv as any).detalles.detalle !== null) {
+        rawItems = [(inv as any).detalles.detalle];
+      } else if (Array.isArray((inv as any).itemsList)) {
+        rawItems = (inv as any).itemsList;
+      } else if (Array.isArray((inv as any).products)) {
+        rawItems = (inv as any).products;
+      } else if (Array.isArray((inv as any).detalle)) {
+        rawItems = (inv as any).detalle;
+      }
+
+      if (rawItems.length === 0) return;
+
+      let typeLabel = 'Venta POS';
+      if (inv.sriNumeroAutorizacion || inv.sriClaveAcceso || (inv as any).accessKey) {
+        typeLabel = 'Factura Electrónica SRI';
+      } else if (inv.documentType === 'FACTURA' || (inv as any).documentType === 'FACTURA_ELECTRONICA') {
+        typeLabel = 'Venta Factura';
+      } else if (inv.documentType === 'BOLETA' || (inv as any).documentType === 'NOTA_VENTA') {
+        typeLabel = 'Nota de Venta';
+      }
+
+      rawItems.forEach((item: any) => {
+        if (!item) return;
+
+        const itemProdId = String(item.productId || item.id || item._id || item.product?.id || item.product?._id || item.codigoPrincipal || item.codigoInterno || item.codigo || '').trim();
+        const itemSku = String(item.sku || item.code || item.codigoPrincipal || item.codigoInterno || item.codigo || item.product?.sku || item.product?.code || '').trim();
+        const itemName = String(item.productName || item.name || item.description || item.descripcion || item.product?.name || '').trim();
+        const itemBarcode = String(item.barcode || item.codigoAuxiliar || item.product?.barcode || '').trim();
 
         if (isTargetProduct(itemProdId, itemSku, itemName, itemBarcode)) {
-          const matchedProd = 
+          let matchedProd = 
             (itemProdId ? productMap.get(itemProdId) : null) || 
             (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
             (itemBarcode ? productMap.get(itemBarcode.toLowerCase()) : null) ||
-            (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
+            (itemName ? productMap.get(itemName.toLowerCase()) : null) ||
             (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName, itemBarcode) ? selectedProduct : null);
 
-          const cost = selectedProduct ? (selectedProduct.costPrice || 0) : (matchedProd?.costPrice || Number(item.costPrice || item.cost || 0));
-          const price = Number(item.unitPrice || item.price || item.precioUnitario || (matchedProd?.price || cost));
-          const qty = Number(item.quantity || item.cantidad || 1);
+          // Búsqueda aproximada por nombre si no hubo coincidencia exacta
+          if (!matchedProd && itemName) {
+            const lowerItem = itemName.toLowerCase();
+            matchedProd = products.find((p) => {
+              const pName = (p.name || '').toLowerCase().trim();
+              return pName && (lowerItem.includes(pName) || pName.includes(lowerItem));
+            }) || null;
+          }
+
+          const cost = selectedProduct 
+            ? (selectedProduct.costPrice || 0) 
+            : (matchedProd?.costPrice || Number(item.costPrice ?? item.cost ?? item.costo ?? item.costoUnitario ?? 0));
+          const price = Number(item.unitPrice ?? item.price ?? item.precioUnitario ?? item.precio ?? item.valorUnitario ?? (matchedProd?.price || cost));
+          const qty = Number(item.quantity ?? item.cantidad ?? item.qty ?? item.cant ?? 1) || 1;
+
+          const sriAuth = inv.sriNumeroAutorizacion || inv.sriClaveAcceso || (inv as any).accessKey;
+          const noteText = isSriElectronic && sriAuth
+            ? `Factura Electrónica SRI Aut: ${String(sriAuth).substring(0, 10)}... (${inv.paymentMethod || 'Contado'})`
+            : `Venta POS (${inv.paymentMethod || 'Contado'})${inv.paymentReference ? ' Ref: ' + inv.paymentReference : ''}`;
 
           rawMovements.push({
-            id: `sale-${inv.id || Math.random()}-${itemProdId || itemSku || Math.random()}-${Math.random()}`,
+            id: `sale-${inv.id || (inv as any)._id || Math.random()}-${itemProdId || itemSku || Math.random()}-${Math.random()}`,
             timestamp,
             dateStr: toEcuadorDateTimeStr(invDate),
             type: 'VENTA',
-            typeLabel: inv.documentType === 'FACTURA' ? 'Venta Factura' : inv.documentType === 'BOLETA' ? 'Venta Boleta' : 'Venta POS',
+            typeLabel,
             docNumber: docNum,
             warehouse: (inv as any).branch || 'Tienda POS / Salón de Ventas',
             entityName: inv.customer?.name || (inv as any).customerName || 'Consumidor Final',
@@ -312,11 +405,11 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             productId: matchedProd?.id || itemProdId || '',
             productName: matchedProd?.name || itemName || 'Producto Varios',
             sku: matchedProd?.sku || itemSku || 'N/A',
-            unit: matchedProd?.unit || item.unit || 'Unid',
+            unit: matchedProd?.unit || item.unit || item.unidad || 'Unid',
             qty,
             cost,
             price,
-            notes: `Venta POS (${inv.paymentMethod || 'Contado'})${inv.paymentReference ? ' Ref: ' + inv.paymentReference : ''}`,
+            notes: noteText,
           });
         }
       });
@@ -619,13 +712,14 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         const dateOnly = dateParts[0] || m.dateStr;
         const timeOnly = dateParts[1] || '';
 
-        const motivo = getMotivo(m.type);
-        const referencia = getReferencia(m.type, isInput, m.docNumber);
+        const motivo = getMotivo(m.type, m.typeLabel);
+        const referencia = getReferencia(m.type, isInput, m.docNumber, m.typeLabel);
         const tipoBadge: 'Ingreso' | 'Egreso' = isInput ? 'Ingreso' : 'Egreso';
 
         calculatedMovements.push({
           id: m.id,
           seqId: 0, // Assigned sequentially after global chronological ordering
+          timestamp: m.timestamp,
           date: m.dateStr,
           dateOnly,
           timeOnly,
@@ -660,10 +754,10 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       });
     });
 
-    // Sort all calculated movements chronologically ascending to assign global sequence IDs
+    // Ordenar cronológicamente ascendente de forma exacta usando el timestamp numérico
     calculatedMovements.sort((a, b) => {
-      const timeA = new Date(a.date).getTime() || 0;
-      const timeB = new Date(b.date).getTime() || 0;
+      const timeA = a.timestamp || (a.date ? new Date(a.date.replace(' ', 'T')).getTime() : 0) || 0;
+      const timeB = b.timestamp || (b.date ? new Date(b.date.replace(' ', 'T')).getTime() : 0) || 0;
       return timeA - timeB;
     });
 
@@ -716,6 +810,20 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     });
 
     return [...list].sort((a, b) => {
+      if (sortColumn === 'date') {
+        const timeA = a.timestamp || (a.date ? new Date(a.date.replace(' ', 'T')).getTime() : 0) || 0;
+        const timeB = b.timestamp || (b.date ? new Date(b.date.replace(' ', 'T')).getTime() : 0) || 0;
+        return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      }
+      if (sortColumn === 'seqId') {
+        return sortOrder === 'asc' ? a.seqId - b.seqId : b.seqId - a.seqId;
+      }
+      if (['cantidad', 'precio', 'stockAnt', 'stockNuevo', 'inQty', 'outQty', 'balanceQty'].includes(sortColumn)) {
+        const valA = Number((a as any)[sortColumn]) || 0;
+        const valB = Number((b as any)[sortColumn]) || 0;
+        return sortOrder === 'asc' ? valA - valB : valB - valA;
+      }
+
       let valA: any = (a as any)[sortColumn];
       let valB: any = (b as any)[sortColumn];
 
@@ -1335,7 +1443,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
                 className="bg-slate-50 border-slate-200 font-bold text-xs"
               >
                 <option value="TODOS">Todos los Movimientos</option>
-                <option value="VENTAS">Solo Ventas (POS)</option>
+                <option value="VENTAS">Ventas (POS y Facturación Electrónica SRI)</option>
                 <option value="COMPRAS">Solo Compras (Proveedores)</option>
                 <option value="AJUSTES">Ajustes & Toma Física (Todos)</option>
                 <option value="AJUSTE_STOCK">Solo Ajustes de Stock</option>

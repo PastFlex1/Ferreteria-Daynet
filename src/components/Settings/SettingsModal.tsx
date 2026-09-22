@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Settings, Save, Store, Building2, Receipt, CheckCircle2 } from 'lucide-react';
 import { StoreSettings } from '../../types';
+import { Select } from '../Shared/Select';
 
 interface SettingsViewProps {
   settings: StoreSettings;
@@ -153,14 +154,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Obligado a Llevar Contabilidad *</label>
-                <select
+                <Select
                   value={formData.accountingRequired ? 'SI' : 'NO'}
-                  onChange={(e) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-900 rounded-xl text-xs font-bold focus:ring-2 focus:ring-orange-500"
+                  onChange={(e: any) => setFormData({ ...formData, accountingRequired: e.target.value === 'SI' })}
+                  className="w-full bg-slate-50 border-slate-200 text-slate-900 font-bold"
                 >
                   <option value="NO">NO</option>
                   <option value="SI">SI</option>
-                </select>
+                </Select>
               </div>
 
               <div>
