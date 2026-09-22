@@ -110,11 +110,11 @@ const xxeAttackXml = `<?xml version="1.0" encoding="ISO-8859-1"?>
 <factura id="comprobante"><infoTributaria><ruc>&xxe;</ruc></infoTributaria></factura>`;
 
 const xxeResult = SriInvoiceXmlParser.parseXml(xxeAttackXml);
-assert(xxeResult.success === false && xxeResult.error?.includes('DOCTYPE'), '10. Rechazo estricto de XML con ataque XXE / DOCTYPE');
+assert(xxeResult.success === false && (xxeResult.error?.includes('DOCTYPE') ?? false), '10. Rechazo estricto de XML con ataque XXE / DOCTYPE');
 
 const scriptAttackXml = `<factura><infoTributaria><razonSocial><script>alert("hack")</script></razonSocial></infoTributaria></factura>`;
 const scriptResult = SriInvoiceXmlParser.parseXml(scriptAttackXml);
-assert(scriptResult.success === false && scriptResult.error?.includes('scripts'), '11. Rechazo de XML con inyección de scripts');
+assert(scriptResult.success === false && (scriptResult.error?.includes('scripts') ?? false), '11. Rechazo de XML con inyección de scripts');
 
 // 3. Cálculos decimales seguros sin aproximación float binaria
 const base1 = 1234.56;

@@ -736,7 +736,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setUsersList([
         ...(usersList || []),
         {
-          id: `USR-0${(usersList || []).length + 1}`,
+          id: `USR-${Date.now()}`,
           name: newUser.name,
           email: newUser.email,
           username: newUser.username,
