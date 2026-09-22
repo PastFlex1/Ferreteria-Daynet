@@ -142,22 +142,28 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
     }
   }, [isOpen, invoice?.id, isInvoiceAlreadyAuthorized, autoTransmit]);
 
+  const handleClose = () => {
+    setIsProcessing(false);
+    onClose();
+  };
+
   const ejecutarProcesoEmisionSRI = async () => {
     if (!invoice) return;
 
     setIsProcessing(true);
     setErrorMessage(null);
 
-    let workingInvoice = { ...invoice };
-    let currentSecNum = parseInt(
-      (workingInvoice.fullNumber || '').split('-')[2] || String(workingInvoice.number || '1'),
-      10
-    );
-    let attempts = 0;
-    const MAX_ATTEMPTS = 15;
+    try {
+      let workingInvoice = { ...invoice };
+      let currentSecNum = parseInt(
+        (workingInvoice.fullNumber || '').split('-')[2] || String(workingInvoice.number || '1'),
+        10
+      );
+      let attempts = 0;
+      const MAX_ATTEMPTS = 15;
 
-    while (attempts < MAX_ATTEMPTS) {
-      attempts++;
+      while (attempts < MAX_ATTEMPTS) {
+        attempts++;
       const ambienteVal = sriMode === 'PRODUCCION' ? '2' : '1';
       const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
       const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
@@ -436,7 +442,10 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         break; // Error no recuperable
       }
     }
-  };
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   if (!isOpen || !invoice) return null;
 
@@ -479,9 +488,10 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
           </div>
 
           <button
-            onClick={onClose}
-            disabled={isProcessing}
-            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800/80 transition cursor-pointer disabled:opacity-30"
+            type="button"
+            onClick={handleClose}
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800/80 transition cursor-pointer"
+            title="Cerrar modal"
           >
             <X className="w-5 h-5" />
           </button>
@@ -744,9 +754,8 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
 
             <button
               type="button"
-              onClick={onClose}
-              disabled={isProcessing}
-              className={`px-5 py-2 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 ${
+              onClick={handleClose}
+              className={`px-5 py-2 text-white font-bold text-xs rounded-xl transition cursor-pointer ${
                 isInvoiceAlreadyAuthorized ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-800 hover:bg-slate-700'
               }`}
             >

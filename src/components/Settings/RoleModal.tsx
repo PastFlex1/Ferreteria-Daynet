@@ -129,7 +129,7 @@ export const RoleModal: React.FC<RoleModalProps> = ({
     setCloneSource(sourceName);
     if (!sourceName) return;
 
-    const foundRole = existingRoles.find((r) => r.name === sourceName) || DEFAULT_SYSTEM_ROLES.find((r) => r.name === sourceName);
+    const foundRole = (existingRoles || []).find((r) => r?.name === sourceName) || DEFAULT_SYSTEM_ROLES.find((r) => r?.name === sourceName);
     const sourcePerms = foundRole?.permissions || ROLE_PRESETS[sourceName]?.permissions || {};
 
     setPermissions((prev) => {
@@ -216,8 +216,8 @@ export const RoleModal: React.FC<RoleModalProps> = ({
     }
 
     // Comprobar si ya existe otro rol con ese nombre (no sensible a mayúsculas)
-    const duplicate = existingRoles.find(
-      (r) => r.name.toLowerCase() === cleanName.toLowerCase() && r.id !== editingRole?.id
+    const duplicate = (existingRoles || []).find(
+      (r) => (r?.name || '').toLowerCase() === cleanName.toLowerCase() && r?.id !== editingRole?.id
     );
     if (duplicate) {
       setErrorMsg(`Ya existe un rol con el nombre "${cleanName}".`);
@@ -374,9 +374,9 @@ export const RoleModal: React.FC<RoleModalProps> = ({
                   className="w-full bg-slate-900 border-slate-800 text-white font-bold"
                 >
                   <option value="">-- Personalizar desde cero --</option>
-                  {existingRoles.map((r) => (
-                    <option key={r.id} value={r.name}>
-                      {r.label || r.name}
+                  {(existingRoles || []).filter(Boolean).map((r) => (
+                    <option key={r?.id || r?.name} value={r?.name}>
+                      {r?.label || r?.name}
                     </option>
                   ))}
                 </Select>

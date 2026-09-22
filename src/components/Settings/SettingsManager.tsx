@@ -157,6 +157,28 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const rolesList = propRolesList || internalRolesList;
   const setRolesList = propSetRolesList || setInternalRolesList;
 
+  // Helper seguro para obtener el nombre del rol en string sin importar si viene como string, objeto o undefined
+  const getRoleString = (role: any): string => {
+    if (!role) return '';
+    if (typeof role === 'string') return role;
+    if (typeof role === 'object') return role.name || role.label || role.id || '';
+    return String(role);
+  };
+
+  // Normalización segura del listado de roles para evitar fallos si un rol guardado tiene campos undefined o nulos
+  const safeRolesList: SystemRole[] = useMemo(() => {
+    const list = Array.isArray(rolesList) ? rolesList : DEFAULT_SYSTEM_ROLES;
+    return list.filter(Boolean).map((r: any) => ({
+      ...r,
+      id: r?.id || r?.name || `role-${Math.random().toString(36).slice(2, 7)}`,
+      name: r?.name || r?.label || r?.id || 'Rol',
+      label: r?.label || r?.name || r?.id || 'Rol',
+      description: r?.description || '',
+      permissions: r?.permissions || {},
+      color: r?.color || 'cyan',
+    }));
+  }, [rolesList]);
+
   const [userSubTab, setUserSubTab] = useState<'users' | 'roles'>('users');
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRole, setEditingRole] = useState<SystemRole | null>(null);
@@ -653,14 +675,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     e.preventDefault();
     if (!newUser.name || !newUser.email || !newUser.username || !newUser.password) return;
     if (editingUser) {
-      const roleChanged = (editingUser.role || '').toLowerCase() !== (newUser.role || '').toLowerCase();
+      const currentEditingRole = getRoleString(editingUser.role).toLowerCase();
+      const newRoleStr = getRoleString(newUser.role).toLowerCase();
+      const roleChanged = currentEditingRole !== newRoleStr;
       let newPermissions = editingUser.permissions;
       let hasCustomPermissions = editingUser.hasCustomPermissions;
 
       if (roleChanged) {
         // Al cambiar de rol, re-sincronizar permisos con la definición del nuevo rol
-        const foundRole = rolesList.find(
-          (r) => r.name.toLowerCase() === newUser.role.toLowerCase() || r.id === newUser.role
+        const foundRole = safeRolesList.find(
+          (r) => (r.name || '').toLowerCase() === newRoleStr || (r.id || '').toLowerCase() === newRoleStr
         );
         const rolePerms = foundRole?.permissions || ROLE_PRESETS[newUser.role]?.permissions || {};
         newPermissions = {};
@@ -678,7 +702,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       };
 
       setUsersList(
-        usersList.map(u => u.id === editingUser.id ? updatedUser : u)
+        (usersList || []).map(u => u.id === editingUser.id ? updatedUser : u)
       );
 
       // Si el usuario editado es el usuario en sesión activa, actualizar sesión de inmediato
@@ -699,8 +723,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
       showToast('Usuario actualizado correctamente', 'success');
     } else {
-      const foundRole = rolesList.find(
-        (r) => r.name.toLowerCase() === newUser.role.toLowerCase() || r.id === newUser.role
+      const newRoleStr = getRoleString(newUser.role).toLowerCase();
+      const foundRole = safeRolesList.find(
+        (r) => (r.name || '').toLowerCase() === newRoleStr || (r.id || '').toLowerCase() === newRoleStr
       );
       const initialRolePermissions = foundRole?.permissions || ROLE_PRESETS[newUser.role]?.permissions || {};
       const newMap: Record<string, boolean> = {};
@@ -709,9 +734,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       });
 
       setUsersList([
-        ...usersList,
+        ...(usersList || []),
         {
-          id: `USR-0${usersList.length + 1}`,
+          id: `USR-0${(usersList || []).length + 1}`,
           name: newUser.name,
           email: newUser.email,
           username: newUser.username,
@@ -724,24 +749,25 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       ]);
       showToast('Usuario creado correctamente', 'success');
     }
-    setNewUser({ name: '', email: '', username: '', role: rolesList[0]?.name || 'Vendedor', password: '' });
+    setNewUser({ name: '', email: '', username: '', role: safeRolesList[0]?.name || 'Vendedor', password: '' });
     setEditingUser(null);
     setShowAddUserModal(false);
   };
 
   const handleSaveRole = (role: SystemRole) => {
-    const existingIndex = rolesList.findIndex(
-      (r) => r.id === role.id || r.name.toLowerCase() === role.name.toLowerCase()
+    const roleTargetName = (role.name || '').toLowerCase();
+    const existingIndex = safeRolesList.findIndex(
+      (r) => r.id === role.id || (r.name || '').toLowerCase() === roleTargetName
     );
     if (existingIndex >= 0) {
-      const updated = [...rolesList];
+      const updated = [...safeRolesList];
       updated[existingIndex] = role;
       setRolesList(updated);
 
       // Propagar en tiempo real los permisos actualizados a todos los usuarios asignados a este rol
       setUsersList((prevUsers: any[]) =>
-        prevUsers.map((u: any) => {
-          if ((u.role || '').toLowerCase() === role.name.toLowerCase() && !u.hasCustomPermissions) {
+        (prevUsers || []).map((u: any) => {
+          if (getRoleString(u.role).toLowerCase() === roleTargetName && !u.hasCustomPermissions) {
             const newPerms: Record<string, boolean> = {};
             ALL_PERMISSIONS.forEach((p) => {
               newPerms[p.id] = !!role.permissions[p.id];
@@ -753,7 +779,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       );
 
       // Si el usuario en sesión activa tiene este rol, actualizar su sesión en tiempo real
-      if (currentUser && (currentUser.role || '').toLowerCase() === role.name.toLowerCase() && !(currentUser as any).hasCustomPermissions) {
+      if (currentUser && getRoleString(currentUser.role).toLowerCase() === roleTargetName && !(currentUser as any).hasCustomPermissions) {
         const newPerms: Record<string, boolean> = {};
         ALL_PERMISSIONS.forEach((p) => {
           newPerms[p.id] = !!role.permissions[p.id];
@@ -772,7 +798,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
       showToast(`Rol "${role.name}" actualizado correctamente.`, 'success');
     } else {
-      setRolesList([...rolesList, role]);
+      setRolesList([...safeRolesList, role]);
       showToast(`Rol "${role.name}" creado correctamente.`, 'success');
       // Si el modal de usuario estaba abierto, seleccionarlo automáticamente
       setNewUser((prev) => ({ ...prev, role: role.name }));
@@ -785,8 +811,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       return;
     }
 
-    const assignedUsers = usersList.filter(
-      (u) => (u.role || '').toLowerCase() === role.name.toLowerCase()
+    const targetRoleName = (role.name || '').toLowerCase();
+    const assignedUsers = (usersList || []).filter(
+      (u) => getRoleString(u.role).toLowerCase() === targetRoleName || u.role === role.id
     );
 
     if (assignedUsers.length > 0) {
@@ -801,7 +828,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     showConfirm(
       `¿Está seguro de eliminar permanentemente el rol "${role.name}"? Los permisos definidos para este rol se descartarán.`,
       () => {
-        setRolesList(rolesList.filter((r) => r.id !== role.id));
+        setRolesList(safeRolesList.filter((r) => r.id !== role.id));
         showToast(`Rol "${role.name}" eliminado correctamente.`, 'success');
       },
       'Confirmar eliminación',
@@ -882,6 +909,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   const filteredUsers = useMemo(() => {
     return (usersList || []).filter((u: any) => {
+      if (!u) return false;
       const q = (userSearchTerm || '').trim().toLowerCase();
       const matchesSearch =
         !q ||
@@ -890,9 +918,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         (u.username || '').toLowerCase().includes(q) ||
         (u.ruc || u.identification || '').toLowerCase().includes(q);
 
+      const userRoleStr = getRoleString(u.role).toLowerCase();
+      const targetFilterStr = (userRoleFilter || '').toLowerCase();
       const matchesRole =
         userRoleFilter === 'ALL' ||
-        (u.role || '').toLowerCase() === userRoleFilter.toLowerCase();
+        userRoleStr === targetFilterStr;
 
       const matchesStatus =
         userStatusFilter === 'ALL' ||
@@ -2336,7 +2366,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     type="button"
                     onClick={() => {
                       setEditingUser(null);
-                      setNewUser({ name: '', email: '', username: '', role: rolesList[0]?.name || 'Vendedor', password: '' });
+                      setNewUser({ name: '', email: '', username: '', role: safeRolesList[0]?.name || 'Vendedor', password: '' });
                       setShowAddUserModal(true);
                     }}
                     className="px-4 py-2.5 bg-gradient-to-r from-orange-500 via-amber-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white text-xs font-black rounded-xl transition shadow-md shadow-orange-500/20 flex items-center gap-2 cursor-pointer active:scale-95"
@@ -2386,7 +2416,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 }`}
               >
                 <Shield className="w-4 h-4 text-indigo-600" />
-                <span>Roles & Perfiles ({rolesList.length})</span>
+                <span>Roles & Perfiles ({safeRolesList.length})</span>
               </button>
             </div>
           </div>
@@ -2418,7 +2448,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between shadow-2xs">
               <div>
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Roles & Plantillas</span>
-                <span className="text-xl font-black text-indigo-600 mt-0.5 block">{rolesList.length}</span>
+                <span className="text-xl font-black text-indigo-600 mt-0.5 block">{safeRolesList.length}</span>
               </div>
               <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl">
                 <ShieldCheck className="w-5 h-5" />
@@ -2471,9 +2501,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       className="bg-white border-slate-200 font-bold text-xs"
                     >
                       <option value="ALL">Todos los Roles</option>
-                      {rolesList.map((r) => (
-                        <option key={r.id} value={r.name}>
-                          {r.name}
+                      {safeRolesList.map((r) => (
+                        <option key={r.id || r.name} value={r.name}>
+                          {r.label || r.name}
                         </option>
                       ))}
                     </Select>
@@ -2530,8 +2560,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     ) : (
                       filteredUsers.map((u) => {
                         const isActive = u.status === 'Activo';
-                        const roleDef = rolesList.find(
-                          (r) => r.name.toLowerCase() === (u.role || '').toLowerCase() || r.id === u.role
+                        const uRoleStr = getRoleString(u.role).toLowerCase();
+                        const roleDef = safeRolesList.find(
+                          (r) => (r.name || '').toLowerCase() === uRoleStr || (r.id || '').toLowerCase() === uRoleStr
                         );
 
                         return (
@@ -2557,7 +2588,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                             <td className="px-4 py-3 whitespace-nowrap">
                               <div className="space-y-1">
                                 <span className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs">
-                                  <span>{roleDef?.label || (typeof u.role === 'object' ? u.role?.name || u.role?.label || 'Sin Rol' : u.role)}</span>
+                                  <span>{roleDef?.label || (typeof u.role === 'object' ? u.role?.name || u.role?.label || 'Sin Rol' : u.role || 'Sin Rol')}</span>
                                 </span>
                                 {u.permissions && Object.keys(u.permissions).length > 0 && (
                                   <div className="text-[10px] font-mono text-amber-700 font-bold flex items-center gap-1">
@@ -2643,9 +2674,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4.5">
-                {rolesList.map((role) => {
-                  const assignedCount = usersList.filter(
-                    (u) => (u.role || '').toLowerCase() === role.name.toLowerCase() || u.role === role.id
+                {safeRolesList.map((role) => {
+                  const roleNameLower = (role.name || '').toLowerCase();
+                  const assignedCount = (usersList || []).filter(
+                    (u) => getRoleString(u.role).toLowerCase() === roleNameLower || u.role === role.id
                   ).length;
                   const activePermsCount = Object.values(role.permissions || {}).filter(Boolean).length;
                   const totalPerms = ALL_PERMISSIONS.length;
@@ -2662,7 +2694,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', badge: 'bg-indigo-100 text-indigo-800' },
                   };
                   const theme = colorClassMap[role.color || 'cyan'] || colorClassMap.cyan;
-                  const emojiChar = role.label.match(/^(\p{Extended_Pictographic}|\S+)/u)?.[1] || '🛡️';
+                  const emojiChar = (role.label || role.name || '').match(/^(\p{Extended_Pictographic}|\S+)/u)?.[1] || '🛡️';
 
                   return (
                     <div
@@ -2862,16 +2894,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         className="w-full bg-slate-50 border-slate-200 text-slate-900 font-bold"
                       >
                         <optgroup label="Roles del Sistema">
-                          {rolesList.filter((r) => r.isSystem).map((r) => (
-                            <option key={r.id} value={r.name}>
+                          {safeRolesList.filter((r) => r.isSystem).map((r) => (
+                            <option key={r.id || r.name} value={r.name}>
                               {r.label || r.name}
                             </option>
                           ))}
                         </optgroup>
-                        {rolesList.some((r) => !r.isSystem) && (
+                        {safeRolesList.some((r) => !r.isSystem) && (
                           <optgroup label="Roles Personalizados">
-                            {rolesList.filter((r) => !r.isSystem).map((r) => (
-                              <option key={r.id} value={r.name}>
+                            {safeRolesList.filter((r) => !r.isSystem).map((r) => (
+                              <option key={r.id || r.name} value={r.name}>
                                 {r.label || r.name}
                               </option>
                             ))}
@@ -2957,7 +2989,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 setUserForPermissions(null);
               }}
               onSave={handleSavePermissions}
-              rolesList={rolesList}
+              rolesList={safeRolesList}
             />
           )}
 
@@ -2971,7 +3003,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               }}
               onSave={handleSaveRole}
               editingRole={editingRole}
-              existingRoles={rolesList}
+              existingRoles={safeRolesList}
             />
           )}
         </div>

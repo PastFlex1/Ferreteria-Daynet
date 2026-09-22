@@ -1257,13 +1257,16 @@ export function getCombinedRolePresets(customRoles?: SystemRole[]): Record<strin
   const result: Record<string, { label: string; description: string; permissions: PermissionMap; isSystem?: boolean; color?: string }> = { ...ROLE_PRESETS };
   if (customRoles && Array.isArray(customRoles)) {
     customRoles.forEach((r) => {
-      result[r.name] = {
-        label: r.label || r.name,
-        description: r.description || '',
-        permissions: r.permissions || {},
-        isSystem: !!r.isSystem,
-        color: r.color || 'cyan',
-      };
+      if (r && (r.name || r.id)) {
+        const key = r.name || r.id;
+        result[key] = {
+          label: r.label || r.name || key,
+          description: r.description || '',
+          permissions: r.permissions || {},
+          isSystem: !!r.isSystem,
+          color: r.color || 'cyan',
+        };
+      }
     });
   }
   return result;
