@@ -168,15 +168,22 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   // Normalización segura del listado de roles para evitar fallos si un rol guardado tiene campos undefined o nulos
   const safeRolesList: SystemRole[] = useMemo(() => {
     const list = Array.isArray(rolesList) ? rolesList : DEFAULT_SYSTEM_ROLES;
-    return list.filter(Boolean).map((r: any) => ({
-      ...r,
-      id: r?.id || r?.name || `role-${Math.random().toString(36).slice(2, 7)}`,
-      name: r?.name || r?.label || r?.id || 'Rol',
-      label: r?.label || r?.name || r?.id || 'Rol',
-      description: r?.description || '',
-      permissions: r?.permissions || {},
-      color: r?.color || 'cyan',
-    }));
+    return list
+      .filter(Boolean)
+      .filter((r: any) => {
+        // Filtrar basura que pudo haberse colado en LocalStorage
+        const nameOrId = typeof r === 'string' ? r : String(r?.name || r?.id || '');
+        return !nameOrId.startsWith('ferreteria_settings_');
+      })
+      .map((r: any) => ({
+        ...r,
+        id: typeof r === 'string' ? r : (r?.id || r?.name || `role-${Math.random().toString(36).slice(2, 7)}`),
+        name: typeof r === 'string' ? r : (r?.name || r?.label || r?.id || 'Rol'),
+        label: typeof r === 'string' ? r : (r?.label || r?.name || r?.id || 'Rol'),
+        description: typeof r === 'string' ? '' : (r?.description || ''),
+        permissions: typeof r === 'string' ? {} : (r?.permissions || {}),
+        color: typeof r === 'string' ? 'cyan' : (r?.color || 'cyan'),
+      }));
   }, [rolesList]);
 
   const [userSubTab, setUserSubTab] = useState<'users' | 'roles'>('users');
@@ -2703,13 +2710,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     >
                       <div>
                         {/* Header Tarjeta */}
-                        <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start justify-between gap-2 min-w-0">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div className={`w-10 h-10 rounded-xl ${theme.bg} border ${theme.border} ${theme.text} flex items-center justify-center text-lg shrink-0 shadow-2xs`}>
                               {emojiChar}
                             </div>
                             <div className="min-w-0">
-                              <h3 className="font-black text-slate-900 text-sm truncate">
+                              <h3 className="font-black text-slate-900 text-sm truncate" title={role.name}>
                                 {role.name}
                               </h3>
                               <span className="text-[10px] font-mono text-slate-400 block truncate">
