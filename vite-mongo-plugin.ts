@@ -375,7 +375,7 @@ export function viteMongoPlugin(): Plugin {
               const count = await friendlyCol.countDocuments();
               if (count > 0) {
                 if (friendlyName === 'configuracion_empresa') {
-                  const confDoc = await friendlyCol.findOne({ _id: 'general_config' });
+                  const confDoc = await friendlyCol.findOne({ _id: 'general_config' } as any);
                   if (confDoc) {
                     const { _id, _syncedAt, ...cleanData } = confDoc;
                     // Cache into app_state
@@ -387,7 +387,7 @@ export function viteMongoPlugin(): Plugin {
                     return sendJson(res, 200, { exists: true, data: cleanData, updatedAt: _syncedAt || new Date() });
                   }
                 } else if (friendlyName === 'configuracion_parametros') {
-                  const paramDoc = await friendlyCol.findOne({ _id: docId });
+                  const paramDoc = await friendlyCol.findOne({ _id: docId } as any);
                   if (paramDoc && paramDoc.value !== undefined) {
                     await db.collection('app_state').updateOne(
                       { _id: docId } as any,
@@ -508,7 +508,7 @@ export function viteMongoPlugin(): Plugin {
             for (const [docId, friendlyName] of Object.entries(COMPASS_COLLECTIONS)) {
               if (!result[docId] || (Array.isArray(result[docId]) && result[docId].length === 0)) {
                 try {
-                  const friendlyCol = db.collection(friendlyName);
+                  const friendlyCol = db.collection<any>(friendlyName);
                   const count = await friendlyCol.countDocuments();
                   if (count > 0) {
                     if (friendlyName === 'configuracion_empresa') {
