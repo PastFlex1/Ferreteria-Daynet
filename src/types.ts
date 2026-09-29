@@ -390,6 +390,7 @@ export type SettingsSubTab =
   | 'CFG_USUARIOS'
   | 'CFG_FORMATO_IMPRESION'
   | 'CFG_ADMINISTRACION'
+  | 'CFG_DISENO'
   | 'CFG_BACKUP';
 
 export type TabType = SalesSubTab | CustomersSubTab | InventorySubTab | PurchasesSubTab | SuppliersSubTab | FinanceSubTab | AccountingSubTab | AssetsSubTab | HRSubTab | ReportsSubTab | SettingsSubTab | 'CASH_REGISTER' | 'SETTINGS';

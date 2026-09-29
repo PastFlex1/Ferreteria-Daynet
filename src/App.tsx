@@ -21,6 +21,7 @@ import { ReportsManager } from './components/Reports/ReportsManager';
 import { SplashScreen, ModuleSkeleton } from './components/UI/LoadingScreen';
 import { PermissionsProvider, usePermissions } from './context/PermissionsContext';
 import { TAB_TO_PERMISSION_MAP, DEFAULT_TAB_PRIORITY, SystemRole, DEFAULT_SYSTEM_ROLES } from './types/permissions';
+import { useTheme } from './context/ThemeContext';
 
 import { 
   AccountingSubTab,
@@ -787,6 +788,8 @@ export default function App() {
     );
   }
 
+  const { sidebarPosition } = useTheme();
+
   return (
     <PermissionsProvider currentUser={currentUser} usersList={usersList} rolesList={rolesList}>
       <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-orange-500 selection:text-white">
@@ -804,8 +807,11 @@ export default function App() {
           setSidebarCollapsed={setSidebarCollapsed}
         />
 
-        {/* Main Container Content — offset by topbar (56px) and sidebar (dynamic) */}
-        <main className={`pt-14 min-h-screen transition-all duration-200 ${sidebarCollapsed ? 'pl-14' : 'pl-56'}`}>
+        {/* Main Container Content — offset by topbar (56px) and sidebar/navbar (dynamic) */}
+        <main className={`min-h-screen transition-all duration-200 
+          ${sidebarPosition === 'top' ? 'pt-28 pb-4' : sidebarPosition === 'bottom' ? 'pt-14 pb-14' : 'pt-14 pb-4'}
+          ${sidebarPosition === 'right' ? (sidebarCollapsed ? 'pr-14' : 'pr-56') : sidebarPosition === 'left' ? (sidebarCollapsed ? 'pl-14' : 'pl-56') : 'px-0'}
+        `}>
           <div className="p-4 sm:p-6 lg:p-8 max-w-[1920px] mx-auto">
           {isTabLoading ? (
             <ModuleSkeleton />
@@ -1066,6 +1072,7 @@ export default function App() {
           'CFG_USUARIOS',
           'CFG_FORMATO_IMPRESION',
           'CFG_ADMINISTRACION',
+          'CFG_DISENO',
           'CFG_BACKUP'
         ].includes(activeTab)) && (
           <SettingsManager 

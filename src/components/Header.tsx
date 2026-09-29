@@ -65,11 +65,13 @@ import {
   Key,
   LogOut,
   X,
-  ChevronRight
+  ChevronRight,
+  Sparkles
 } from 'lucide-react';
 import { CustomersSubTab, InventorySubTab, PurchasesSubTab, SalesSubTab, SuppliersSubTab, FinanceSubTab, AccountingSubTab, AssetsSubTab, HRSubTab, ReportsSubTab, SettingsSubTab, StoreSettings, TabType } from '../types';
 import { usePermissions } from '../context/PermissionsContext';
 import { TAB_TO_PERMISSION_MAP } from '../types/permissions';
+import { useTheme } from '../context/ThemeContext';
 
 
 interface HeaderProps {
@@ -242,6 +244,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'CFG_USUARIOS',          label: 'Usuarios',            icon: <Users className="w-3.5 h-3.5" /> },
     { id: 'CFG_FORMATO_IMPRESION', label: 'Formato Impresión',   icon: <Printer className="w-3.5 h-3.5" /> },
     { id: 'CFG_ADMINISTRACION',    label: 'Administración',      icon: <Sliders className="w-3.5 h-3.5" /> },
+    { id: 'CFG_DISENO',            label: 'Diseño y Tema',       icon: <Sparkles className="w-3.5 h-3.5 text-purple-400" /> },
     { id: 'CFG_BACKUP',            label: 'Base de Datos (MongoDB)', icon: <Database className="w-3.5 h-3.5 text-emerald-400" /> },
   ];
 
@@ -270,21 +273,36 @@ export const Header: React.FC<HeaderProps> = ({
 
   const modules = rawModules.filter(m => isSuperAdmin || m.items.length > 0);
 
+  const { sidebarPosition } = useTheme();
+  const isHorizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom';
 
   // Determine which module is active based on current tab
   const activeModule = modules.find(m => m.items.some(i => i.id === activeTab));
 
-  // Open the active module by default; allow manual toggling
+  // Open the active module by default (only if vertical); allow manual toggling
   const [openModule, setOpenModule] = useState<ModuleId | null>(
-    (activeModule?.id ?? null) as ModuleId | null
+    isHorizontal ? null : (activeModule?.id ?? null) as ModuleId | null
   );
 
-  // Keep open module in sync when navigating programmatically
+  // Keep open module in sync when navigating programmatically (only in vertical accordion mode)
   useEffect(() => {
-    if (activeModule && openModule !== activeModule.id) {
+    if (!isHorizontal && activeModule && openModule !== activeModule.id) {
       setOpenModule(activeModule.id as ModuleId);
     }
-  }, [activeTab]);
+  }, [activeTab, isHorizontal, activeModule?.id]);
+
+  // Click outside to close dropdown in horizontal mode
+  useEffect(() => {
+    if (!isHorizontal) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('nav')) {
+        setOpenModule(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isHorizontal]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -299,12 +317,14 @@ export const Header: React.FC<HeaderProps> = ({
     setOpenModule(prev => (prev === id ? null : id));
   };
 
+  // Synchronize browser tab title and favicon omitted here
+
   return (
     <>
       {/* ── Top Topbar ───────────────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-slate-950 border-b border-slate-800/80 shadow-xl h-14 flex items-center px-4 gap-4 no-print">
+      <header className={`fixed top-0 left-0 right-0 z-40 bg-slate-950 border-b border-slate-800/80 shadow-xl h-14 flex items-center px-4 gap-4 no-print ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
         {/* Brand */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className={`flex items-center gap-3 shrink-0 ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
           {settings.logoUrl ? (
             <div className="p-1 bg-white rounded-xl shadow-md border border-slate-700 flex items-center justify-center shrink-0">
               <img src={settings.logoUrl} alt="Logo" className="w-8 h-8 object-contain" />
@@ -317,7 +337,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
           )}
-          <div>
+          <div className={sidebarPosition === 'right' ? 'text-right' : ''}>
             <h1 className="text-base font-black tracking-tight text-white">
               {settings.storeName || 'Ferretería'}
             </h1>
@@ -332,7 +352,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         {/* Right-side status pills */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className={`flex items-center gap-2 shrink-0 ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
           {lowStockCount > 0 && (
             <button
               onClick={() => setActiveTab('INVENTARIO' as TabType)}
@@ -358,14 +378,14 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{isCashRegisterOpen ? 'Caja Abierta' : 'Caja Cerrada'}</span>
           </button>
 
-          <div className="hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 font-mono">
+          <div className={`hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 font-mono ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
             <Clock className="w-3.5 h-3.5 text-orange-400" />
             <span>{currentTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
           </div>
 
           {currentUser && (
-            <div className="flex items-center gap-2 border-l border-slate-800 pl-3">
-              <div className="hidden sm:flex flex-col text-right">
+            <div className={`flex items-center gap-2 border-slate-800 ${sidebarPosition === 'right' ? 'border-r pr-3 flex-row-reverse' : 'border-l pl-3'}`}>
+              <div className={`hidden sm:flex flex-col ${sidebarPosition === 'right' ? 'text-left' : 'text-right'}`}>
                 <span className="text-[11px] font-black text-white leading-tight">{currentUser.name}</span>
                 <span className="text-[9px] font-black text-orange-400 uppercase tracking-wider">{typeof currentUser.role === 'object' ? currentUser.role?.name || currentUser.role?.label || 'Sin Rol' : currentUser.role}</span>
               </div>
@@ -381,57 +401,64 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </header>
 
-      {/* ── Left Sidebar (accordion) ─────────────────────────────────────────── */}
+      {/* ── Navigation Menu (Sidebar or Navbar) ───────────────────────────── */}
       <aside
-        className={`fixed top-14 left-0 bottom-0 z-30 bg-slate-950 border-r border-slate-800/80 flex flex-col shadow-2xl transition-all duration-200 no-print ${
-          sidebarCollapsed ? 'w-14' : 'w-56'
+        className={`fixed z-30 bg-slate-950 border-slate-800/80 shadow-2xl transition-all duration-200 no-print flex ${
+          isHorizontal
+            ? `left-0 right-0 h-auto min-h-[56px] flex-row items-center justify-center px-2 py-1 ${sidebarPosition === 'top' ? 'top-14 border-b' : 'bottom-0 border-t'}`
+            : `top-14 bottom-0 flex-col ${sidebarPosition === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${sidebarCollapsed ? 'w-14' : 'w-56'}`
         }`}
       >
-        {/* Collapse toggle */}
-        <div className="flex items-center justify-end px-2 py-2 border-b border-slate-800/60 shrink-0">
-          <button
-            onClick={() => {
-              setSidebarCollapsed(prev => !prev);
-            }}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
-            title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}
-          >
-            {sidebarCollapsed
-              ? <ChevronRight className="w-4 h-4" />
-              : <X className="w-4 h-4" />}
-          </button>
-        </div>
+        {/* Collapse toggle (only for vertical) */}
+        {!isHorizontal && (
+          <div className="flex items-center justify-end px-2 py-2 border-b border-slate-800/60 shrink-0">
+            <button
+              onClick={() => {
+                setSidebarCollapsed(prev => !prev);
+              }}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+              title={sidebarCollapsed ? 'Expandir menú' : 'Colapsar menú'}
+            >
+              {sidebarCollapsed
+                ? <ChevronRight className="w-4 h-4" />
+                : <X className="w-4 h-4" />}
+            </button>
+          </div>
+        )}
 
-        {/* Accordion nav */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar py-2">
+        {/* Navigation Items */}
+        <nav className={`flex-1 custom-scrollbar ${isHorizontal ? 'flex flex-row flex-wrap items-center justify-center px-2 h-full gap-1' : 'overflow-y-auto overflow-x-hidden py-2'}`}>
           {modules.map((mod) => {
             const isModuleActive = mod.items.some(i => i.id === activeTab);
             const isOpen = openModule === mod.id;
 
             return (
-              <div key={mod.id}>
+              <div key={mod.id} className={isHorizontal ? "relative flex-shrink-0 h-full flex items-center" : ""}>
                 {/* Module header button */}
                 <button
                   onClick={() => {
-                    if (!sidebarCollapsed) toggleModule(mod.id);
-                    else {
-                      // when collapsed, just open the first subtab
+                    if (isHorizontal) {
+                      toggleModule(mod.id);
+                    } else if (!sidebarCollapsed) {
+                      toggleModule(mod.id);
+                    } else {
+                      // when collapsed vertically, just open the first subtab or expand
                       setSidebarCollapsed(false);
                       setOpenModule(mod.id);
                     }
                   }}
-                  title={sidebarCollapsed ? mod.label : undefined}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 transition-all duration-150 cursor-pointer
-                    ${isModuleActive
-                      ? 'bg-orange-500/15 text-white border-l-2 border-orange-500'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-l-2 border-transparent'
+                  title={sidebarCollapsed && !isHorizontal ? mod.label : undefined}
+                  className={`group flex items-center gap-3 transition-all duration-150 cursor-pointer
+                    ${isHorizontal
+                      ? `h-10 px-3 rounded-lg ${isModuleActive ? 'bg-orange-500/15 text-white border-b-2 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`
+                      : `w-full px-3 py-2.5 ${isModuleActive ? 'bg-orange-500/15 text-white border-l-2 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-l-2 border-transparent'}`
                     }`}
                 >
                   <span className={`shrink-0 ${isModuleActive ? 'text-orange-400' : 'text-slate-500 group-hover:text-slate-300'}`}>
                     {mod.icon}
                   </span>
 
-                  {!sidebarCollapsed && (
+                  {(!sidebarCollapsed || isHorizontal) && (
                     <>
                       <span className="flex-1 text-left text-[11px] font-black uppercase tracking-wider truncate">
                         {mod.label}
@@ -450,15 +477,23 @@ export const Header: React.FC<HeaderProps> = ({
                   )}
                 </button>
 
-                {/* Submenu items (accordion) */}
-                {isOpen && !sidebarCollapsed && (
-                  <div className="bg-slate-900/40 border-l-2 border-orange-500/20 ml-2 mr-1 mb-1 rounded-r-xl overflow-hidden">
+                {/* Submenu items (accordion or dropdown) */}
+                {isOpen && (!sidebarCollapsed || isHorizontal) && (
+                  <div 
+                    className={isHorizontal
+                      ? `absolute ${sidebarPosition === 'top' ? 'top-full mt-1' : 'bottom-full mb-1'} left-0 min-w-[200px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 overflow-hidden`
+                      : `bg-slate-900/40 border-l-2 border-orange-500/20 ml-2 mr-1 mb-1 rounded-r-xl overflow-hidden`
+                    }
+                  >
                     {mod.items.map((item) => {
                       const isActive = activeTab === item.id;
                       return (
                         <button
                           key={item.id}
-                          onClick={() => handleNavClick(item.id as TabType)}
+                          onClick={() => {
+                            handleNavClick(item.id as TabType);
+                            if (isHorizontal) setOpenModule(null); // auto-close dropdown
+                          }}
                           className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-100 cursor-pointer
                             ${isActive
                               ? 'bg-orange-500/20 text-orange-300 font-black'
@@ -481,48 +516,48 @@ export const Header: React.FC<HeaderProps> = ({
             );
           })}
 
-          {/* Arqueo de Caja — direct link, only visible if permitted */}
+          {/* Arqueo de Caja — direct link */}
           {(isSuperAdmin || can('cash.open_shift') || can('cash.close_shift') || can('nav.ventas.caja') || can('nav.reportes.caja')) && (
             <button
               onClick={() => handleNavClick('CASH_REGISTER')}
-              title={sidebarCollapsed ? 'Arqueo de Caja' : undefined}
-              className={`group w-full flex items-center gap-3 px-3 py-2.5 transition-all duration-150 cursor-pointer border-l-2
-                ${activeTab === 'CASH_REGISTER'
-                  ? 'bg-orange-500/15 text-white border-orange-500'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-transparent'
+              title={sidebarCollapsed && !isHorizontal ? 'Arqueo de Caja' : undefined}
+              className={`group flex items-center gap-3 transition-all duration-150 cursor-pointer shrink-0
+                ${isHorizontal
+                  ? `h-10 px-3 rounded-lg ${activeTab === 'CASH_REGISTER' ? 'bg-orange-500/15 text-white border-b-2 border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'}`
+                  : `w-full px-3 py-2.5 border-l-2 ${activeTab === 'CASH_REGISTER' ? 'bg-orange-500/15 text-white border-orange-500' : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border-transparent'}`
                 }`}
             >
               <DollarSign className={`shrink-0 w-4 h-4 ${activeTab === 'CASH_REGISTER' ? 'text-orange-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-              {!sidebarCollapsed && (
-                <>
-                  <span className="flex-1 text-left text-[11px] font-black uppercase tracking-wider">Arqueo de Caja</span>
-                </>
+              {(!sidebarCollapsed || isHorizontal) && (
+                <span className="flex-1 text-left text-[11px] font-black uppercase tracking-wider">Arqueo de Caja</span>
               )}
             </button>
           )}
         </nav>
 
-        {/* Bottom store address & branding/support info */}
-        {!sidebarCollapsed ? (
-          <div className="px-3 py-2.5 border-t border-slate-800/80 bg-slate-950/40 shrink-0 space-y-1">
-            {settings.address && (
-              <p className="text-[9px] text-slate-500 truncate font-medium">{settings.address}</p>
-            )}
-            <div className="pt-1 border-t border-slate-800/50 flex items-center justify-between text-[9px]">
-              <span className="font-semibold text-slate-400">Palma Nexus Solutions</span>
-              <a 
-                href="tel:0998212307" 
-                className="font-mono text-orange-400 font-bold hover:text-orange-300 transition"
-                title="Llamar / Contactar Soporte"
-              >
-                099 821 2307
-              </a>
+        {/* Bottom/Right Branding Info */}
+        {!isHorizontal && (
+          !sidebarCollapsed ? (
+            <div className="px-3 py-2.5 border-t border-slate-800/80 bg-slate-950/40 shrink-0 space-y-1">
+              {settings.address && (
+                <p className="text-[9px] text-slate-500 truncate font-medium">{settings.address}</p>
+              )}
+              <div className="pt-1 border-t border-slate-800/50 flex items-center justify-between text-[9px]">
+                <span className="font-semibold text-slate-400">Palma Nexus Solutions</span>
+                <a 
+                  href="tel:0998212307" 
+                  className="font-mono text-orange-400 font-bold hover:text-orange-300 transition"
+                  title="Llamar / Contactar Soporte"
+                >
+                  099 821 2307
+                </a>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="p-2 border-t border-slate-800/60 text-center shrink-0" title="Palma Nexus Solutions: 099 821 2307">
-            <span className="text-[8px] font-bold text-slate-500 font-mono">PNS</span>
-          </div>
+          ) : (
+            <div className="p-2 border-t border-slate-800/60 text-center shrink-0" title="Palma Nexus Solutions: 099 821 2307">
+              <span className="text-[8px] font-bold text-slate-500 font-mono">PNS</span>
+            </div>
+          )
         )}
       </aside>
     </>

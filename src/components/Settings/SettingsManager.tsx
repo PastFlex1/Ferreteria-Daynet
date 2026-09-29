@@ -61,6 +61,7 @@ import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../s
 import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { UserPermissionsModal } from './UserPermissionsModal';
 import { RoleModal } from './RoleModal';
+import { useTheme } from '../../context/ThemeContext';
 
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
 import { MongoConnectorCard } from './MongoConnectorCard';
@@ -92,6 +93,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   setCurrentUser,
 }) => {
   const { showAlert, showConfirm, showToast } = useModal();
+  const { mode, setMode, accentColor, setAccentColor, sidebarPosition, setSidebarPosition } = useTheme();
   const [formData, setFormData] = useState<StoreSettings>({ ...initialStoreSettings, ...settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -3142,7 +3144,107 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         </div>
       )}
 
-      {/* 9. BACKUP */}
+      {/* 9. DISENO Y TEMA */}
+      {currentTab === 'CFG_DISENO' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div className="flex items-center space-x-3.5">
+              <div className="p-3 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-white tracking-tight">Diseño y Tema</h2>
+                <p className="text-xs font-medium text-slate-400 mt-0.5">Personaliza los colores y el modo de pantalla del sistema.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-300">Modo de Pantalla</label>
+              <div className="flex space-x-4">
+                <button
+                  type="button"
+                  onClick={() => { setMode('light'); showToast('Modo Claro activado', 'info'); }}
+                  className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all border ${mode === 'light' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Modo Claro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMode('dark'); showToast('Modo Oscuro activado', 'info'); }}
+                  className={`flex-1 py-3 px-4 rounded-xl font-bold transition-all border ${mode === 'dark' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Modo Oscuro
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-300">Color de Énfasis</label>
+              <div className="flex flex-wrap gap-4">
+                {(['orange', 'blue', 'green', 'red', 'purple'] as const).map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => { setAccentColor(color); showToast(`Color de énfasis actualizado`, 'success'); }}
+                    className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${accentColor === color ? 'ring-4 ring-offset-2 ring-offset-slate-900 ring-white scale-110' : 'hover:scale-105'}`}
+                    style={{
+                      backgroundColor: 
+                        color === 'orange' ? '#f97316' : 
+                        color === 'blue' ? '#3b82f6' : 
+                        color === 'green' ? '#10b981' : 
+                        color === 'red' ? '#ef4444' : 
+                        '#8b5cf6'
+                    }}
+                  >
+                    {accentColor === color && <Check className="text-white w-6 h-6" />}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Selecciona el color principal que se aplicará en botones, alertas y elementos destacados.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-300">Posición de la Barra Lateral</label>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => { setSidebarPosition('left'); showToast('Barra a la izquierda', 'info'); }}
+                  className={`py-3 px-4 rounded-xl font-bold transition-all border ${sidebarPosition === 'left' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Izquierda
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSidebarPosition('right'); showToast('Barra a la derecha', 'info'); }}
+                  className={`py-3 px-4 rounded-xl font-bold transition-all border ${sidebarPosition === 'right' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Derecha
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSidebarPosition('top'); showToast('Barra en la parte superior', 'info'); }}
+                  className={`py-3 px-4 rounded-xl font-bold transition-all border ${sidebarPosition === 'top' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Arriba
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSidebarPosition('bottom'); showToast('Barra en la parte inferior', 'info'); }}
+                  className={`py-3 px-4 rounded-xl font-bold transition-all border ${sidebarPosition === 'bottom' ? 'bg-orange-500 text-white border-orange-500 shadow-lg' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                >
+                  Abajo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. BACKUP */}
       {currentTab === 'CFG_BACKUP' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
           {/* Hidden File Input for Backup Restore */}

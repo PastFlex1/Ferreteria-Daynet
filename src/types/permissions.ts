@@ -566,6 +566,22 @@ export const ALL_PERMISSIONS: PermissionDefinition[] = [
     dangerLevel: 'medium',
   },
   {
+    id: 'pos.edit_tax',
+    label: 'Input: Modificar Tarifa de IVA',
+    description: 'Permite alterar manualmente la tarifa de IVA de un producto en caja.',
+    category: 'Inputs y Edición en Caja',
+    module: 'POS',
+    dangerLevel: 'high',
+  },
+  {
+    id: 'pos.create_custom_item',
+    label: 'Botón: Agregar Ítem Personalizado (+ Nuevo)',
+    description: 'Permite crear ítems o servicios personalizados al vuelo en la caja.',
+    category: 'Operaciones en Caja',
+    module: 'POS',
+    dangerLevel: 'medium',
+  },
+  {
     id: 'pos.clear_cart',
     label: 'Botón: Vaciar Carrito Completo',
     description: 'Permite cancelar la venta actual y limpiar todos los productos del carrito.',
@@ -1392,6 +1408,7 @@ export const TAB_TO_PERMISSION_MAP: Record<string, string> = {
   CFG_USUARIOS: 'nav.configuracion.usuarios',
   CFG_FORMATO_IMPRESION: 'nav.configuracion',
   CFG_ADMINISTRACION: 'nav.configuracion',
+  CFG_DISENO: 'nav.configuracion',
   CFG_BACKUP: 'nav.configuracion',
 };
 

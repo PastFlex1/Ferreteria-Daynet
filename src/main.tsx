@@ -2,6 +2,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { ModalProvider } from './context/ModalContext.tsx';
+import { ThemeProvider } from './context/ThemeContext.tsx';
 import './index.css';
 
 // Prevent negative numbers and scientific notation in all number inputs globally
@@ -33,8 +34,10 @@ document.addEventListener('wheel', (e: WheelEvent) => {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ModalProvider>
-      <App />
-    </ModalProvider>
+    <ThemeProvider>
+      <ModalProvider>
+        <App />
+      </ModalProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

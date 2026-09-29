@@ -1127,6 +1127,9 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 <p className="text-[10px]">{settings.address}</p>
                 <p className="text-[10px]">RUC: {settings.taxId}</p>
                 <p className="text-[10px]">Tel: {settings.phone}</p>
+                {(settings.province || settings.city) && (
+                  <p className="text-[10px]">{settings.province ? `${settings.province} - ` : ''}{settings.city || ''}</p>
+                )}
               </div>
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-1">
@@ -1142,6 +1145,12 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               </div>
 
               <div className="py-2 border-b border-dashed border-slate-400 space-y-2">
+                <div className="flex justify-between text-[10px] font-bold pb-1 border-b border-dashed border-slate-400">
+                  <span className="w-10">CANT</span>
+                  <span className="flex-1">DESCRIPCION</span>
+                  <span className="w-16 text-right">V.UNI</span>
+                  <span className="w-16 text-right">V.TOTAL</span>
+                </div>
                 {activeInvoice.items.map((item, idx) => {
                   let itemTaxRate = settings.defaultTaxRate ?? 15;
                   if (typeof item.taxRate === 'number') {
@@ -1151,17 +1160,26 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   } else if (item.taxAmount === 0 && (item.subtotal || item.unitPrice) > 0) {
                     itemTaxRate = 0;
                   }
+
+                  const unitPrice = item.unitPrice || 0;
+                  const qty = item.quantity || 1;
+                  const discountAmount = Math.round(((unitPrice * qty * (item.discountPercent || 0)) / 100) * 100) / 100;
+                  const lineBase = Math.max(0, Math.round((unitPrice * qty - discountAmount) * 100) / 100);
+
                   return (
-                    <div key={idx} className="space-y-0.5">
+                    <div key={idx} className="space-y-0.5 text-[10px]">
                       <div className="flex justify-between items-start">
-                        <p className="font-bold text-slate-900">{item.productName}</p>
-                        <span className="text-[9.5px] font-semibold text-slate-600 ml-1">IVA {itemTaxRate}%</span>
+                        <p className="font-bold text-slate-900 truncate flex-1">{item.productName}</p>
+                        <span className="text-[9px] font-semibold text-slate-600 ml-1">IVA {itemTaxRate}%</span>
                       </div>
-                      <div className="flex justify-between text-[10px]">
-                        <span>
-                          {item.quantity} {item.unit} x {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                      <div className="flex text-[10px]">
+                        <span className="w-10">{item.quantity} {item.unit}</span>
+                        <span className="flex-1 text-center">x</span>
+                        <span className="w-16 text-right">{formatCurrency(unitPrice, settings.currencySymbol)}</span>
+                        <span className="w-16 text-right font-bold">
+                          {formatCurrency(lineBase, settings.currencySymbol)}
+                          {itemTaxRate > 0 ? <span className="ml-0.5">*</span> : ''}
                         </span>
-                        <span className="font-bold">{formatCurrency(item.total, settings.currencySymbol)}</span>
                       </div>
                     </div>
                   );
@@ -1236,6 +1254,9 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                     <p>ENTREGADO: {formatCurrency(activeInvoice.amountTendered, settings.currencySymbol)}</p>
                     <p>CAMBIO: {formatCurrency(activeInvoice.changeGiven || 0, settings.currencySymbol)}</p>
                   </>
+                )}
+                {activeInvoice.sellerName && (
+                  <p>CAJERO: {activeInvoice.sellerName}</p>
                 )}
               </div>
 

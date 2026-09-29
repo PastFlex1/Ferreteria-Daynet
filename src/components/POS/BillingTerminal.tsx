@@ -44,6 +44,7 @@ import {
 } from '../../types';
 import { formatCurrency, generateDocumentNumber, getEcuadorianDateTime } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { useFirestoreSync } from '../../hooks/useFirestoreSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
 import { Order } from '../Sales/CreateOrderModal';
@@ -90,6 +91,7 @@ interface DecimalInputProps {
   max?: number;
   placeholder?: string;
   allowEmpty?: boolean;
+  disabled?: boolean;
 }
 
 const DecimalInput: React.FC<DecimalInputProps> = ({
@@ -101,6 +103,7 @@ const DecimalInput: React.FC<DecimalInputProps> = ({
   max,
   placeholder,
   allowEmpty = false,
+  disabled = false,
 }) => {
   const [localText, setLocalText] = useState<string>(() => {
     if (value === 0 && allowEmpty) return '';
@@ -124,6 +127,7 @@ const DecimalInput: React.FC<DecimalInputProps> = ({
       inputMode="decimal"
       placeholder={placeholder}
       value={localText}
+      disabled={disabled}
       onFocus={(e) => {
         setIsFocused(true);
         e.target.select();
@@ -196,6 +200,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   onOpenCashRegister,
 }) => {
   const { showToast, showAlert } = useModal();
+  const { can } = usePermissions();
   const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
   const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const [syncedPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
@@ -1496,15 +1501,17 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setIsQuickCustomItemOpen(true)}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shadow-sm"
-                  title="Agregar un ítem o servicio personalizado"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Nuevo</span>
-                </button>
+                {can('pos.create_custom_item') && (
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickCustomItemOpen(true)}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shadow-sm"
+                    title="Agregar un ítem o servicio personalizado"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Nuevo</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1663,7 +1670,12 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                               onChange={(newPrice) => handleUpdateUnitPrice(item.product.id, newPrice)}
                               onBlurFallback={0}
                               min={0}
-                              className="w-20 text-right font-bold font-mono border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-900 focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                              disabled={!can('pos.edit_price')}
+                              className={`w-20 text-right font-bold font-mono border rounded px-1.5 py-0.5 text-xs focus:outline-none ${
+                                can('pos.edit_price')
+                                  ? 'border-slate-200 text-slate-900 focus:ring-1 focus:ring-orange-500'
+                                  : 'border-slate-100 bg-slate-50 text-slate-500 cursor-not-allowed opacity-80'
+                              }`}
                             />
                             {activeScale ? (
                               <span className="text-[9px] font-bold text-indigo-600 block text-right font-mono" title={`Precio de escala "${activeScale.name}" aplicado automáticamente`}>
@@ -1681,20 +1693,23 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                           <div className="relative inline-block text-left" data-tax-dropdown>
                             <button
                               type="button"
-                              onClick={() => setOpenTaxDropdownId(openTaxDropdownId === item.product.id ? null : item.product.id)}
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-black border transition-all cursor-pointer shadow-2xs select-none ${
+                              onClick={() => can('pos.edit_tax') && setOpenTaxDropdownId(openTaxDropdownId === item.product.id ? null : item.product.id)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-black border transition-all shadow-2xs select-none ${
+                                can('pos.edit_tax') ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'
+                              } ${
                                 (item.product.taxRate ?? settings.defaultTaxRate) === 15
                                   ? 'bg-amber-50 text-amber-800 border-amber-200/90 hover:bg-amber-100'
                                   : (item.product.taxRate ?? settings.defaultTaxRate) === 5
                                   ? 'bg-blue-50 text-blue-800 border-blue-200/90 hover:bg-blue-100'
                                   : 'bg-emerald-50 text-emerald-800 border-emerald-200/90 hover:bg-emerald-100'
                               } ${openTaxDropdownId === item.product.id ? 'ring-2 ring-orange-500 border-orange-500 bg-white' : ''}`}
+                              title={can('pos.edit_tax') ? 'Modificar tarifa' : 'Modificación de IVA bloqueada'}
                             >
                               <span>{item.product.taxRate ?? settings.defaultTaxRate}% IVA</span>
-                              <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${openTaxDropdownId === item.product.id ? 'rotate-180 text-orange-600' : ''}`} />
+                              {can('pos.edit_tax') && <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${openTaxDropdownId === item.product.id ? 'rotate-180 text-orange-600' : ''}`} />}
                             </button>
 
-                            {openTaxDropdownId === item.product.id && (
+                            {openTaxDropdownId === item.product.id && can('pos.edit_tax') && (
                               <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 w-32 bg-white border border-slate-200/90 rounded-2xl shadow-2xl z-50 p-1.5 space-y-1 animate-fadeIn ring-1 ring-slate-900/10">
                                 <div className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-400 text-center">
                                   Tarifa SRI
@@ -1735,10 +1750,13 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                               min={0}
                               max={100}
                               placeholder="0"
-                              className={`w-14 text-center font-bold font-mono border rounded px-1 py-0.5 text-xs focus:ring-1 focus:ring-orange-500 focus:outline-none ${
-                                item.discountPercent > 0
-                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-black ring-1 ring-emerald-200'
-                                  : 'border-slate-200 text-slate-800'
+                              disabled={!can('pos.apply_discount')}
+                              className={`w-14 text-center font-bold font-mono border rounded px-1 py-0.5 text-xs focus:outline-none ${
+                                !can('pos.apply_discount') 
+                                  ? 'border-slate-100 bg-slate-50 text-slate-400 cursor-not-allowed opacity-80' 
+                                  : item.discountPercent > 0
+                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-black ring-1 ring-emerald-200'
+                                    : 'border-slate-200 text-slate-800 focus:ring-1 focus:ring-orange-500'
                               }`}
                             />
                             {item.discountPercent > 0 && (

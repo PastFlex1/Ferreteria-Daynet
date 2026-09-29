@@ -417,3 +417,47 @@ input::placeholder {
   color: #94a3b8 !important; /* slate-400 */
   opacity: 1;
 }
+
+/* Theme Mode and Colors */
+:root {
+  --theme-primary-400: #fb923c;
+  --theme-primary-500: #f97316;
+  --theme-primary-600: #ea580c;
+}
+:root[data-color='blue'] {
+  --theme-primary-400: #60a5fa;
+  --theme-primary-500: #3b82f6;
+  --theme-primary-600: #2563eb;
+}
+:root[data-color='green'] {
+  --theme-primary-400: #34d399;
+  --theme-primary-500: #10b981;
+  --theme-primary-600: #059669;
+}
+:root[data-color='red'] {
+  --theme-primary-400: #f87171;
+  --theme-primary-500: #ef4444;
+  --theme-primary-600: #dc2626;
+}
+:root[data-color='purple'] {
+  --theme-primary-400: #a78bfa;
+  --theme-primary-500: #8b5cf6;
+  --theme-primary-600: #7c3aed;
+}
+
+@theme {
+  --color-orange-400: var(--theme-primary-400);
+  --color-orange-500: var(--theme-primary-500);
+  --color-orange-600: var(--theme-primary-600);
+}
+
+html.dark-mode body {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #0f172a;
+}
+html.dark-mode img, 
+html.dark-mode svg, 
+html.dark-mode canvas, 
+html.dark-mode [style*='background-image'] {
+  filter: invert(1) hue-rotate(180deg);
+}
