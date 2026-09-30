@@ -98,13 +98,19 @@ export class SriBackendService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const response = await fetch(`${baseUrl}/api/sri/test-cors`, {
+      let response = await fetch(`${baseUrl}/api/sri/test-cors`, {
         method: 'GET',
         headers: { 'Accept': 'application/json, text/plain, */*' },
         signal: controller.signal,
-      }).catch(async () => {
-        return await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
-      });
+      }).catch(() => null);
+
+      if (response && response.status === 404) {
+        response = await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
+      }
+      
+      if (!response) {
+        response = await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
+      }
 
       clearTimeout(timeoutId);
 
