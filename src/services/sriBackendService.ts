@@ -55,22 +55,13 @@ export function isSecuencialAlreadyRegistered(rawResponse?: string, errorMsg?: s
 export class SriBackendService {
   private static defaultBaseUrl = 'http://localhost:8080';
 
-  /**
-   * Obtiene la URL base configurada para la API Java local del SRI (Spring Boot).
-   * Siempre devuelve el host base (ej: http://localhost:8080).
-   */
   public static getBaseUrl(): string {
     const saved = localStorage.getItem('ferreteria_sri_api_url');
     let target = this.defaultBaseUrl;
     if (saved && saved.trim() !== '') {
       target = saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     }
-    // Si estamos en el navegador y el host objetivo es localhost:8080 o 127.0.0.1:8080,
-    // devolver '' para que las peticiones se enruten vía proxy de Vite (/api/sri)
-    // eliminando problemas de CORS en desarrollo local.
-    if (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.0\.0\.1):8080$/i.test(target)) {
-      return '';
-    }
+    // Forzamos el uso de la URL completa (ej. http://localhost:8080) siempre.
     return target;
   }
 
@@ -91,7 +82,7 @@ export class SriBackendService {
     let baseUrl = targetUrl ? targetUrl.replace(/\/$/, '').replace(/\/api\/sri\/?$/, '') : this.getBaseUrl();
     
     if (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.0\.0\.1):8080$/i.test(baseUrl)) {
-      baseUrl = '';
+      // Ya no lo vaciamos para que llame directamente al 8080
     }
 
     try {
