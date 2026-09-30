@@ -768,6 +768,8 @@ export default function App() {
     window.location.reload();
   };
 
+  const { sidebarPosition } = useTheme();
+
   if (isInitialLoading) {
     return (
       <SplashScreen 
@@ -787,8 +789,6 @@ export default function App() {
       />
     );
   }
-
-  const { sidebarPosition } = useTheme();
 
   return (
     <PermissionsProvider currentUser={currentUser} usersList={usersList} rolesList={rolesList}>

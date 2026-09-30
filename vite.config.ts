@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 import { mongoBridgePlugin } from './vite-mongo-plugin';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), mongoBridgePlugin()],
+    plugins: [react(), tailwindcss(), mongoBridgePlugin(), nodePolyfills()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
