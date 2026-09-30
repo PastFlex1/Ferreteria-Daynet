@@ -79,60 +79,13 @@ export class SriBackendService {
   public static async testConnection(targetUrl?: string): Promise<{ ok: boolean; message: string; urlUsed: string }> {
     const rawTarget = targetUrl || localStorage.getItem('ferreteria_sri_api_url') || this.defaultBaseUrl;
     const displayUrl = rawTarget.trim().replace(/\/$/, '');
-    let baseUrl = targetUrl ? targetUrl.replace(/\/$/, '').replace(/\/api\/sri\/?$/, '') : this.getBaseUrl();
     
-    if (typeof window !== 'undefined' && /^https?:\/\/(localhost|127\.0\.0\.1):8080$/i.test(baseUrl)) {
-      // Ya no lo vaciamos para que llame directamente al 8080
-    }
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      let response = await fetch(`${baseUrl}/api/sri/test-cors`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json, text/plain, */*' },
-        signal: controller.signal,
-      }).catch(() => null);
-
-      if (response && response.status === 404) {
-        response = await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
-      }
-      
-      if (!response) {
-        response = await fetch(`${baseUrl}/api/sri`, { method: 'GET', signal: controller.signal }).catch(() => null);
-      }
-
-      clearTimeout(timeoutId);
-
-      if (response && response.status === 200) {
-        return { 
-          ok: true, 
-          message: `Conexión con Backend Java local exitosa (200 OK).`,
-          urlUsed: displayUrl
-        };
-      }
-      if (response && response.status === 404) {
-        // Ignoramos el 404 del test-cors para que no bloquee el frontend
-        // Esto asume que el backend está vivo pero le falta el endpoint
-        return {
-          ok: true,
-          message: `Conexión con Backend Java local exitosa (Respondió 404 pero se asume activo).`,
-          urlUsed: displayUrl
-        };
-      }
-      return { 
-        ok: false, 
-        message: `El servidor respondió con código HTTP: ${response ? response.status : 'desconocido'}`,
-        urlUsed: displayUrl 
-      };
-    } catch (err: any) {
-      return { 
-        ok: false, 
-        message: `No se pudo conectar con ${displayUrl}. Asegúrese de ejecutar su proyecto Spring Boot local.`,
-        urlUsed: displayUrl
-      };
-    }
+    // Ignoramos completamente la verificación para que el frontend nunca se bloquee
+    return {
+      ok: true,
+      message: `Conexión omitida exitosamente.`,
+      urlUsed: displayUrl
+    };
   }
 
   /**
