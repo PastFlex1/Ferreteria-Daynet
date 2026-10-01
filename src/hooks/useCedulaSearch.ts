@@ -66,19 +66,17 @@ export function useCedulaSearch() {
       let foundName = '';
       let foundAddress = '';
 
-      // Intento 1: API Pública SRI Móvil (RUC / Cédula)
+      // Intento 1: API Pública SRI a través del proxy local
       try {
-        const sriRes = await fetch(`https://srienlinea.sri.gob.ec/movil-servicios/api/v1.0/deuda/consultarPorNumeroIdentificacion?numeroIdentificacion=${cleanDoc}`, {
-          headers: { 'Accept': 'application/json' }
-        });
+        const sriRes = await fetch(`/api/sri/cedula/${cleanDoc}`);
         if (sriRes.ok) {
           const sriData = await sriRes.json();
-          if (sriData?.contribuyente?.razonSocial || sriData?.contribuyente?.nombreComercial) {
-            foundName = (sriData.contribuyente.razonSocial || sriData.contribuyente.nombreComercial).trim();
+          if (sriData?.success && sriData?.nombre) {
+            foundName = sriData.nombre;
           }
         }
       } catch (e) {
-        // SRI en línea falló o tiene CORS
+        // Fallback local en caso de error de red
       }
 
       // Intento 2: Proxy SECAP Registro Civil

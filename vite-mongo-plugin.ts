@@ -253,11 +253,71 @@ export function viteMongoPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || '';
-        if (!url.startsWith('/api/mongo')) {
+        if (!url.startsWith('/api/mongo') && !url.startsWith('/api/sri')) {
           return next();
         }
 
         const pathname = url.split('?')[0];
+
+        // 0.5 GET /api/sri/cedula/:id
+        if (pathname.startsWith('/api/sri/cedula/') && req.method === 'GET') {
+          const rawId = decodeURIComponent(pathname.replace('/api/sri/cedula/', ''));
+          const cleanId = rawId.replace(/\D/g, '');
+          
+          if (cleanId.length !== 10 && cleanId.length !== 13) {
+            return sendJson(res, 400, { success: false, message: 'La identificación debe tener 10 o 13 dígitos numéricos.' });
+          }
+
+          const tipo = cleanId.length === 10 ? 'C' : 'R';
+          const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*'
+          };
+
+          try {
+            // 1. Intentar endpoint oficial de Persona del SRI
+            const personaUrl = `https://srienlinea.sri.gob.ec/sri-catastro-sujeto-servicio-internet/rest/Persona/obtenerPorTipoIdentificacion?numeroIdentificacion=${cleanId}&tipoIdentificacion=${tipo}`;
+            const resPersona = await fetch(personaUrl, { headers });
+            
+            if (resPersona.status === 200) {
+              const data = await resPersona.json();
+              if (data && data.nombreCompleto) {
+                return sendJson(res, 200, {
+                  success: true,
+                  identificacion: cleanId,
+                  nombre: data.nombreCompleto.trim(),
+                  tipoPersona: data.tipoPersona || null
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('Fallo consulta Persona SRI, intentando catastro RUC...');
+          }
+
+          try {
+            // 2. Fallback a Catastro RUC consolidado del SRI
+            const rucNum = cleanId.length === 10 ? `${cleanId}001` : cleanId;
+            const rucUrl = `https://srienlinea.sri.gob.ec/sri-catastro-sujeto-servicio-internet/rest/ConsolidadoContribuyente/obtenerPorNumerosRuc?ruc=${rucNum}`;
+            const resRuc = await fetch(rucUrl, { headers });
+            
+            if (resRuc.status === 200) {
+              const list = await resRuc.json();
+              if (Array.isArray(list) && list.length > 0 && list[0].razonSocial) {
+                return sendJson(res, 200, {
+                  success: true,
+                  identificacion: cleanId,
+                  nombre: list[0].razonSocial.trim(),
+                  tipoPersona: list[0].tipoContribuyente || null
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('Fallo consulta RUC Consolidado SRI');
+          }
+
+          return sendJson(res, 404, { success: false, message: 'No se encontraron datos para la identificación ingresada.' });
+        }
+
 
         // 0. GET /api/mongo/events (Server-Sent Events for real-time LAN push)
         if (pathname === '/api/mongo/events' && req.method === 'GET') {
