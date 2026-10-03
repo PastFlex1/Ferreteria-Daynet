@@ -145,25 +145,60 @@ export class SriBackendService {
    * 2️⃣ RECEPCIÓN SRI
    * Envía el XML firmado al Web Service de Recepción del SRI.
    */
-  public static async recepcionarSri(xmlFirmado: string): Promise<{ success: boolean; recepcion?: string; error?: string }> {
-    try {
-      const baseUrl = this.getBaseUrl();
-      const resRecepcion = await fetch(`${baseUrl}/api/sri/recepcion`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: xmlFirmado,
-      });
+  public static async recepcionarSri(xmlFirmado: string, retries = 3, delayMs = 2500): Promise<{ success: boolean; recepcion?: string; error?: string }> {
+    const baseUrl = this.getBaseUrl();
+    let lastError = 'Error en recepción del SRI.';
 
-      if (!resRecepcion.ok) {
-        const errorText = await resRecepcion.text();
-        throw new Error(errorText || 'El SRI rechazó la recepción del comprobante firmado.');
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const resRecepcion = await fetch(`${baseUrl}/api/sri/recepcion`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: xmlFirmado,
+        });
+
+        if (!resRecepcion.ok) {
+          const errorText = await resRecepcion.text();
+          // Si el error es de construcción de servicio (SRI caído) o timeouts, intentamos de nuevo
+          const isIntermittentError = errorText.includes('ServiceConstructionException') || 
+                                      errorText.includes('Timeout') || 
+                                      errorText.includes('Connection refused') || 
+                                      errorText.includes('502') || 
+                                      errorText.includes('503') ||
+                                      errorText.includes('504');
+                                      
+          lastError = errorText || 'El SRI rechazó la recepción del comprobante firmado.';
+          
+          if (isIntermittentError && attempt < retries) {
+            console.warn(`[SRI Recepción] Intento ${attempt} falló por inestabilidad del SRI. Reintentando en ${delayMs}ms...`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            continue;
+          }
+          // Si es otro tipo de error, lanzamos error (rompe el try y va al catch)
+          throw new Error(lastError);
+        }
+        
+        const recepcion = await resRecepcion.text();
+        return { success: true, recepcion };
+      } catch (error: any) {
+        lastError = error.message || 'Error en recepción del SRI.';
+        
+        const isIntermittentError = lastError.includes('ServiceConstructionException') || 
+                                    lastError.includes('Timeout') || 
+                                    lastError.includes('Failed to fetch') ||
+                                    lastError.includes('Connection');
+                                    
+        if (isIntermittentError && attempt < retries) {
+            console.warn(`[SRI Recepción Catch] Intento ${attempt} falló. Reintentando en ${delayMs}ms... Error: ${lastError}`);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            continue;
+        }
+        
+        return { success: false, error: lastError };
       }
-      const recepcion = await resRecepcion.text();
-
-      return { success: true, recepcion };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Error en recepción del SRI.' };
     }
+    
+    return { success: false, error: lastError };
   }
 
   /**
