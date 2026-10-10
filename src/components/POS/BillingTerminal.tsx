@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import confetti from 'canvas-confetti';
 import { 
   FileText, 
@@ -320,11 +321,73 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const [isDocTypeDropdownOpen, setIsDocTypeDropdownOpen] = useState(false);
   const [isSellerDropdownOpen, setIsSellerDropdownOpen] = useState(false);
   const [openTaxDropdownId, setOpenTaxDropdownId] = useState<string | null>(null);
+  const [taxDropdownPos, setTaxDropdownPos] = useState<{ top: number; left: number; openUpwards: boolean } | null>(null);
 
   const customerSearchRef = useRef<HTMLDivElement>(null);
   const productSearchRef = useRef<HTMLDivElement>(null);
   const docTypeDropdownRef = useRef<HTMLDivElement>(null);
   const sellerDropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleTaxDropdown = (productId: string, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!can('pos.edit_tax')) return;
+    if (openTaxDropdownId === productId) {
+      setOpenTaxDropdownId(null);
+      setTaxDropdownPos(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dropdownWidth = 140;
+    const dropdownHeight = 145;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const openUpwards = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+    let left = rect.left + rect.width / 2 - dropdownWidth / 2;
+    if (left + dropdownWidth > window.innerWidth - 12) {
+      left = window.innerWidth - dropdownWidth - 12;
+    }
+    if (left < 12) left = 12;
+
+    const top = openUpwards ? Math.max(10, rect.top - dropdownHeight - 6) : rect.bottom + 6;
+
+    setTaxDropdownPos({ top, left, openUpwards });
+    setOpenTaxDropdownId(productId);
+  };
+
+  // Reposicionar el dropdown flotante de tarifa en caso de scroll o redimensión
+  useEffect(() => {
+    if (!openTaxDropdownId) return;
+    const handleReposition = () => {
+      const triggerBtn = document.querySelector(`[data-tax-btn="${openTaxDropdownId}"]`) as HTMLElement;
+      if (!triggerBtn) {
+        setOpenTaxDropdownId(null);
+        setTaxDropdownPos(null);
+        return;
+      }
+      const rect = triggerBtn.getBoundingClientRect();
+      const dropdownWidth = 140;
+      const dropdownHeight = 145;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const openUpwards = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+      let left = rect.left + rect.width / 2 - dropdownWidth / 2;
+      if (left + dropdownWidth > window.innerWidth - 12) {
+        left = window.innerWidth - dropdownWidth - 12;
+      }
+      if (left < 12) left = 12;
+
+      const top = openUpwards ? Math.max(10, rect.top - dropdownHeight - 6) : rect.bottom + 6;
+      setTaxDropdownPos({ top, left, openUpwards });
+    };
+
+    window.addEventListener('scroll', handleReposition, true);
+    window.addEventListener('resize', handleReposition);
+    return () => {
+      window.removeEventListener('scroll', handleReposition, true);
+      window.removeEventListener('resize', handleReposition);
+    };
+  }, [openTaxDropdownId]);
 
   useEffect(() => {
     if (sellerOptions.length > 0 && !sellerOptions.includes(sellerName)) {
@@ -361,6 +424,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       }
       if (!(e.target as HTMLElement).closest('[data-tax-dropdown]')) {
         setOpenTaxDropdownId(null);
+        setTaxDropdownPos(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -697,6 +761,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setIsProductDropdownOpen(false);
     setIsDocTypeDropdownOpen(false);
     setIsSellerDropdownOpen(false);
+    setOpenTaxDropdownId(null);
+    setTaxDropdownPos(null);
     setCustomName('');
     setCustomPrice('10.00');
     setCustomQty('1');
@@ -1688,12 +1754,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                             ) : null}
                           </td>
 
-                        {/* Tarifa IVA (Custom Popover Dropdown) */}
+                        {/* Tarifa IVA (Trigger para Popover Flotante en Portal) */}
                         <td className="py-2.5 px-2 text-center">
                           <div className="relative inline-block text-left" data-tax-dropdown>
                             <button
                               type="button"
-                              onClick={() => can('pos.edit_tax') && setOpenTaxDropdownId(openTaxDropdownId === item.product.id ? null : item.product.id)}
+                              data-tax-dropdown
+                              data-tax-btn={item.product.id}
+                              onClick={(e) => handleToggleTaxDropdown(item.product.id, e)}
                               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-black border transition-all shadow-2xs select-none ${
                                 can('pos.edit_tax') ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'
                               } ${
@@ -1706,37 +1774,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                               title={can('pos.edit_tax') ? 'Modificar tarifa' : 'Modificación de IVA bloqueada'}
                             >
                               <span>{item.product.taxRate ?? settings.defaultTaxRate}% IVA</span>
-                              {can('pos.edit_tax') && <ChevronDown className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${openTaxDropdownId === item.product.id ? 'rotate-180 text-orange-600' : ''}`} />}
+                              {can('pos.edit_tax') && (
+                                <ChevronDown
+                                  className={`w-3 h-3 text-slate-500 transition-transform duration-200 ${
+                                    openTaxDropdownId === item.product.id ? 'rotate-180 text-orange-600' : ''
+                                  }`}
+                                />
+                              )}
                             </button>
-
-                            {openTaxDropdownId === item.product.id && can('pos.edit_tax') && (
-                              <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 w-32 bg-white border border-slate-200/90 rounded-2xl shadow-2xl z-50 p-1.5 space-y-1 animate-fadeIn ring-1 ring-slate-900/10">
-                                <div className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-400 text-center">
-                                  Tarifa SRI
-                                </div>
-                                {[15, 5, 0].map((rate) => {
-                                  const isSelected = (item.product.taxRate ?? settings.defaultTaxRate) === rate;
-                                  return (
-                                    <button
-                                      key={rate}
-                                      type="button"
-                                      onClick={() => {
-                                        handleUpdateTaxRate(item.product.id, rate);
-                                        setOpenTaxDropdownId(null);
-                                      }}
-                                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center justify-between transition cursor-pointer ${
-                                        isSelected
-                                          ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-2xs'
-                                          : 'hover:bg-orange-50/80 text-slate-700 hover:text-orange-950'
-                                      }`}
-                                    >
-                                      <span>{rate}% IVA</span>
-                                      {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
                           </div>
                         </td>
 
@@ -1813,6 +1858,54 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Dropdown Flotante en Portal para Tarifa SRI (Posicionado con fixed y z-index máximo para quedar siempre encima de todo) */}
+            {openTaxDropdownId && taxDropdownPos && can('pos.edit_tax') && (() => {
+              const currentItem = cartItems.find((i) => i.product.id === openTaxDropdownId);
+              if (!currentItem) return null;
+              const currentTaxRate = currentItem.product.taxRate ?? settings.defaultTaxRate;
+
+              return createPortal(
+                <div
+                  data-tax-dropdown
+                  style={{
+                    position: 'fixed',
+                    top: taxDropdownPos.top,
+                    left: taxDropdownPos.left,
+                    width: 140,
+                    zIndex: 99999999,
+                  }}
+                  className="bg-white border border-slate-200/90 rounded-2xl shadow-2xl p-1.5 space-y-1 animate-fadeIn ring-1 ring-slate-900/10 select-none"
+                >
+                  <div className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-400 text-center border-b border-slate-100 pb-1">
+                    Tarifa SRI
+                  </div>
+                  {[15, 5, 0].map((rate) => {
+                    const isSelected = currentTaxRate === rate;
+                    return (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => {
+                          handleUpdateTaxRate(currentItem.product.id, rate);
+                          setOpenTaxDropdownId(null);
+                          setTaxDropdownPos(null);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-2xs'
+                            : 'hover:bg-orange-50/80 text-slate-700 hover:text-orange-950'
+                        }`}
+                      >
+                        <span>{rate}% IVA</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+                      </button>
+                    );
+                  })}
+                </div>,
+                document.body
+              );
+            })()}
           </div>
 
           {/* 4. SECTION: FORMAS DE PAGO */}
