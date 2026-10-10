@@ -47,6 +47,7 @@ import {
   Square,
   ExternalLink,
   ArrowRight,
+  ArrowLeft,
   RotateCcw,
   Upload,
   Sparkles,
@@ -156,26 +157,38 @@ export interface JournalEntry {
 }
 
 export const normalizeJournalEntry = (je: any): JournalEntry => {
-  let items: JournalEntryItem[] = Array.isArray(je?.items) ? je.items : [];
+  let rawItems: any[] = Array.isArray(je?.items) ? je.items : [];
   const debit = Number(je?.totalDebit ?? je?.debit ?? 0);
   const credit = Number(je?.totalCredit ?? je?.credit ?? 0);
+
+  let items: JournalEntryItem[] = rawItems.map(item => ({
+    accountCode: String(item?.accountCode || '').trim(),
+    accountName: String(item?.accountName || '').trim(),
+    debit: Number(item?.debit || 0),
+    credit: Number(item?.credit || 0),
+  }));
 
   if (items.length === 0 && (debit > 0 || credit > 0)) {
     items = [
       {
-        accountCode: '1.01.01.01',
-        accountName: 'Caja General',
+        accountCode: '1.1.01.01.01',
+        accountName: 'Caja General Mostrador',
         debit: debit,
         credit: 0
       },
       {
-        accountCode: '3.01.01.01',
-        accountName: 'Capital Social / Patrimonio',
+        accountCode: '3.1.01.01.01',
+        accountName: 'Capital Social Suscrito y Pagado',
         debit: 0,
         credit: credit
       }
     ];
   }
+
+  const calcDebit = items.reduce((acc, it) => acc + (it.debit || 0), 0);
+  const calcCredit = items.reduce((acc, it) => acc + (it.credit || 0), 0);
+  const totalDebit = Number(je?.totalDebit ?? (calcDebit > 0 ? calcDebit : debit));
+  const totalCredit = Number(je?.totalCredit ?? (calcCredit > 0 ? calcCredit : credit));
 
   const numVal = je?.entryNumber || (je?.number ? `ASI-2026-${String(je.number).padStart(4, '0')}` : `ASI-2026-${String(je?.id || '1').replace(/\D/g, '').padStart(4, '0')}`);
 
@@ -187,9 +200,9 @@ export const normalizeJournalEntry = (je: any): JournalEntry => {
     concept: je?.concept || 'Asiento contable',
     type: je?.type || 'DIARIO',
     items,
-    totalDebit: debit,
-    totalCredit: credit,
-    status: je?.status || 'ASENTADO'
+    totalDebit: Math.round(totalDebit * 100) / 100,
+    totalCredit: Math.round(totalCredit * 100) / 100,
+    status: ((je?.status || 'ASENTADO').toUpperCase() as any)
   };
 };
 
@@ -303,6 +316,12 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   const [accountSearchQuery, setAccountSearchQuery] = useState('');
   const [editingAccount, setEditingAccount] = useState<AccountPlanItem | null>(null);
   const [isSyncingEntries, setIsSyncingEntries] = useState(false);
+
+  // UI States para Libro Mayor y Asientos Mayores
+  const [selectedMayorAccountCode, setSelectedMayorAccountCode] = useState<string | null>(null);
+  const [mayorSearchTerm, setMayorSearchTerm] = useState('');
+  const [mayorTypeFilter, setMayorTypeFilter] = useState<'TODOS' | 'ACTIVO' | 'PASIVO' | 'PATRIMONIO' | 'INGRESO' | 'GASTO'>('TODOS');
+  const [mayorOnlyWithMovements, setMayorOnlyWithMovements] = useState(false);
 
   // 6. Periodos Fiscales
   const [fiscalPeriods, setFiscalPeriods] = useFirestoreSync<FiscalPeriod[]>('ferreteria_fiscal_periods', []);
@@ -491,29 +510,178 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
     setSelectedVoucherForPrint(voucherDoc);
   };
 
-  // Cálculo de Saldos Mayorizados en Tiempo Real por Cuenta a partir del Libro Diario
-  const accountBalances = useMemo(() => {
-    const balances: Record<string, number> = {};
+  // Helper de búsqueda de cuenta contable flexible (soporta compatibilidad de formatos de código)
+  const findAccountByCode = (code: string) => {
+    if (!code) return undefined;
+    const trimmed = String(code).trim();
+    const exact = accountPlan.find(a => a.code === trimmed);
+    if (exact) return exact;
+    // Soporte para variantes de códigos históricos (ej: 1.01.01.01 vs 1.1.01.01.01)
+    const normalized = trimmed
+      .replace(/^1\.01\./, '1.1.01.')
+      .replace(/^2\.01\./, '2.1.01.')
+      .replace(/^3\.01\./, '3.1.01.')
+      .replace(/^4\.01\./, '4.1.01.')
+      .replace(/^5\.01\./, '5.1.01.');
+    return accountPlan.find(a => a.code === normalized);
+  };
+
+  // ── MOTOR DE MAYORIZACIÓN EN TIEMPO REAL A PARTIR DEL LIBRO DIARIO ──────
+  // Sincroniza cada asiento contable del Libro Diario hacia el Libro Mayor general y sus tarjetas auxiliares
+  const { ledgerByAccount, accountBalances, systemLedgerTotals } = useMemo(() => {
+    // 1. Inicializar mapa de mayorización para cada cuenta del plan contable
+    const ledgerMap: Record<string, {
+      account: AccountPlanItem;
+      initialBalance: number;
+      totalDebit: number;
+      totalCredit: number;
+      finalBalance: number;
+      movementsCount: number;
+      movements: Array<{
+        date: string;
+        entryId: string;
+        entryNumber: string;
+        entryType: string;
+        concept: string;
+        debit: number;
+        credit: number;
+        runningBalance: number;
+      }>;
+    }> = {};
+
     accountPlan.forEach(a => {
-      balances[a.code] = Number(a.balance || 0);
+      const initBal = Number(a.balance || 0);
+      ledgerMap[a.code] = {
+        account: a,
+        initialBalance: initBal,
+        totalDebit: 0,
+        totalCredit: 0,
+        finalBalance: initBal,
+        movementsCount: 0,
+        movements: []
+      };
     });
 
-    normalizedJournalEntries.forEach(je => {
-      if (je.status === 'ASENTADO') {
-        (je.items || []).forEach(it => {
-          const acc = accountPlan.find(a => a.code === it.accountCode);
-          const nature = acc ? acc.nature : (it.accountCode.startsWith('1') || it.accountCode.startsWith('5') ? 'DEUDORA' : 'ACREEDORA');
-          const current = balances[it.accountCode] || 0;
-          if (nature === 'DEUDORA') {
-            balances[it.accountCode] = current + (it.debit || 0) - (it.credit || 0);
-          } else {
-            balances[it.accountCode] = current + (it.credit || 0) - (it.debit || 0);
+    // 2. Filtrar asientos válidos con estado ASENTADO y ordenar cronológicamente
+    const validPostedEntries = normalizedJournalEntries
+      .filter(je => (je.status || 'ASENTADO').toUpperCase() === 'ASENTADO')
+      .slice()
+      .sort((a, b) => {
+        const timeA = new Date(a.date).getTime() || 0;
+        const timeB = new Date(b.date).getTime() || 0;
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.entryNumber || '').localeCompare(b.entryNumber || '');
+      });
+
+    // 3. Procesar cada asiento y mayorizar en las cuentas afectadas
+    validPostedEntries.forEach(je => {
+      (je.items || []).forEach(it => {
+        const acc = findAccountByCode(it.accountCode);
+        const targetCode = acc ? acc.code : String(it.accountCode || '').trim();
+        if (!targetCode) return;
+
+        if (!ledgerMap[targetCode]) {
+          const isDeudora = (targetCode.startsWith('1') || targetCode.startsWith('5'));
+          ledgerMap[targetCode] = {
+            account: {
+              code: targetCode,
+              name: it.accountName || `Cuenta ${targetCode}`,
+              level: 5,
+              type: targetCode.startsWith('1') ? 'ACTIVO' : targetCode.startsWith('2') ? 'PASIVO' : targetCode.startsWith('3') ? 'PATRIMONIO' : targetCode.startsWith('4') ? 'INGRESO' : 'GASTO',
+              nature: isDeudora ? 'DEUDORA' : 'ACREEDORA',
+              acceptsMovement: true,
+              balance: 0
+            },
+            initialBalance: 0,
+            totalDebit: 0,
+            totalCredit: 0,
+            finalBalance: 0,
+            movementsCount: 0,
+            movements: []
+          };
+        }
+
+        const leg = ledgerMap[targetCode];
+        const debitAmt = Number(it.debit || 0);
+        const creditAmt = Number(it.credit || 0);
+        leg.totalDebit = Math.round((leg.totalDebit + debitAmt) * 100) / 100;
+        leg.totalCredit = Math.round((leg.totalCredit + creditAmt) * 100) / 100;
+        leg.movementsCount += 1;
+
+        const isDeudora = leg.account.nature === 'DEUDORA';
+        const prevBal = leg.movements.length > 0
+          ? leg.movements[leg.movements.length - 1].runningBalance
+          : leg.initialBalance;
+
+        const newRunningBal = isDeudora
+          ? prevBal + debitAmt - creditAmt
+          : prevBal + creditAmt - debitAmt;
+
+        leg.movements.push({
+          date: je.date,
+          entryId: je.id,
+          entryNumber: je.entryNumber,
+          entryType: je.type,
+          concept: je.concept,
+          debit: debitAmt,
+          credit: creditAmt,
+          runningBalance: Math.round(newRunningBal * 100) / 100
+        });
+
+        leg.finalBalance = Math.round(newRunningBal * 100) / 100;
+      });
+    });
+
+    // 4. Consolidar balances en cuentas agrupadoras / padres (niveles 1 al 4)
+    accountPlan.forEach(parent => {
+      if (!parent.acceptsMovement) {
+        const cleanPrefix = parent.code.replace(/(\.00)+$/, '');
+        let aggDebit = 0;
+        let aggCredit = 0;
+        let aggBalance = 0;
+        let aggMovements = 0;
+
+        accountPlan.forEach(leaf => {
+          if (leaf.acceptsMovement && (leaf.code.startsWith(cleanPrefix + '.') || leaf.code === cleanPrefix)) {
+            const leafLedger = ledgerMap[leaf.code];
+            if (leafLedger) {
+              aggDebit += leafLedger.totalDebit;
+              aggCredit += leafLedger.totalCredit;
+              aggBalance += leafLedger.finalBalance;
+              aggMovements += leafLedger.movementsCount;
+            }
           }
         });
+
+        if (ledgerMap[parent.code]) {
+          ledgerMap[parent.code].totalDebit = Math.round(aggDebit * 100) / 100;
+          ledgerMap[parent.code].totalCredit = Math.round(aggCredit * 100) / 100;
+          ledgerMap[parent.code].finalBalance = Math.round(aggBalance * 100) / 100;
+          ledgerMap[parent.code].movementsCount = aggMovements;
+        }
       }
     });
 
-    return balances;
+    // 5. Diccionario plano de saldos de todas las cuentas para compatibilidad global
+    const balances: Record<string, number> = {};
+    Object.keys(ledgerMap).forEach(code => {
+      balances[code] = ledgerMap[code].finalBalance;
+    });
+
+    // 6. Totales globales del sistema contable
+    const totalSysDebit = validPostedEntries.reduce((sum, je) => sum + (je.totalDebit || 0), 0);
+    const totalSysCredit = validPostedEntries.reduce((sum, je) => sum + (je.totalCredit || 0), 0);
+
+    return {
+      ledgerByAccount: ledgerMap,
+      accountBalances: balances,
+      systemLedgerTotals: {
+        totalDebit: Math.round(totalSysDebit * 100) / 100,
+        totalCredit: Math.round(totalSysCredit * 100) / 100,
+        isBalanced: Math.abs(totalSysDebit - totalSysCredit) < 0.02,
+        postedEntriesCount: validPostedEntries.length
+      }
+    };
   }, [accountPlan, normalizedJournalEntries]);
 
   // Dynamic Metrics NIIF
@@ -4149,107 +4317,699 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
       )}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 8: MAYORES (Libro Mayor)
+          SUBTAB 8: MAYORES (Libro Mayor & Asientos Mayores Sincronizados)
          --------------------------------------------------------------------- */}
-      {subTab === 'MAYORES' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-cyan-500" />
-                <span>Libro Mayor General de Cuentas</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Resumen de movimientos débito/crédito y saldo acumulado por cada cuenta contable del catálogo.
-              </p>
-            </div>
-          </div>
+      {subTab === 'MAYORES' && (() => {
+        // Cuentas filtradas para la vista general
+        const movementAccounts = accountPlan.filter(a => a.acceptsMovement);
+        const accountsWithMovementsCount = movementAccounts.filter(a => (ledgerByAccount[a.code]?.movementsCount || 0) > 0).length;
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Código Cuenta</th>
-                  <th className="py-3 px-4">Nombre de la Cuenta</th>
-                  <th className="py-3 px-4">Naturaleza</th>
-                  <th className="py-3 px-4 text-right">Saldo Actual ($)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white font-mono text-[11px]">
-                {accountPlan.filter(a => a.acceptsMovement).map((acc) => (
-                  <tr key={acc.code} className="hover:bg-slate-50">
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{acc.code}</td>
-                    <td className="py-2.5 px-4 font-sans font-bold text-slate-800">{acc.name}</td>
-                    <td className="py-2.5 px-4">
-                      <span className="px-2 py-0.5 bg-slate-100 font-bold text-[10px] rounded">
-                        {acc.nature}
+        const filteredAccounts = movementAccounts.filter(acc => {
+          if (mayorTypeFilter !== 'TODOS' && acc.type !== mayorTypeFilter) return false;
+          const leg = ledgerByAccount[acc.code];
+          if (mayorOnlyWithMovements && (!leg || leg.movementsCount === 0)) return false;
+          if (mayorSearchTerm.trim()) {
+            const q = mayorSearchTerm.toLowerCase();
+            return acc.code.toLowerCase().includes(q) || acc.name.toLowerCase().includes(q);
+          }
+          return true;
+        });
+
+        // Totales de la tabla filtrada
+        const sumFilteredDebits = filteredAccounts.reduce((sum, a) => sum + (ledgerByAccount[a.code]?.totalDebit || 0), 0);
+        const sumFilteredCredits = filteredAccounts.reduce((sum, a) => sum + (ledgerByAccount[a.code]?.totalCredit || 0), 0);
+        const sumFilteredBalances = filteredAccounts.reduce((sum, a) => sum + (ledgerByAccount[a.code]?.finalBalance || 0), 0);
+
+        // Cuenta activa si se seleccionó una para ver su ficha de mayor detallada
+        const activeAccount = selectedMayorAccountCode ? accountPlan.find(a => a.code === selectedMayorAccountCode) : null;
+        const activeLedger = selectedMayorAccountCode ? ledgerByAccount[selectedMayorAccountCode] : null;
+
+        return (
+          <div className="space-y-6">
+            {/* Header del Libro Mayor */}
+            <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 shadow-sm space-y-5">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-5 h-5 text-cyan-600" />
+                    <h2 className="text-lg font-black text-slate-950">
+                      Libro Mayor General & Asientos Mayorizados
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-cyan-50 text-cyan-700 border border-cyan-200 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse" />
+                      Sincronizado con Diario
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Control contable bajo partida doble: trazabilidad de cada asiento cronológico del Libro Diario reflejado en el saldo mayorizado de cada cuenta.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selectedMayorAccountCode ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMayorAccountCode(null)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Volver al Catálogo Mayor</span>
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    disabled={isSyncingEntries}
+                    onClick={handleSyncAutomaticEntries}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-700 hover:to-sky-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSyncingEntries ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    )}
+                    <span>Sincronizar Asientos Automáticos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Imprimir Mayor</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Banner de Métricas en Tiempo Real del Libro Mayor */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 rounded-xl border border-slate-700/80 shadow-sm">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] font-medium mb-1">
+                    <span>Asientos en Libro Diario</span>
+                    <Calculator className="w-4 h-4 text-cyan-400" />
+                  </div>
+                  <div className="text-2xl font-black font-mono tracking-tight text-white">
+                    {systemLedgerTotals.postedEntriesCount}
+                  </div>
+                  <div className="text-[10px] text-cyan-300 mt-1 font-sans">
+                    100% Asentados y Mayorizados
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50/70 border border-emerald-200/80 p-4 rounded-xl">
+                  <div className="flex items-center justify-between text-emerald-800 text-[11px] font-bold mb-1">
+                    <span>Total Débitos (Debe)</span>
+                    <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="text-xl font-black font-mono text-emerald-700">
+                    {formatCurrency(systemLedgerTotals.totalDebit, settings.currencySymbol)}
+                  </div>
+                  <div className="text-[10px] text-emerald-600 mt-1">
+                    Sumas acumuladas en Diario
+                  </div>
+                </div>
+
+                <div className="bg-rose-50/70 border border-rose-200/80 p-4 rounded-xl">
+                  <div className="flex items-center justify-between text-rose-800 text-[11px] font-bold mb-1">
+                    <span>Total Créditos (Haber)</span>
+                    <ArrowUpRight className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <div className="text-xl font-black font-mono text-rose-700">
+                    {formatCurrency(systemLedgerTotals.totalCredit, settings.currencySymbol)}
+                  </div>
+                  <div className="text-[10px] text-rose-600 mt-1">
+                    Sumas acumuladas en Diario
+                  </div>
+                </div>
+
+                <div className={`p-4 rounded-xl border ${
+                  systemLedgerTotals.isBalanced
+                    ? 'bg-sky-50/80 border-sky-200 text-sky-900'
+                    : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                }`}>
+                  <div className="flex items-center justify-between text-[11px] font-bold mb-1">
+                    <span>Cuadre Partida Doble</span>
+                    <Scale className="w-4 h-4" />
+                  </div>
+                  <div className="text-sm font-black flex items-center gap-1.5 mt-1">
+                    {systemLedgerTotals.isBalanced ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="text-emerald-700 font-bold">Libro Mayor Cuadrado</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span className="text-amber-700 font-bold">Diferencia: {formatCurrency(Math.abs(systemLedgerTotals.totalDebit - systemLedgerTotals.totalCredit), settings.currencySymbol)}</span>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-[10px] opacity-80 mt-1">
+                    Debe = Haber verificado en tiempo real
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* VISTA 1: FICHA DE MAYOR DETALLADA DE UNA CUENTA ESPECÍFICA */}
+            {selectedMayorAccountCode && activeAccount && activeLedger ? (
+              <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+                {/* Header de la Cuenta */}
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-black text-sm px-2.5 py-1 bg-slate-900 text-white rounded-lg">
+                        {activeAccount.code}
                       </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-black text-slate-900 text-sm">
-                      {formatCurrency(acc.balance, settings.currencySymbol)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <h3 className="text-lg font-black text-slate-900 font-sans">
+                        {activeAccount.name}
+                      </h3>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        activeAccount.type === 'ACTIVO' ? 'bg-emerald-100 text-emerald-800' :
+                        activeAccount.type === 'PASIVO' ? 'bg-rose-100 text-rose-800' :
+                        activeAccount.type === 'PATRIMONIO' ? 'bg-blue-100 text-blue-800' :
+                        activeAccount.type === 'INGRESO' ? 'bg-purple-100 text-purple-800' :
+                        'bg-amber-100 text-amber-800'
+                      }`}>
+                        {activeAccount.type}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                        Naturaleza {activeAccount.nature}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Tarjeta auxiliar del Libro Mayor: listado cronológico de todos los asientos del Libro Diario que afectan esta cuenta.
+                    </p>
+                  </div>
+
+                  {/* Selector rápido para cambiar de cuenta */}
+                  <div className="w-full md:w-72">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                      Cambiar Cuenta de Mayor:
+                    </label>
+                    <Select
+                      value={selectedMayorAccountCode}
+                      onChange={(e) => setSelectedMayorAccountCode(e.target.value)}
+                      className="w-full text-xs font-mono font-bold"
+                    >
+                      {movementAccounts.map(a => (
+                        <option key={a.code} value={a.code}>
+                          {a.code} - {a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Tarjetas de Resumen de la Cuenta */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Saldo Inicial</span>
+                    <span className="text-sm font-black font-mono text-slate-800 mt-0.5 block">
+                      {formatCurrency(activeLedger.initialBalance, settings.currencySymbol)}
+                    </span>
+                  </div>
+
+                  <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase block">Total Débitos (Debe)</span>
+                    <span className="text-sm font-black font-mono text-emerald-700 mt-0.5 block">
+                      {formatCurrency(activeLedger.totalDebit, settings.currencySymbol)}
+                    </span>
+                  </div>
+
+                  <div className="bg-rose-50/70 p-3.5 rounded-xl border border-rose-200">
+                    <span className="text-[10px] font-bold text-rose-700 uppercase block">Total Créditos (Haber)</span>
+                    <span className="text-sm font-black font-mono text-rose-700 mt-0.5 block">
+                      {formatCurrency(activeLedger.totalCredit, settings.currencySymbol)}
+                    </span>
+                  </div>
+
+                  <div className="bg-cyan-50/80 p-3.5 rounded-xl border border-cyan-200">
+                    <span className="text-[10px] font-bold text-cyan-800 uppercase block">Saldo Mayorizado Actual</span>
+                    <span className="text-base font-black font-mono text-cyan-900 mt-0.5 block">
+                      {formatCurrency(activeLedger.finalBalance, settings.currencySymbol)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Tabla de Movimientos / Asientos del Libro Diario para esta Cuenta */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                      <BookOpen className="w-4 h-4 text-cyan-600" />
+                      <span>Movimientos de Libro Diario ({activeLedger.movements.length} asientos)</span>
+                    </h4>
+                  </div>
+
+                  {activeLedger.movements.length === 0 ? (
+                    <div className="py-12 bg-slate-50 rounded-xl border border-slate-200 text-center text-slate-400 text-xs space-y-2">
+                      <Calculator className="w-8 h-8 text-slate-300 mx-auto" />
+                      <p className="font-bold text-slate-600">Esta cuenta no registra movimientos en el Libro Diario.</p>
+                      <p className="text-[11px] text-slate-400">
+                        Su saldo actual coincide con su saldo inicial ({formatCurrency(activeLedger.initialBalance, settings.currencySymbol)}).
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 font-mono text-xs">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                          <tr>
+                            <th className="py-3 px-3">Fecha</th>
+                            <th className="py-3 px-3">N° Asiento</th>
+                            <th className="py-3 px-3">Tipo</th>
+                            <th className="py-3 px-4 font-sans">Concepto / Glosa</th>
+                            <th className="py-3 px-3 text-right">Debe ($)</th>
+                            <th className="py-3 px-3 text-right">Haber ($)</th>
+                            <th className="py-3 px-4 text-right">Saldo Progresivo ($)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                          {/* Fila de Saldo Inicial */}
+                          {activeLedger.initialBalance !== 0 && (
+                            <tr className="bg-slate-50/80 font-bold text-slate-600">
+                              <td className="py-2.5 px-3">-</td>
+                              <td className="py-2.5 px-3">-</td>
+                              <td className="py-2.5 px-3">INICIAL</td>
+                              <td className="py-2.5 px-4 font-sans font-bold">Saldo de Apertura / Inicial de la Cuenta</td>
+                              <td className="py-2.5 px-3 text-right">-</td>
+                              <td className="py-2.5 px-3 text-right">-</td>
+                              <td className="py-2.5 px-4 text-right font-black text-slate-900">
+                                {formatCurrency(activeLedger.initialBalance, settings.currencySymbol)}
+                              </td>
+                            </tr>
+                          )}
+
+                          {activeLedger.movements.map((mov, idx) => (
+                            <tr key={`${mov.entryId}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-2 px-3 text-slate-600 whitespace-nowrap">{mov.date}</td>
+                              <td className="py-2 px-3">
+                                <span className="px-2 py-0.5 bg-purple-50 text-purple-700 font-black rounded text-[10px]">
+                                  {mov.entryNumber}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3">
+                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 text-[9px] font-black rounded uppercase">
+                                  {mov.entryType}
+                                </span>
+                              </td>
+                              <td className="py-2 px-4 font-sans text-slate-800 font-medium">
+                                {mov.concept}
+                              </td>
+                              <td className="py-2 px-3 text-right text-emerald-700 font-bold whitespace-nowrap">
+                                {mov.debit > 0 ? formatCurrency(mov.debit, settings.currencySymbol) : '-'}
+                              </td>
+                              <td className="py-2 px-3 text-right text-rose-700 font-bold whitespace-nowrap">
+                                {mov.credit > 0 ? formatCurrency(mov.credit, settings.currencySymbol) : '-'}
+                              </td>
+                              <td className="py-2 px-4 text-right font-black text-slate-950 whitespace-nowrap">
+                                {formatCurrency(mov.runningBalance, settings.currencySymbol)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-100 font-black border-t-2 border-slate-300 text-xs">
+                          <tr>
+                            <td colSpan={4} className="py-3 px-4 font-sans uppercase text-right text-slate-800">
+                              Totales Mayorizados de la Cuenta:
+                            </td>
+                            <td className="py-3 px-3 text-right text-emerald-700 font-black">
+                              {formatCurrency(activeLedger.totalDebit, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-3 text-right text-rose-700 font-black">
+                              {formatCurrency(activeLedger.totalCredit, settings.currencySymbol)}
+                            </td>
+                            <td className="py-3 px-4 text-right text-cyan-900 font-black text-sm">
+                              {formatCurrency(activeLedger.finalBalance, settings.currencySymbol)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* VISTA 2: LISTADO GENERAL DEL LIBRO MAYOR (TODAS LAS CUENTAS) */
+              <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+                {/* Barra de Filtros y Búsqueda */}
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                  {/* Búsqueda */}
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por código (ej: 1.1.01) o nombre de cuenta..."
+                      value={mayorSearchTerm}
+                      onChange={(e) => setMayorSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-sans focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {/* Filtro por Elemento Contable */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {(['TODOS', 'ACTIVO', 'PASIVO', 'PATRIMONIO', 'INGRESO', 'GASTO'] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setMayorTypeFilter(type)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          mayorTypeFilter === type
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Filtro Toggle: Solo cuentas con movimientos */}
+                <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-medium select-none">
+                    <input
+                      type="checkbox"
+                      checked={mayorOnlyWithMovements}
+                      onChange={(e) => setMayorOnlyWithMovements(e.target.checked)}
+                      className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Mostrar únicamente cuentas con movimientos en Libro Diario ({accountsWithMovementsCount} cuentas)</span>
+                  </label>
+
+                  <span className="text-[11px] text-slate-500 font-sans">
+                    Mostrando <strong>{filteredAccounts.length}</strong> de <strong>{movementAccounts.length}</strong> cuentas de movimiento
+                  </span>
+                </div>
+
+                {/* Tabla General del Libro Mayor */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200 font-mono text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                      <tr>
+                        <th className="py-3 px-3">Código</th>
+                        <th className="py-3 px-4 font-sans">Nombre de la Cuenta</th>
+                        <th className="py-3 px-3">Tipo NIIF</th>
+                        <th className="py-3 px-3">Naturaleza</th>
+                        <th className="py-3 px-3 text-right">Saldo Inicial</th>
+                        <th className="py-3 px-3 text-right">Sumas Debe</th>
+                        <th className="py-3 px-3 text-right">Sumas Haber</th>
+                        <th className="py-3 px-4 text-right">Saldo Mayorizado</th>
+                        <th className="py-3 px-3 text-center">Asientos</th>
+                        <th className="py-3 px-3 text-center font-sans">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                      {filteredAccounts.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="py-8 text-center text-slate-400 font-sans">
+                            No se encontraron cuentas contables que coincidan con los filtros aplicados.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAccounts.map((acc) => {
+                          const leg = ledgerByAccount[acc.code];
+                          const hasMovements = (leg?.movementsCount || 0) > 0;
+                          const initBal = leg?.initialBalance || 0;
+                          const totalDeb = leg?.totalDebit || 0;
+                          const totalCred = leg?.totalCredit || 0;
+                          const finalBal = leg?.finalBalance ?? 0;
+
+                          return (
+                            <tr
+                              key={acc.code}
+                              className={`transition-colors hover:bg-slate-50/80 ${
+                                hasMovements ? 'bg-cyan-50/20' : ''
+                              }`}
+                            >
+                              {/* Código */}
+                              <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedMayorAccountCode(acc.code)}
+                                  className="hover:text-cyan-600 transition underline underline-offset-2 cursor-pointer"
+                                  title="Ver tarjeta auxiliar de mayor"
+                                >
+                                  {acc.code}
+                                </button>
+                              </td>
+
+                              {/* Nombre */}
+                              <td className="py-2.5 px-4 font-sans font-bold text-slate-800">
+                                {acc.name}
+                              </td>
+
+                              {/* Tipo */}
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                                  acc.type === 'ACTIVO' ? 'bg-emerald-100 text-emerald-800' :
+                                  acc.type === 'PASIVO' ? 'bg-rose-100 text-rose-800' :
+                                  acc.type === 'PATRIMONIO' ? 'bg-blue-100 text-blue-800' :
+                                  acc.type === 'INGRESO' ? 'bg-purple-100 text-purple-800' :
+                                  'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {acc.type}
+                                </span>
+                              </td>
+
+                              {/* Naturaleza */}
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <span className={`text-[10px] font-bold ${
+                                  acc.nature === 'DEUDORA' ? 'text-sky-700' : 'text-purple-700'
+                                }`}>
+                                  {acc.nature}
+                                </span>
+                              </td>
+
+                              {/* Saldo Inicial */}
+                              <td className="py-2.5 px-3 text-right text-slate-500 whitespace-nowrap">
+                                {formatCurrency(initBal, settings.currencySymbol)}
+                              </td>
+
+                              {/* Sumas Debe */}
+                              <td className="py-2.5 px-3 text-right text-emerald-700 font-bold whitespace-nowrap">
+                                {totalDeb > 0 ? formatCurrency(totalDeb, settings.currencySymbol) : '-'}
+                              </td>
+
+                              {/* Sumas Haber */}
+                              <td className="py-2.5 px-3 text-right text-rose-700 font-bold whitespace-nowrap">
+                                {totalCred > 0 ? formatCurrency(totalCred, settings.currencySymbol) : '-'}
+                              </td>
+
+                              {/* Saldo Mayorizado */}
+                              <td className="py-2.5 px-4 text-right font-black text-slate-900 whitespace-nowrap text-xs">
+                                {formatCurrency(finalBal, settings.currencySymbol)}
+                              </td>
+
+                              {/* Asientos */}
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                {hasMovements ? (
+                                  <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 font-black rounded-full text-[10px]">
+                                    {leg.movementsCount}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300 text-[10px]">0</span>
+                                )}
+                              </td>
+
+                              {/* Acción */}
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap font-sans">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedMayorAccountCode(acc.code)}
+                                  className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg font-bold text-[10px] transition cursor-pointer flex items-center gap-1 mx-auto"
+                                  title="Ver movimientos cronológicos en Libro Diario"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>Ver Mayor</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                    <tfoot className="bg-slate-100 font-black border-t-2 border-slate-300 text-xs">
+                      <tr>
+                        <td colSpan={5} className="py-3 px-4 font-sans uppercase text-right text-slate-800">
+                          Totales de Cuentas Filtradas:
+                        </td>
+                        <td className="py-3 px-3 text-right text-emerald-700 font-black whitespace-nowrap">
+                          {formatCurrency(sumFilteredDebits, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-3 text-right text-rose-700 font-black whitespace-nowrap">
+                          {formatCurrency(sumFilteredCredits, settings.currencySymbol)}
+                        </td>
+                        <td className="py-3 px-4 text-right text-slate-950 font-black whitespace-nowrap text-sm">
+                          {formatCurrency(sumFilteredBalances, settings.currencySymbol)}
+                        </td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
-          SUBTAB 9: BALANCE_COMPROBACION
+          SUBTAB 9: BALANCE_COMPROBACION (Sincronizado con Libro Diario)
          --------------------------------------------------------------------- */}
-      {subTab === 'BALANCE_COMPROBACION' && (
-        <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-950 flex items-center gap-2">
-                <Scale className="w-5 h-5 text-amber-500" />
-                <span>Balance de Comprobación de Sumas y Saldos</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Verificación de igualdad entre débitos y créditos acumulados en todo el sistema.
-              </p>
-            </div>
-          </div>
+      {subTab === 'BALANCE_COMPROBACION' && (() => {
+        const movementAccounts = accountPlan.filter(a => a.acceptsMovement);
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 font-mono text-xs">
-            <table className="w-full text-left">
-              <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Código</th>
-                  <th className="py-3 px-4">Cuenta</th>
-                  <th className="py-3 px-4 text-right">Sumas Debe</th>
-                  <th className="py-3 px-4 text-right">Sumas Haber</th>
-                  <th className="py-3 px-4 text-right">Saldo Deudor</th>
-                  <th className="py-3 px-4 text-right">Saldo Acreedor</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
-                {accountPlan.filter(a => a.acceptsMovement).map((acc) => {
-                  const isDeudora = acc.nature === 'DEUDORA';
-                  return (
-                    <tr key={acc.code} className="hover:bg-slate-50">
+        // Cálculos de sumas y saldos sincronizados con Libro Diario
+        let totalSumasDebe = 0;
+        let totalSumasHaber = 0;
+        let totalSaldoDeudor = 0;
+        let totalSaldoAcreedor = 0;
+
+        const rows = movementAccounts.map(acc => {
+          const leg = ledgerByAccount[acc.code];
+          const initial = Number(acc.balance || 0);
+          const isDeudora = acc.nature === 'DEUDORA';
+
+          const debits = leg ? leg.totalDebit : 0;
+          const credits = leg ? leg.totalCredit : 0;
+
+          const sumasDebe = Math.round((debits + (isDeudora ? initial : 0)) * 100) / 100;
+          const sumasHaber = Math.round((credits + (!isDeudora ? initial : 0)) * 100) / 100;
+
+          const saldoDeudor = sumasDebe > sumasHaber ? Math.round((sumasDebe - sumasHaber) * 100) / 100 : 0;
+          const saldoAcreedor = sumasHaber > sumasDebe ? Math.round((sumasHaber - sumasDebe) * 100) / 100 : 0;
+
+          totalSumasDebe += sumasDebe;
+          totalSumasHaber += sumasHaber;
+          totalSaldoDeudor += saldoDeudor;
+          totalSaldoAcreedor += saldoAcreedor;
+
+          return {
+            acc,
+            isDeudora,
+            sumasDebe,
+            sumasHaber,
+            saldoDeudor,
+            saldoAcreedor
+          };
+        });
+
+        totalSumasDebe = Math.round(totalSumasDebe * 100) / 100;
+        totalSumasHaber = Math.round(totalSumasHaber * 100) / 100;
+        totalSaldoDeudor = Math.round(totalSaldoDeudor * 100) / 100;
+        totalSaldoAcreedor = Math.round(totalSaldoAcreedor * 100) / 100;
+
+        const isSumasCuadradas = Math.abs(totalSumasDebe - totalSumasHaber) < 0.05;
+        const isSaldosCuadrados = Math.abs(totalSaldoDeudor - totalSaldoAcreedor) < 0.05;
+
+        return (
+          <div className="bg-white border border-slate-200/90 ring-1 ring-slate-200/60 rounded-2xl p-6 space-y-6 shadow-sm">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Scale className="w-5 h-5 text-amber-500" />
+                  <h2 className="text-lg font-black text-slate-950">
+                    Balance de Comprobación de Sumas y Saldos
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200">
+                    NIIF Sincronizado
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Verificación de igualdad entre sumas y saldos acumulados en todo el sistema contable a partir de los asientos del Libro Diario.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir Balance</span>
+              </button>
+            </div>
+
+            {/* Banner de Verificación de Cuadre */}
+            <div className={`p-4 rounded-xl border flex items-center justify-between ${
+              isSumasCuadradas && isSaldosCuadrados
+                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50/80 border-amber-200 text-amber-900'
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className={`w-5 h-5 ${isSumasCuadradas && isSaldosCuadrados ? 'text-emerald-600' : 'text-amber-600'}`} />
+                <div>
+                  <div className="font-bold text-xs">
+                    {isSumasCuadradas && isSaldosCuadrados
+                      ? 'Partida Doble Cuadrada: Sumas Iguales y Saldos Conciliados'
+                      : 'Diferencia en Balance de Comprobación'}
+                  </div>
+                  <div className="text-[11px] opacity-80">
+                    Sumas Debe ({formatCurrency(totalSumasDebe, settings.currencySymbol)}) = Sumas Haber ({formatCurrency(totalSumasHaber, settings.currencySymbol)})
+                    {' | '}
+                    Saldos Deudores ({formatCurrency(totalSaldoDeudor, settings.currencySymbol)}) = Saldos Acreedores ({formatCurrency(totalSaldoAcreedor, settings.currencySymbol)})
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 font-mono text-xs">
+              <table className="w-full text-left">
+                <thead className="bg-slate-950 text-white font-black uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Código</th>
+                    <th className="py-3 px-4 font-sans">Cuenta</th>
+                    <th className="py-3 px-4 text-right">Sumas Debe</th>
+                    <th className="py-3 px-4 text-right">Sumas Haber</th>
+                    <th className="py-3 px-4 text-right">Saldo Deudor</th>
+                    <th className="py-3 px-4 text-right">Saldo Acreedor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-[11px]">
+                  {rows.map(({ acc, sumasDebe, sumasHaber, saldoDeudor, saldoAcreedor }) => (
+                    <tr key={acc.code} className="hover:bg-slate-50 transition-colors">
                       <td className="py-2.5 px-4 font-bold text-slate-900">{acc.code}</td>
                       <td className="py-2.5 px-4 font-sans font-bold text-slate-800">{acc.name}</td>
                       <td className="py-2.5 px-4 text-right font-bold text-emerald-700">
-                        {formatCurrency(acc.balance, settings.currencySymbol)}
+                        {sumasDebe > 0 ? formatCurrency(sumasDebe, settings.currencySymbol) : '-'}
                       </td>
-                      <td className="py-2.5 px-4 text-right text-slate-400">$0.00</td>
-                      <td className="py-2.5 px-4 text-right font-black text-slate-900">
-                        {isDeudora ? formatCurrency(acc.balance, settings.currencySymbol) : '-'}
+                      <td className="py-2.5 px-4 text-right font-bold text-rose-700">
+                        {sumasHaber > 0 ? formatCurrency(sumasHaber, settings.currencySymbol) : '-'}
                       </td>
                       <td className="py-2.5 px-4 text-right font-black text-slate-900">
-                        {!isDeudora ? formatCurrency(acc.balance, settings.currencySymbol) : '-'}
+                        {saldoDeudor > 0 ? formatCurrency(saldoDeudor, settings.currencySymbol) : '-'}
+                      </td>
+                      <td className="py-2.5 px-4 text-right font-black text-slate-900">
+                        {saldoAcreedor > 0 ? formatCurrency(saldoAcreedor, settings.currencySymbol) : '-'}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-100 font-black border-t-2 border-slate-300 text-xs">
+                  <tr>
+                    <td colSpan={2} className="py-3 px-4 font-sans uppercase text-right text-slate-900">
+                      Sumas Totales:
+                    </td>
+                    <td className="py-3 px-4 text-right text-emerald-700 font-black">
+                      {formatCurrency(totalSumasDebe, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 px-4 text-right text-rose-700 font-black">
+                      {formatCurrency(totalSumasHaber, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 px-4 text-right text-slate-950 font-black">
+                      {formatCurrency(totalSaldoDeudor, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 px-4 text-right text-slate-950 font-black">
+                      {formatCurrency(totalSaldoAcreedor, settings.currencySymbol)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ---------------------------------------------------------------------
           SUBTAB 10: ESTADO_SITUACION_FINANCIERA (Balance General NIIF)
