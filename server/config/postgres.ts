@@ -72,9 +72,11 @@ class PostgresCollection {
     const ddl = `
       CREATE TABLE IF NOT EXISTS "${this.tableName}" (
         id VARCHAR(150) PRIMARY KEY,
-        data JSONB NOT NULL,
+        data JSONB DEFAULT '{}'::jsonb,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE "${this.tableName}" ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE "${this.tableName}" ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
       CREATE INDEX IF NOT EXISTS "idx_${this.tableName}_gin" ON "${this.tableName}" USING GIN(data);
     `;
     try {

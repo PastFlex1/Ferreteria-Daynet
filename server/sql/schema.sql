@@ -180,7 +180,9 @@ CREATE TABLE IF NOT EXISTS cola_sri (
     mensajes_sri JSONB,
     ultimo_error TEXT,
     xml_original TEXT,
-    xml_firmado TEXT
+    xml_firmado TEXT,
+    data JSONB DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_cola_sri_estado ON cola_sri(estado);
