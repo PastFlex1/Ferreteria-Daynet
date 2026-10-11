@@ -11,59 +11,81 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function initPostgres() {
-  const host = process.env.PGHOST || '127.0.0.1';
-  const port = parseInt(process.env.PGPORT || '5432', 10);
-  const user = process.env.PGUSER || 'postgres';
-  const password = process.env.PGPASSWORD || 'postgres';
-  const targetDb = process.env.PGDATABASE || 'ferreteria_daynet';
+  let host = process.env.PGHOST || '127.0.0.1';
+  let port = parseInt(process.env.PGPORT || '5432', 10);
+  let user = process.env.PGUSER || 'postgres';
+  let password = process.env.PGPASSWORD || 'postgres';
+  let targetDb = process.env.PGDATABASE || 'ferreteria_daynet';
+  const connectionString = process.env.DATABASE_URL;
 
-  console.log(`\n======================================================`);
-  console.log(`🐘 INICIALIZADOR DE BASE DE DATOS POSTGRESQL 18`);
-  console.log(`Host: ${host}:${port} | Usuario: ${user} | DB: ${targetDb}`);
-  console.log(`======================================================\n`);
-
-  // Paso 1: Conectar a la base de datos 'postgres' del sistema para crear targetDb si no existe
-  const sysClient = new Client({
-    host,
-    port,
-    user,
-    password,
-    database: 'postgres',
-    connectionTimeoutMillis: 5000
-  });
-
-  try {
-    await sysClient.connect();
-    console.log(`[PostgreSQL] ✓ Conexión inicial al servidor exitosa.`);
-
-    const checkDbRes = await sysClient.query(
-      `SELECT 1 FROM pg_database WHERE datname = $1;`,
-      [targetDb]
-    );
-
-    if (checkDbRes.rows.length === 0) {
-      console.log(`[PostgreSQL] Creando base de datos '${targetDb}'...`);
-      await sysClient.query(`CREATE DATABASE "${targetDb}";`);
-      console.log(`[PostgreSQL] ✓ Base de datos '${targetDb}' creada exitosamente.`);
-    } else {
-      console.log(`[PostgreSQL] ✓ Base de datos '${targetDb}' ya existe.`);
-    }
-  } catch (err: any) {
-    console.warn(`[PostgreSQL Advertencia en verificación inicial]:`, err.message);
-  } finally {
+  if (connectionString) {
     try {
-      await sysClient.end();
+      const parsed = new URL(connectionString);
+      host = parsed.hostname || host;
+      port = parsed.port ? parseInt(parsed.port, 10) : port;
+      user = parsed.username ? decodeURIComponent(parsed.username) : user;
+      password = parsed.password ? decodeURIComponent(parsed.password) : password;
+      targetDb = parsed.pathname ? parsed.pathname.replace(/^\//, '') : targetDb;
     } catch {}
   }
 
+  console.log(`\n======================================================`);
+  console.log(`🐘 INICIALIZADOR DE BASE DE DATOS POSTGRESQL`);
+  console.log(`Host: ${host}:${port} | Usuario: ${user} | DB: ${targetDb}`);
+  console.log(`======================================================\n`);
+
+  // Paso 1: Intentar verificar o crear la base de datos si es servidor con superusuario
+  if (targetDb !== 'postgres') {
+    const sysClient = new Client(connectionString ? {
+      connectionString: connectionString.replace(new RegExp(`/${targetDb}(\\?|$)`), '/postgres$1'),
+      connectionTimeoutMillis: 5000,
+      ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined
+    } : {
+      host,
+      port,
+      user,
+      password,
+      database: 'postgres',
+      connectionTimeoutMillis: 5000
+    });
+
+    try {
+      await sysClient.connect();
+      console.log(`[PostgreSQL] ✓ Verificando existencia de la base de datos '${targetDb}'...`);
+
+      const checkDbRes = await sysClient.query(
+        `SELECT 1 FROM pg_database WHERE datname = $1;`,
+        [targetDb]
+      );
+
+      if (checkDbRes.rows.length === 0) {
+        console.log(`[PostgreSQL] Creando base de datos '${targetDb}'...`);
+        await sysClient.query(`CREATE DATABASE "${targetDb}";`);
+        console.log(`[PostgreSQL] ✓ Base de datos '${targetDb}' creada exitosamente.`);
+      } else {
+        console.log(`[PostgreSQL] ✓ Base de datos '${targetDb}' ya existe.`);
+      }
+    } catch (err: any) {
+      console.log(`[PostgreSQL Nota]: Verificación previa en 'postgres' omitida (${err.message}). Conectando directamente a '${targetDb}'...`);
+    } finally {
+      try {
+        await sysClient.end();
+      } catch {}
+    }
+  }
+
   // Paso 2: Conectar directamente a targetDb y aplicar schema.sql
-  const appClient = new Client({
+  const appClient = new Client(connectionString ? {
+    connectionString,
+    connectionTimeoutMillis: 8000,
+    ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined
+  } : {
     host,
     port,
     user,
     password,
     database: targetDb,
-    connectionTimeoutMillis: 5000
+    connectionTimeoutMillis: 8000
   });
 
   try {
