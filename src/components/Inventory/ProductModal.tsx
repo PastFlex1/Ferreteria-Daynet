@@ -5,7 +5,7 @@ import { Select } from '../Shared/Select';
 import { BarcodeSvg } from '../Shared/BarcodeSvg';
 import { generateEan13Barcode, generateCode128Barcode } from '../../utils/barcodeGenerator';
 import { useModal } from '../../context/ModalContext';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultTaxRates } from '../../data/initialData';
 import { usePermissions } from '../../context/PermissionsContext';
 
@@ -47,7 +47,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 }) => {
   const { can } = usePermissions();
   const { showAlert, showToast } = useModal();
-  const [syncedTaxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const [syncedTaxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const availableTaxRates = (taxRates && taxRates.length > 0 ? taxRates : syncedTaxRates).filter(t => t.active !== false);
   const categoryOptions = categories && categories.length > 0 ? categories.map((c) => c.name) : ['General'];
   const [sku, setSku] = useState('');

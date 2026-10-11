@@ -2,12 +2,11 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
-import { mongoBridgePlugin } from './vite-mongo-plugin';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), mongoBridgePlugin(), nodePolyfills()],
+    plugins: [react(), tailwindcss(), nodePolyfills()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -17,10 +16,11 @@ export default defineConfig(() => {
       port: 3000,
       host: true,
       proxy: {
-        '/api/sri': {
-          target: 'http://localhost:8080',
+        '/api': {
+          target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
+          ws: true,
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

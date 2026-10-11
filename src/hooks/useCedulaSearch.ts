@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useModal } from '../context/ModalContext';
 import { validateEcuadorianDocument } from '../utils/ecuadorianValidator';
 import { SriBackendService } from '../services/sriBackendService';
+import { getApiUrl } from '../lib/apiConfig';
 
 export interface CustomerData {
   name?: string;
@@ -27,7 +28,7 @@ export function useCedulaSearch() {
     
     setIsSearchingCedula(true);
     try {
-      // 2. Primero busca localmente en Clientes y Proveedores (MongoDB / Cache Local)
+      // 2. Primero busca localmente en Clientes y Proveedores (PostgreSQL / Cache Local)
       try {
         const rawCust = localStorage.getItem('ferreteria_customers');
         const customers: any[] = rawCust ? JSON.parse(rawCust) : [];
@@ -68,7 +69,7 @@ export function useCedulaSearch() {
 
       // Intento 1: API Pública SRI a través del proxy local
       try {
-        const sriRes = await fetch(`/api/sri/cedula/${cleanDoc}`);
+        const sriRes = await fetch(getApiUrl(`/api/sri/cedula/${cleanDoc}`));
         if (sriRes.ok) {
           const sriData = await sriRes.json();
           if (sriData?.success && sriData?.nombre) {

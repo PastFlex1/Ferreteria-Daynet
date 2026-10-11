@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { 
   BookOpen, 
   Receipt, 
@@ -290,26 +290,26 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   // -------------------------------------------------------------------------
 
   // 1. Cheques Girados
-  const [issuedChecks, setIssuedChecks] = useFirestoreSync<IssuedCheck[]>('ferreteria_issued_checks', []);
+  const [issuedChecks, setIssuedChecks] = usePostgresSync<IssuedCheck[]>('ferreteria_issued_checks', []);
 
   // 2. Cheques Posfechados
-  const [postdatedChecks, setPostdatedChecks] = useFirestoreSync<PostdatedCheck[]>('ferreteria_postdated_checks', []);
+  const [postdatedChecks, setPostdatedChecks] = usePostgresSync<PostdatedCheck[]>('ferreteria_postdated_checks', []);
 
   // 3. Conciliación de Tarjetas
-  const [cardReconciliations, setCardReconciliations] = useFirestoreSync<CardReconciliation[]>('ferreteria_card_reconciliations', []);
+  const [cardReconciliations, setCardReconciliations] = usePostgresSync<CardReconciliation[]>('ferreteria_card_reconciliations', []);
 
   // 4. Asientos Contables / Libro Diario
-  const [journalEntries, setJournalEntries] = useFirestoreSync<JournalEntry[]>('ferreteria_journal_entries', []);
+  const [journalEntries, setJournalEntries] = usePostgresSync<JournalEntry[]>('ferreteria_journal_entries', []);
 
   const normalizedJournalEntries = useMemo(() => {
     return (journalEntries || []).map(normalizeJournalEntry);
   }, [journalEntries]);
 
   // 5. Plan de Cuentas NIIF (Oficial 5 Niveles)
-  const [accountPlan, setAccountPlan] = useFirestoreSync<AccountPlanItem[]>('ferreteria_account_plan', OFFICIAL_NIIF_ACCOUNT_PLAN);
+  const [accountPlan, setAccountPlan] = usePostgresSync<AccountPlanItem[]>('ferreteria_account_plan', OFFICIAL_NIIF_ACCOUNT_PLAN);
 
   // 5.1 Motor de Mapeo Paramétrico Contable NIIF
-  const [accountingMapping, setAccountingMapping] = useFirestoreSync<AccountingMapping>('ferreteria_accounting_mapping', DEFAULT_ACCOUNTING_MAPPING);
+  const [accountingMapping, setAccountingMapping] = usePostgresSync<AccountingMapping>('ferreteria_accounting_mapping', DEFAULT_ACCOUNTING_MAPPING);
 
   // UI States para Catálogo y Parametrización
   const [accountPlanFilterElement, setAccountPlanFilterElement] = useState<'TODOS' | 'ACTIVO' | 'PASIVO' | 'PATRIMONIO' | 'INGRESO' | 'GASTO'>('TODOS');
@@ -324,21 +324,21 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
   const [mayorOnlyWithMovements, setMayorOnlyWithMovements] = useState(false);
 
   // 6. Periodos Fiscales
-  const [fiscalPeriods, setFiscalPeriods] = useFirestoreSync<FiscalPeriod[]>('ferreteria_fiscal_periods', []);
+  const [fiscalPeriods, setFiscalPeriods] = usePostgresSync<FiscalPeriod[]>('ferreteria_fiscal_periods', []);
 
   // 7. Global Collections for real calculations
-  const [invoices] = useFirestoreSync<any[]>('ferreteria_invoices', []);
-  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
-  const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
-  const [bankAccounts, setBankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
-  const [customers] = useFirestoreSync<any[]>('ferreteria_customers', []);
-  const [suppliers] = useFirestoreSync<any[]>('ferreteria_suppliers', []);
+  const [invoices] = usePostgresSync<any[]>('ferreteria_invoices', []);
+  const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
+  const [retenciones] = usePostgresSync<any[]>('ferreteria_retenciones', []);
+  const [bankAccounts, setBankAccounts] = usePostgresSync<any[]>('ferreteria_bank_accounts', []);
+  const [customers] = usePostgresSync<any[]>('ferreteria_customers', []);
+  const [suppliers] = usePostgresSync<any[]>('ferreteria_suppliers', []);
 
   // 8. Comprobantes Contables de Ingreso y Egreso
-  const [accountingVouchers, setAccountingVouchers] = useFirestoreSync<AccountingVoucher[]>('ferreteria_accounting_vouchers', []);
+  const [accountingVouchers, setAccountingVouchers] = usePostgresSync<AccountingVoucher[]>('ferreteria_accounting_vouchers', []);
 
   // 9. Conciliación Bancaria Mensual
-  const [bankReconciliations, setBankReconciliations] = useFirestoreSync<BankReconciliationRecord[]>('ferreteria_bank_reconciliations', []);
+  const [bankReconciliations, setBankReconciliations] = usePostgresSync<BankReconciliationRecord[]>('ferreteria_bank_reconciliations', []);
 
   // UI States para Comprobantes
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);

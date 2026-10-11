@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { 
   Briefcase, 
   TrendingDown, 
@@ -173,18 +173,18 @@ export const AssetsManager: React.FC<AssetsManagerProps> = ({
   // MOCK DATA STATES
   // -------------------------------------------------------------------------
 
-  const [classifications, setClassifications] = useFirestoreSync<AssetClassification[]>('ferreteria_asset_classifications', defaultAssetClassifications);
+  const [classifications, setClassifications] = usePostgresSync<AssetClassification[]>('ferreteria_asset_classifications', defaultAssetClassifications);
 
-  const [areas, setAreas] = useFirestoreSync<AssetArea[]>('ferreteria_asset_areas', defaultAssetAreas);
+  const [areas, setAreas] = usePostgresSync<AssetArea[]>('ferreteria_asset_areas', defaultAssetAreas);
 
-  const [locations, setLocations] = useFirestoreSync<AssetLocation[]>('ferreteria_asset_locations', defaultAssetLocations);
+  const [locations, setLocations] = usePostgresSync<AssetLocation[]>('ferreteria_asset_locations', defaultAssetLocations);
 
-  const [assets, setAssets] = useFirestoreSync<FixedAssetItem[]>('ferreteria_assets', []);
-  const [maintenances, setMaintenances] = useFirestoreSync<AssetMaintenance[]>('ferreteria_asset_maintenances', []);
-  const [transfers, setTransfers] = useFirestoreSync<AssetTransfer[]>('ferreteria_asset_transfers', []);
+  const [assets, setAssets] = usePostgresSync<FixedAssetItem[]>('ferreteria_assets', []);
+  const [maintenances, setMaintenances] = usePostgresSync<AssetMaintenance[]>('ferreteria_asset_maintenances', []);
+  const [transfers, setTransfers] = usePostgresSync<AssetTransfer[]>('ferreteria_asset_transfers', []);
 
-  const [historyLogs, setHistoryLogs] = useFirestoreSync<AssetHistoryLog[]>('ferreteria_asset_history_logs', []);
-  const [journalEntries, setJournalEntries] = useFirestoreSync<any[]>('ferreteria_journal_entries', []);
+  const [historyLogs, setHistoryLogs] = usePostgresSync<AssetHistoryLog[]>('ferreteria_asset_history_logs', []);
+  const [journalEntries, setJournalEntries] = usePostgresSync<any[]>('ferreteria_journal_entries', []);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');

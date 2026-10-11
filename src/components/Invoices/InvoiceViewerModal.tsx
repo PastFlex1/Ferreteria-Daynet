@@ -25,7 +25,7 @@ import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { CreditNoteViewerModal } from '../Sales/CreditNoteViewerModal';
 import { downloadXML, convertERPInvoiceToSRI, generateInvoiceXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 import { SriBackendService } from '../../services/sriBackendService';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 import JsBarcode from 'jsbarcode';
 import html2canvas from 'html2canvas-pro';
@@ -57,8 +57,8 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const [isAnularModalOpen, setIsAnularModalOpen] = useState(false);
   const [anularReason, setAnularReason] = useState('Anulación total de la factura');
   const [anularRestoreStock, setAnularRestoreStock] = useState(true);
-  const [creditNotes, setCreditNotes] = useFirestoreSync<CreditNoteData[]>('ferreteria_credit_notes', []);
-  const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
+  const [creditNotes, setCreditNotes] = usePostgresSync<CreditNoteData[]>('ferreteria_credit_notes', []);
+  const [secCreditNote, setSecCreditNote] = usePostgresSync<string>('ferreteria_settings_sec_credit_note', '000000001');
   const [viewingCreditNote, setViewingCreditNote] = useState<CreditNoteData | null>(null);
   const [ticketFormat, setTicketFormat] = useState<'A4' | 'THERMAL'>('A4');
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
@@ -67,11 +67,11 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const [isAnulando, setIsAnulando] = useState(false);
   const [anularStepText, setAnularStepText] = useState<string>('');
 
-  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
-  const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
-  const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
-  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+  const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [establishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
+  const [emissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
+  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
   const barcodeRef = React.useRef<SVGSVGElement | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 

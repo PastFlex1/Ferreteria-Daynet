@@ -9,6 +9,7 @@ import { Invoice, StoreSettings } from '../types';
 import { SRIRetentionData } from '../types/retention';
 import { SriRetentionXmlGenerator } from './retention/SriRetentionXmlGenerator';
 import { RetentionXsdValidator } from './retention/RetentionXsdValidator';
+import { getApiUrl, getAuthHeaders } from '../lib/apiConfig';
 
 export interface SriEmissionResult {
   success: boolean;
@@ -341,20 +342,60 @@ export class SriBackendService {
         // Paso 2: Recepción SRI
         const rRes = await this.recepcionarSri(fRes.xmlFirmado);
 
-        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar automáticamente
+        // Si el comprobante ya fue recibido por el SRI (Error 43 / Clave registrada),
+        // NUNCA generar un nuevo secuencial (evita doble cobro y saltos según TdR).
+        // Se reconsulta la autorización con LA MISMA CLAVE DE ACCESO.
         if (isSecuencialAlreadyRegistered(rRes.recepcion, rRes.error)) {
-          console.warn(`[SRI] Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente...`);
-          currentSecNum++;
-          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
-          try {
-            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: nextSecSetting })
-            }).catch(() => {});
-          } catch (_) {}
-          continue;
+          console.log(`[SRI] Comprobante ya recibido por el SRI con clave ${claveAcceso}. Reconsultando autorización con la misma clave de acceso...`);
+          // Reconsulta inmediata con la misma clave
+          const reAuth = await this.autorizarSri(claveAcceso, 5, 2000);
+          if (reAuth.success && reAuth.autorizacion && reAuth.autorizacion.includes('AUTORIZADO')) {
+            const authNumMatch = reAuth.autorizacion.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
+            const authDateMatch = reAuth.autorizacion.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
+            return {
+              success: true,
+              claveAcceso,
+              estado: 'AUTORIZADO',
+              numeroAutorizacion: authNumMatch ? authNumMatch[1] : claveAcceso,
+              fechaAutorizacion: authDateMatch ? authDateMatch[1] : new Date().toISOString(),
+              xmlOriginal,
+              xmlFirmado: fRes.xmlFirmado,
+              rawRecepcion: rRes.recepcion,
+              rawAutorizacion: reAuth.autorizacion,
+              nuevoSecuencial: formattedSec,
+              nuevoFullNumber: currentInvoice.fullNumber,
+            };
+          }
+
+          // Si el SRI sigue procesando, encolar en cola_sri del servidor
+          fetch(getApiUrl('/api/sri/cola/enqueue'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              invoiceId: currentInvoice.id,
+              invoiceNumber: currentInvoice.fullNumber,
+              establishment: estab,
+              emissionPoint: ptoEmi,
+              claveAcceso,
+              customerName: currentInvoice.customer?.name,
+              customerTaxId: currentInvoice.customer?.idNumber || (currentInvoice.customer as any)?.taxId,
+              total: currentInvoice.total,
+              xmlOriginal,
+              xmlFirmado: fRes.xmlFirmado
+            })
+          }).catch(() => {});
+
+          return {
+            success: true,
+            claveAcceso,
+            estado: 'EN PROCESO',
+            xmlOriginal,
+            xmlFirmado: fRes.xmlFirmado,
+            rawRecepcion: rRes.recepcion,
+            mensaje: 'Comprobante recibido por el SRI. Permanece en cola para verificación con la misma clave de acceso.',
+            nuevoSecuencial: formattedSec,
+            nuevoFullNumber: currentInvoice.fullNumber,
+          };
         }
 
         if (!rRes.success || !rRes.recepcion) {
@@ -399,19 +440,36 @@ export class SriBackendService {
         // Paso 3: Autorización SRI con reintentos
         const aRes = await this.autorizarSri(claveAcceso, 4, 2000);
 
-        if (isSecuencialAlreadyRegistered(aRes.autorizacion, aRes.error) && aRes.autorizacion?.includes('NO AUTORIZADO')) {
-          console.warn(`[SRI Autorización] Secuencial ${formattedSec} ya registrado. Avanzando automáticamente al siguiente...`);
-          currentSecNum++;
-          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
-          try {
-            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: nextSecSetting })
-            }).catch(() => {});
-          } catch (_) {}
-          continue;
+        if (isSecuencialAlreadyRegistered(aRes.autorizacion, aRes.error)) {
+          console.log(`[SRI Autorización] Clave ${claveAcceso} registrada en SRI. Encolando para resolución con la misma clave de acceso...`);
+          fetch(getApiUrl('/api/sri/cola/enqueue'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              invoiceId: currentInvoice.id,
+              invoiceNumber: currentInvoice.fullNumber,
+              establishment: estab,
+              emissionPoint: ptoEmi,
+              claveAcceso,
+              customerName: currentInvoice.customer?.name,
+              customerTaxId: currentInvoice.customer?.idNumber || (currentInvoice.customer as any)?.taxId,
+              total: currentInvoice.total,
+              xmlOriginal,
+              xmlFirmado: fRes.xmlFirmado
+            })
+          }).catch(() => {});
+
+          return {
+            success: true,
+            claveAcceso,
+            estado: 'EN PROCESO',
+            xmlOriginal,
+            xmlFirmado: fRes.xmlFirmado,
+            rawRecepcion: rRes.recepcion,
+            mensaje: 'Comprobante registrado en el SRI. Se consultará la autorización con la misma clave de acceso.',
+            nuevoSecuencial: formattedSec,
+            nuevoFullNumber: currentInvoice.fullNumber,
+          };
         }
 
         if (!aRes.success || !aRes.autorizacion) {
@@ -438,9 +496,9 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_invoice'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
@@ -568,9 +626,9 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
@@ -616,9 +674,9 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
@@ -649,9 +707,9 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_credit_note', {
+            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
             }).catch(() => {});
           } catch (_) {}
@@ -797,7 +855,7 @@ export class SriBackendService {
       const numMatch = aRes.autorizacion ? aRes.autorizacion.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/) : null;
       const fechaMatch = aRes.autorizacion ? aRes.autorizacion.match(/<fechaAutorizacion.*?>(.*?)<\/fechaAutorizacion>/) : null;
 
-      // Actualizar secuencial en almacenamiento local y Firestore si procede
+      // Actualizar secuencial en almacenamiento local y PostgreSQL si procede
       const nextSecNumber = parseInt(formattedSec, 10) + 1;
       localStorage.setItem('ferreteria_settings_sec_retention', String(nextSecNumber));
 

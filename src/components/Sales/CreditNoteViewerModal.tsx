@@ -19,7 +19,7 @@ import { downloadCreditNotePdf, printCreditNoteDocument } from '../../utils/cred
 import { calculateSriTotals } from '../../utils/sriCalculations';
 import { downloadXML, convertCreditNoteToSRI, generateCreditNoteXML } from '../../services/sriXmlService';
 import { SriBackendService } from '../../services/sriBackendService';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 
 interface CreditNoteViewerModalProps {
@@ -41,9 +41,9 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
 }) => {
   const barcodeRef = useRef<SVGSVGElement>(null);
   const [isTransmitting, setIsTransmitting] = useState(false);
-  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
-  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+  const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
   const { showToast, showAlert } = useModal();
 
   const claveAcceso = creditNote?.claveAcceso || creditNote?.numeroAutorizacion || '040920260417900123450011001001000000001123456781';

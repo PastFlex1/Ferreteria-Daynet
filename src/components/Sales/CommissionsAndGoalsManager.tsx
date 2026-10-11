@@ -27,7 +27,7 @@ import {
   Send,
   Eye
 } from 'lucide-react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 import { Invoice, SalesSubTab, StoreSettings } from '../../types';
 import { formatCurrency, formatDate, formatFullDate, getPaymentMethodLabel } from '../../utils/formatters';
@@ -72,10 +72,10 @@ export const CommissionsAndGoalsManager: React.FC<CommissionsAndGoalsManagerProp
   const { showAlert, showToast, showConfirm } = useModal();
 
   // ── Sync with Real Employees, Users and Goals ──────────────────────────────
-  const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
-  const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
-  const [goals, setGoals] = useFirestoreSync<SellerGoalRecord[]>('ferreteria_seller_goals', []);
-  const [incomes, setIncomes] = useFirestoreSync<any[]>('ferreteria_hr_incomes', []);
+  const [employees] = usePostgresSync<any[]>('ferreteria_hr_employees', defaultEmployees);
+  const [usersList] = usePostgresSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [goals, setGoals] = usePostgresSync<SellerGoalRecord[]>('ferreteria_seller_goals', []);
+  const [incomes, setIncomes] = usePostgresSync<any[]>('ferreteria_hr_incomes', []);
 
   // Filter Period
   const [selectedPeriod, setSelectedPeriod] = useState<'ESTE_MES' | 'MES_ANTERIOR' | 'TODOS'>('ESTE_MES');

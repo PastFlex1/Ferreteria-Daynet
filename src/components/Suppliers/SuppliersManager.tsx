@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 import { 
   Building2, 
@@ -98,13 +98,13 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
 }) => {
   const { showConfirm, showAlert, showToast } = useModal();
   // Clean Suppliers State
-  const [suppliers, setSuppliers] = useFirestoreSync<SupplierDetail[]>('ferreteria_suppliers_details', []);
+  const [suppliers, setSuppliers] = usePostgresSync<SupplierDetail[]>('ferreteria_suppliers_details', []);
 
   // Cuentas por Pagar (Payable Invoices)
-  const [payables, setPayables] = useFirestoreSync<PayableInvoice[]>('ferreteria_payables', []);
+  const [payables, setPayables] = usePostgresSync<PayableInvoice[]>('ferreteria_payables', []);
 
   // Historial de Compras para Auto-Sincronización
-  const [purchasesHistory] = useFirestoreSync<any[]>('ferreteria_purchases', []);
+  const [purchasesHistory] = usePostgresSync<any[]>('ferreteria_purchases', []);
 
   // Auto-Sync: Cargar facturas de compras a crédito de ferreteria_purchases hacia ferreteria_payables
   useEffect(() => {
@@ -176,12 +176,12 @@ export const SuppliersManager: React.FC<SuppliersManagerProps> = ({
   }, [payables, suppliers]);
 
   // Payment History Log
-  const [paymentHistory, setPaymentHistory] = useFirestoreSync<PaymentRecord[]>('ferreteria_supplier_payments', []);
+  const [paymentHistory, setPaymentHistory] = usePostgresSync<PaymentRecord[]>('ferreteria_supplier_payments', []);
 
   // Integración Contable y Tesorería (Cheques Girados y Asientos)
-  const [issuedChecks, setIssuedChecks] = useFirestoreSync<any[]>('ferreteria_issued_checks', []);
-  const [journalEntries, setJournalEntries] = useFirestoreSync<any[]>('ferreteria_journal_entries', []);
-  const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
+  const [issuedChecks, setIssuedChecks] = usePostgresSync<any[]>('ferreteria_issued_checks', []);
+  const [journalEntries, setJournalEntries] = usePostgresSync<any[]>('ferreteria_journal_entries', []);
+  const [bankAccounts] = usePostgresSync<any[]>('ferreteria_bank_accounts', []);
 
 
 

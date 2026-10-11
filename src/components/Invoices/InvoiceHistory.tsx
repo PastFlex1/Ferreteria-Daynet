@@ -30,7 +30,7 @@ import { Customer, DocumentType, Invoice, InvoiceItem, InvoiceStatus, Product, S
 import { formatCurrency, formatDate, getDocumentTypeName, getPaymentMethodLabel } from '../../utils/formatters';
 import { SriEmissionProgressModal } from '../POS/SriEmissionProgressModal';
 import { useModal } from '../../context/ModalContext';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { downloadXML, getAuthorizedXmlContent } from '../../services/sriXmlService';
 import { usePermissions } from '../../context/PermissionsContext';
 import { initialProducts, initialCustomers } from '../../data/initialData';
@@ -69,11 +69,11 @@ export const InvoiceHistory: React.FC<InvoiceHistoryProps> = ({
   const [sriStatusFilter, setSriStatusFilter] = useState<'TODOS' | 'AUTORIZADO' | 'PENDIENTE' | 'DEVUELTA'>('TODOS');
   
   // Data for editing quotes
-  const [syncProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
-  const [syncCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
+  const [syncProducts] = usePostgresSync<Product[]>('ferreteria_products', initialProducts);
+  const [syncCustomers] = usePostgresSync<Customer[]>('ferreteria_customers', initialCustomers);
   const products = propsProducts ?? syncProducts;
   const customers = propsCustomers ?? syncCustomers;
-  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [editingQuote, setEditingQuote] = useState<Invoice | null>(null);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [editCustomerId, setEditCustomerId] = useState<string>('');

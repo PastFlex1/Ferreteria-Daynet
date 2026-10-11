@@ -16,8 +16,9 @@ import {
 import { Invoice, StoreSettings } from '../../types';
 import { SriBackendService, isSecuencialAlreadyRegistered } from '../../services/sriBackendService';
 import { generateInvoiceXML, convertERPInvoiceToSRI, downloadXML } from '../../services/sriXmlService';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { getEcuadorianDateTime, formatFullDate } from '../../utils/formatters';
+import { getApiUrl, getAuthHeaders } from '../../lib/apiConfig';
 
 interface SriEmissionProgressModalProps {
   isOpen: boolean;
@@ -26,6 +27,8 @@ interface SriEmissionProgressModalProps {
   settings: StoreSettings;
   onInvoiceUpdated?: (updatedInvoice: Invoice) => void;
   autoTransmit?: boolean;
+  establishment?: string;
+  emissionPoint?: string;
 }
 
 export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> = ({
@@ -35,6 +38,8 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   settings,
   onInvoiceUpdated,
   autoTransmit = true,
+  establishment: propEstablishment,
+  emissionPoint: propEmissionPoint,
 }) => {
   const [activeInvoice, setActiveInvoice] = useState<Invoice | null>(invoice);
 
@@ -42,11 +47,14 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
     setActiveInvoice(invoice);
   }, [invoice]);
 
-  const [sriMode, setSriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
-  const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
-  const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
-  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword, setSignaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+  const [sriMode, setSriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [syncedEstablishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
+  const [syncedEmissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
+
+  const establishment = propEstablishment || syncedEstablishment || '001';
+  const emissionPoint = propEmissionPoint || (typeof window !== 'undefined' ? localStorage.getItem('ferreteria_terminal_emission_point') : null) || syncedEmissionPoint || '001';
+  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword, setSignaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
   const [inputPassword, setInputPassword] = useState(signaturePassword || '');
 
   // Pipeline execution state
@@ -162,11 +170,29 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
       let attempts = 0;
       const MAX_ATTEMPTS = 15;
 
+      const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
+      const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
+
+      // CONTROL DE CONCURRENCIA: Reservar secuencial atómico garantizado en el servidor para evitar choques entre terminales
+      try {
+        const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
+        });
+        if (seqRes.ok) {
+          const seqData = await seqRes.json();
+          if (seqData.success && seqData.sequentialNumber) {
+            currentSecNum = seqData.sequentialNumber;
+          }
+        }
+      } catch (err) {
+        console.warn('Fallback a secuencial local:', err);
+      }
+
       while (attempts < MAX_ATTEMPTS) {
         attempts++;
       const ambienteVal = sriMode === 'PRODUCCION' ? '2' : '1';
-      const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
-      const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
       const formattedSec = String(currentSecNum).padStart(9, '0');
 
       workingInvoice.number = currentSecNum;
@@ -214,20 +240,29 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const rRes = await SriBackendService.recepcionarSri(fRes.xmlFirmado);
         console.log('📡 [SRI 2. RECEPCIÓN RAW]:', rRes.recepcion || rRes.error);
 
-        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar automáticamente al siguiente
+        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar atómicamente en el servidor
         if (isSecuencialAlreadyRegistered(rRes.recepcion, rRes.error)) {
-          console.warn(`[SRI] Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente...`);
-          setStep2Details(`Secuencial ${formattedSec} ya registrado/autorizado en el SRI. Avanzando automáticamente al siguiente secuencial...`);
-          currentSecNum++;
-          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
+          console.warn(`[SRI] Secuencial ${formattedSec} ya registrado en SRI. Avanzando atómicamente al siguiente...`);
+          setStep2Details(`Secuencial ${formattedSec} ya registrado en el SRI. Solicitando siguiente secuencial atómico...`);
           try {
-            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+            const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: nextSecSetting })
-            }).catch(() => {});
-          } catch (_) {}
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
+            });
+            if (seqRes.ok) {
+              const seqData = await seqRes.json();
+              if (seqData.success && seqData.sequentialNumber) {
+                currentSecNum = seqData.sequentialNumber;
+              } else {
+                currentSecNum++;
+              }
+            } else {
+              currentSecNum++;
+            }
+          } catch {
+            currentSecNum++;
+          }
           await new Promise((r) => setTimeout(r, 50));
           continue; // Reintentar con el siguiente secuencial
         }
@@ -290,17 +325,26 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         // Si la autorización indica que el secuencial ya estaba registrado
         if (isSecuencialAlreadyRegistered(aRes.autorizacion, aRes.error) && aRes.autorizacion?.includes('NO AUTORIZADO')) {
           console.warn(`[SRI Autorización] Secuencial ${formattedSec} ya registrado en SRI. Avanzando al siguiente...`);
-          setStep3Details(`Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente secuencial...`);
-          currentSecNum++;
-          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
+          setStep3Details(`Secuencial ${formattedSec} ya registrado en SRI. Avanzando atómicamente al siguiente secuencial...`);
           try {
-            localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+            const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: nextSecSetting })
-            }).catch(() => {});
-          } catch (_) {}
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
+            });
+            if (seqRes.ok) {
+              const seqData = await seqRes.json();
+              if (seqData.success && seqData.sequentialNumber) {
+                currentSecNum = seqData.sequentialNumber;
+              } else {
+                currentSecNum++;
+              }
+            } else {
+              currentSecNum++;
+            }
+          } catch {
+            currentSecNum++;
+          }
           await new Promise((r) => setTimeout(r, 50));
           continue; // Reintentar con el siguiente secuencial
         }
@@ -415,26 +459,39 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
         try {
           localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-          fetch('/api/mongo/doc/ferreteria_settings_sec_invoice', {
+          fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_invoice'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({ data: nextSecSetting })
           }).catch(() => {});
         } catch (_) {}
 
-        // Actualizar factura en estado principal
+        // Actualizar factura en estado principal y persistir atómicamente en servidor
+        const updatedInvoice: Invoice = {
+          ...workingInvoice,
+          sriStatus: 'AUTORIZADO',
+          sriClaveAcceso: claveCalculada,
+          sriNumeroAutorizacion: numAuth,
+          sriFechaAutorizacion: fechaAuth,
+          sriXmlFirmado: xmlAutorizadoOficial,
+          sriMensaje: 'AUTORIZADO por el SRI',
+        };
+
         if (onInvoiceUpdated) {
-          const updatedInvoice: Invoice = {
-            ...workingInvoice,
-            sriStatus: 'AUTORIZADO',
-            sriClaveAcceso: claveCalculada,
-            sriNumeroAutorizacion: numAuth,
-            sriFechaAutorizacion: fechaAuth,
-            sriXmlFirmado: xmlAutorizadoOficial,
-            sriMensaje: 'AUTORIZADO por el SRI',
-          };
           onInvoiceUpdated(updatedInvoice);
         }
+
+        try {
+          fetch(getApiUrl('/api/invoices'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              ...updatedInvoice,
+              establishment: estab,
+              emissionPoint: ptoEmi
+            })
+          }).catch(() => {});
+        } catch (_) {}
         break; // Completado con éxito
       } catch (err: any) {
         console.error('[SRI Modal Error]', err);

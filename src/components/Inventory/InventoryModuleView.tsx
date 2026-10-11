@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { CustomSelect } from '../CustomSelect';
 import { 
   Package, 
@@ -345,7 +345,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   }, [currentCategories, products]);
 
   // 1. Promociones State (Sincronizado a nivel global con el POS de facturación)
-  const [internalPromotions, setInternalPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
+  const [internalPromotions, setInternalPromotions] = usePostgresSync<Promotion[]>('ferreteria_promotions', []);
   const promotions = propPromotions ?? internalPromotions;
   const setPromotions = onUpdatePromotions ?? setInternalPromotions;
   const [isCreatingPromo, setIsCreatingPromo] = useState(false);
@@ -618,8 +618,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   });
 
   // 3. Lotes & Vencimientos State (Sincronizado directamente con Compras y Lotes de Almacén)
-  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
-  const [manualBatches, setManualBatches] = useFirestoreSync<ProductBatch[]>('ferreteria_product_batches', []);
+  const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
+  const [manualBatches, setManualBatches] = usePostgresSync<ProductBatch[]>('ferreteria_product_batches', []);
   const [batchSearchTerm, setBatchSearchTerm] = useState('');
   const [batchStatusFilter, setBatchStatusFilter] = useState<'TODOS' | 'POR_VENCER' | 'VENCIDOS' | 'VIGENTES'>('TODOS');
   const [batchLocationFilter, setBatchLocationFilter] = useState('TODAS');
@@ -774,8 +774,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
     return { total, vigentes, porVencer, vencidos, totalUnits };
   }, [consolidatedBatches]);
 
-  // Gestión de Bodegas y Almacenes Reales (Sincronizado con Firestore ferreteria_warehouses)
-  const [warehouses, setWarehouses] = useFirestoreSync<WarehouseLocation[]>('ferreteria_warehouses', defaultWarehouseLocations);
+  // Gestión de Bodegas y Almacenes Reales (Sincronizado con PostgreSQL ferreteria_warehouses)
+  const [warehouses, setWarehouses] = usePostgresSync<WarehouseLocation[]>('ferreteria_warehouses', defaultWarehouseLocations);
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
   const [isEditWarehouseModalOpen, setIsEditWarehouseModalOpen] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseLocation | null>(null);
@@ -967,7 +967,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   const [adjustTypeReason, setAdjustTypeReason] = useState<'ENTRADA_COMPRA' | 'ENTRADA_DEVOLUCION' | 'SALIDA_MERMA' | 'SALIDA_ROBO' | 'CORRECCION'>('CORRECCION');
   const [adjustNotes, setAdjustNotes] = useState('');
   const [adjustHistory, setAdjustHistory] = useState<{ id: string; date: string; product: string; qty: number; reason: string; user: string; }[]>([]);
-  const [stockAdjustments, setStockAdjustments] = useFirestoreSync<StockAdjustmentRecord[]>('ferreteria_stock_adjustments', []);
+  const [stockAdjustments, setStockAdjustments] = usePostgresSync<StockAdjustmentRecord[]>('ferreteria_stock_adjustments', []);
 
   // Interactive Multi-Product Stock Adjustment Rows State (matching image design)
   const [adjustMovementType, setAdjustMovementType] = useState<'INGRESO' | 'EGRESO'>('INGRESO');
@@ -1075,7 +1075,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
   };
 
   // 7. Transferencias State (Doble Fase Transaccional sincronizada con ferreteria_transfers)
-  const [transfers, setTransfers] = useFirestoreSync<StockTransfer[]>('ferreteria_transfers', []);
+  const [transfers, setTransfers] = usePostgresSync<StockTransfer[]>('ferreteria_transfers', []);
   const [transferSearchTerm, setTransferSearchTerm] = useState('');
   const [transferStatusFilter, setTransferStatusFilter] = useState<'TODAS' | 'EN_TRANSITO' | 'COMPLETADA' | 'CANCELADA'>('TODAS');
 

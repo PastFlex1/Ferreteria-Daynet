@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useModal } from '../../context/ModalContext';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { Invoice, Product, ProductCategory, ReportsSubTab, StoreSettings } from '../../types';
 import { CustomDatePicker } from '../Shared/CustomDatePicker';
 import { CustomSelect } from '../CustomSelect';
@@ -113,26 +113,26 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
 }) => {
   const { showAlert, showToast } = useModal();
 
-  // Firestore Data Collections
-  const [syncInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
-  const [syncProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
-  const [syncCategories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', defaultCategories);
-  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
-  const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
-  const [sellers] = useFirestoreSync<any[]>('ferreteria_sellers', []);
-  const [sellerGoals] = useFirestoreSync<any[]>('ferreteria_seller_goals', []);
-  const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
-  const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
-  const [payrollRoles] = useFirestoreSync<any[]>('ferreteria_hr_payroll_roles', []);
-  const [syncCashSession] = useFirestoreSync<any>('ferreteria_cash_session', null);
+  // PostgreSQL Data Collections
+  const [syncInvoices] = usePostgresSync<Invoice[]>('ferreteria_invoices', []);
+  const [syncProducts] = usePostgresSync<Product[]>('ferreteria_products', initialProducts);
+  const [syncCategories] = usePostgresSync<ProductCategory[]>('ferreteria_categories', defaultCategories);
+  const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
+  const [creditNotes] = usePostgresSync<any[]>('ferreteria_credit_notes', []);
+  const [sellers] = usePostgresSync<any[]>('ferreteria_sellers', []);
+  const [sellerGoals] = usePostgresSync<any[]>('ferreteria_seller_goals', []);
+  const [employees] = usePostgresSync<any[]>('ferreteria_hr_employees', defaultEmployees);
+  const [usersList] = usePostgresSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [payrollRoles] = usePostgresSync<any[]>('ferreteria_hr_payroll_roles', []);
+  const [syncCashSession] = usePostgresSync<any>('ferreteria_cash_session', null);
 
   const invoices = propsInvoices ?? syncInvoices;
   const products = propsProducts ?? syncProducts;
   const categories = propsCategories ?? syncCategories;
   const cashSession = propsCashSession ?? syncCashSession;
-  const [cashSessionsHistory] = useFirestoreSync<any[]>('ferreteria_cash_sessions_history', []);
-  const [retenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
-  const [bankAccounts] = useFirestoreSync<any[]>('ferreteria_bank_accounts', []);
+  const [cashSessionsHistory] = usePostgresSync<any[]>('ferreteria_cash_sessions_history', []);
+  const [retenciones] = usePostgresSync<any[]>('ferreteria_retenciones', []);
+  const [bankAccounts] = usePostgresSync<any[]>('ferreteria_bank_accounts', []);
 
   // Caja / Arqueo specific states
   const [cajaWorkerFilter, setCajaWorkerFilter] = useState<string>('TODOS');

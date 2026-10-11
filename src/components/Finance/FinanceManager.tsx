@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { 
   Landmark, 
   PiggyBank, 
@@ -128,21 +128,21 @@ export const FinanceManager: React.FC<FinanceManagerProps> = ({
   // -------------------------------------------------------------------------
 
   // 1. BANCOS
-  const [bankAccounts, setBankAccounts] = useFirestoreSync<BankAccount[]>('ferreteria_bank_accounts', []);
-  const [bankTransactions, setBankTransactions] = useFirestoreSync<BankTransaction[]>('ferreteria_bank_transactions', []);
+  const [bankAccounts, setBankAccounts] = usePostgresSync<BankAccount[]>('ferreteria_bank_accounts', []);
+  const [bankTransactions, setBankTransactions] = usePostgresSync<BankTransaction[]>('ferreteria_bank_transactions', []);
 
   // 2. DEPOSITOS
-  const [deposits, setDeposits] = useFirestoreSync<BankDeposit[]>('ferreteria_bank_deposits', []);
+  const [deposits, setDeposits] = usePostgresSync<BankDeposit[]>('ferreteria_bank_deposits', []);
 
   // 3. CAJA CHICA
   const pettyCashBaseFund = 0.00;
-  const [pettyExpenses, setPettyExpenses] = useFirestoreSync<PettyCashExpense[]>('ferreteria_petty_expenses', []);
+  const [pettyExpenses, setPettyExpenses] = usePostgresSync<PettyCashExpense[]>('ferreteria_petty_expenses', []);
 
   // 4. ACTIVOS FIJOS
-  const [fixedAssets, setFixedAssets] = useFirestoreSync<FixedAsset[]>('ferreteria_finance_assets', []);
+  const [fixedAssets, setFixedAssets] = usePostgresSync<FixedAsset[]>('ferreteria_finance_assets', []);
 
   // 5. PRESUPUESTO
-  const [budgetCategories, setBudgetCategories] = useFirestoreSync<BudgetCategory[]>('ferreteria_budget_categories', []);
+  const [budgetCategories, setBudgetCategories] = usePostgresSync<BudgetCategory[]>('ferreteria_budget_categories', []);
 
   // Search & Modals state
   const [searchTerm, setSearchTerm] = useState('');

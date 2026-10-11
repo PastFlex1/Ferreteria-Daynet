@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect } from 'react';
-import { useFirestoreSync } from '../hooks/useFirestoreSync';
+import { usePostgresSync } from '../hooks/usePostgresSync';
 
 type ThemeMode = 'light' | 'dark';
 type ThemeColor = 'orange' | 'blue' | 'green' | 'red' | 'purple';
@@ -17,9 +17,9 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setMode] = useFirestoreSync<ThemeMode>('ferreteria_theme_mode', 'light');
-  const [accentColor, setAccentColor] = useFirestoreSync<ThemeColor>('ferreteria_theme_color', 'orange');
-  const [sidebarPosition, setSidebarPosition] = useFirestoreSync<SidebarPosition>('ferreteria_sidebar_position', 'left');
+  const [mode, setMode] = usePostgresSync<ThemeMode>('ferreteria_theme_mode', 'light');
+  const [accentColor, setAccentColor] = usePostgresSync<ThemeColor>('ferreteria_theme_color', 'orange');
+  const [sidebarPosition, setSidebarPosition] = usePostgresSync<SidebarPosition>('ferreteria_sidebar_position', 'left');
 
   useEffect(() => {
     const root = document.documentElement;

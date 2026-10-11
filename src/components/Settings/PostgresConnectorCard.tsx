@@ -7,12 +7,11 @@ import {
   Zap, 
   UploadCloud, 
   DownloadCloud, 
-  ExternalLink,
   HardDrive,
   Copy,
   Check
 } from 'lucide-react';
-import { mongoSync, MongoStatusResponse } from '../../services/mongoSyncService';
+import { postgresSync, PostgresStatusResponse } from '../../services/postgresSyncService';
 import { useModal } from '../../context/ModalContext';
 import { KNOWN_COLLECTIONS } from '../../services/backupService';
 import {
@@ -51,23 +50,23 @@ const DEFAULT_FALLBACKS: Record<string, any> = {
   ferreteria_sellers: defaultSellers,
 };
 
-export const MongoConnectorCard: React.FC = () => {
+export const PostgresConnectorCard: React.FC = () => {
   const { showAlert, showToast } = useModal();
-  const [status, setStatus] = useState<MongoStatusResponse>({
+  const [status, setStatus] = useState<PostgresStatusResponse>({
     connected: false,
-    uri: 'mongodb://127.0.0.1:27017',
+    uri: 'postgresql://127.0.0.1:5432',
     dbName: 'ferreteria_daynet',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [inputUri, setInputUri] = useState('mongodb://127.0.0.1:27017');
+  const [inputUri, setInputUri] = useState('postgresql://127.0.0.1:5432');
   const [inputDbName, setInputDbName] = useState('ferreteria_daynet');
   const [copied, setCopied] = useState(false);
 
   const fetchStatus = async (force = false) => {
     setIsLoading(true);
     try {
-      const res = await mongoSync.getStatus(force);
+      const res = await postgresSync.getStatus(force);
       setStatus(res);
       if (res.uri) setInputUri(res.uri);
       if (res.dbName) setInputDbName(res.dbName);
@@ -76,7 +75,7 @@ export const MongoConnectorCard: React.FC = () => {
         connected: false,
         uri: inputUri,
         dbName: inputDbName,
-        error: 'No se pudo contactar el puente local'
+        error: 'No se pudo contactar el servidor local'
       });
     } finally {
       setIsLoading(false);
@@ -92,12 +91,12 @@ export const MongoConnectorCard: React.FC = () => {
   const handleTestConnection = async () => {
     setIsLoading(true);
     try {
-      const res = await mongoSync.testConnection(inputUri, inputDbName, true);
+      const res = await postgresSync.testConnection(inputUri, inputDbName, true);
       if (res.success) {
-        showToast(`✅ Conexión con MongoDB Compass exitosa. ${res.collections?.length || 0} colecciones detectadas.`, 'success');
+        showToast(`✅ Conexión con PostgreSQL exitosa. ${res.collections?.length || 0} tablas detectadas.`, 'success');
         await fetchStatus(true);
       } else {
-        showAlert('Error de Conexión a MongoDB', res.message || 'Verifica que MongoDB Compass o el servicio mongod estén corriendo en este equipo.');
+        showAlert('Error de Conexión a PostgreSQL', res.message || 'Verifica que el servicio PostgreSQL 18 esté corriendo en este equipo en el puerto 5432.');
       }
     } catch (e: any) {
       showAlert('Error', e.message);
@@ -106,14 +105,12 @@ export const MongoConnectorCard: React.FC = () => {
     }
   };
 
-  const handleExportAllToMongo = async () => {
+  const handleExportAllToPostgres = async () => {
     setIsSyncing(true);
     try {
       const payload: Record<string, any> = {};
 
-      // Read all collections from localStorage and memory
-
-      // 2. Read all keys from localStorage
+      // Leer colecciones desde localStorage
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && (key.startsWith('ferreteria_') || key.startsWith('doc_') || key === 'app_state')) {
@@ -130,7 +127,7 @@ export const MongoConnectorCard: React.FC = () => {
         }
       }
 
-      // 3. Ensure every single module and collection has an initial structure
+      // Asegurar estructura inicial en todas las tablas maestras
       for (const key of KNOWN_COLLECTIONS) {
         if (payload[key] === undefined || payload[key] === null) {
           if (DEFAULT_FALLBACKS[key] !== undefined) {
@@ -150,25 +147,25 @@ export const MongoConnectorCard: React.FC = () => {
         }
       }
 
-      const res = await mongoSync.exportAllToMongo(payload);
+      const res = await postgresSync.exportAllToPostgres(payload);
       if (res.success) {
         const count = Object.keys(payload).length;
-        showToast(`🚀 ¡Se exportaron ${count} secciones y colecciones a MongoDB Compass exitosamente!`, 'success');
+        showToast(`🚀 ¡Se sincronizaron ${count} secciones y tablas en PostgreSQL exitosamente!`, 'success');
         await fetchStatus(true);
       } else {
         showAlert('Fallo en sincronización', res.message);
       }
     } catch (e: any) {
-      showAlert('Error al exportar', e.message);
+      showAlert('Error al sincronizar', e.message);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handlePullAllFromMongo = async () => {
+  const handlePullAllFromPostgres = async () => {
     setIsSyncing(true);
     try {
-      const res = await mongoSync.pullAllFromMongo();
+      const res = await postgresSync.pullAllFromPostgres();
       if (res.success && res.data) {
         let restoredCount = 0;
         for (const [key, val] of Object.entries(res.data)) {
@@ -177,12 +174,12 @@ export const MongoConnectorCard: React.FC = () => {
             restoredCount++;
           } catch {}
         }
-        showToast(`📥 Se restauraron ${restoredCount} colecciones desde MongoDB. Recargando datos...`, 'success');
+        showToast(`📥 Se restauraron ${restoredCount} tablas desde PostgreSQL. Recargando datos...`, 'success');
         setTimeout(() => {
           window.location.reload();
         }, 1200);
       } else {
-        showAlert('Aviso', res.error || 'No se encontraron documentos en MongoDB para restaurar.');
+        showAlert('Aviso', res.error || 'No se encontraron registros en PostgreSQL para restaurar.');
       }
     } catch (e: any) {
       showAlert('Error al restaurar', e.message);
@@ -213,7 +210,7 @@ export const MongoConnectorCard: React.FC = () => {
           <div>
             <div className="flex items-center space-x-2">
               <h3 className="text-base font-extrabold text-slate-900">
-                Conexión a MongoDB Local (Compass)
+                Conexión a PostgreSQL 18 Local (pgAdmin / DBeaver)
               </h3>
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wide border ${
                 status.connected
@@ -225,7 +222,7 @@ export const MongoConnectorCard: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Almacena automáticamente cada venta, producto, cliente y permiso en tu base de datos MongoDB local.
+              Almacena automáticamente cada venta, producto, cliente, asiento y movimiento en tu base de datos relacional PostgreSQL 18.
             </p>
           </div>
         </div>
@@ -247,10 +244,10 @@ export const MongoConnectorCard: React.FC = () => {
           <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
           <div className="text-xs text-emerald-900 space-y-1">
             <p className="font-bold">
-              ¡MongoDB está enlazado en tiempo real con este computador!
+              ¡PostgreSQL 18 está enlazado en tiempo real con este computador!
             </p>
             <p className="text-emerald-700">
-              Base de Datos: <strong className="font-mono">{status.dbName}</strong> | Registros totales: <strong className="font-mono">{status.totalDocs ?? 0}</strong> | Colecciones activas: <strong className="font-mono">{status.collections?.length || 0}</strong> ({status.collections?.slice(0, 8).join(', ')}{status.collections && status.collections.length > 8 ? ` y ${status.collections.length - 8} más...` : ''}).
+              Base de Datos: <strong className="font-mono">{status.dbName}</strong> | Registros totales: <strong className="font-mono">{status.totalDocs ?? 0}</strong> | Tablas activas: <strong className="font-mono">{status.collections?.length || 0}</strong> ({status.collections?.slice(0, 8).join(', ')}{status.collections && status.collections.length > 8 ? ` y ${status.collections.length - 8} más...` : ''}).
             </p>
           </div>
         </div>
@@ -258,9 +255,9 @@ export const MongoConnectorCard: React.FC = () => {
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs text-amber-900 space-y-1">
-            <p className="font-bold">Servicio local de MongoDB no detectado</p>
+            <p className="font-bold">Servicio local de PostgreSQL no detectado</p>
             <p className="text-amber-700">
-              Asegúrate de que el servicio de MongoDB (o MongoDB Compass) esté instalado y activo en este equipo en el puerto 27017.
+              Asegúrate de que el servicio de PostgreSQL 18 esté instalado y activo en este equipo en el puerto 5432 con las credenciales configuradas en .env.
             </p>
           </div>
         </div>
@@ -270,14 +267,14 @@ export const MongoConnectorCard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-bold text-slate-700 mb-1.5">
-            URI de Conexión MongoDB
+            URI de Conexión PostgreSQL
           </label>
           <div className="relative flex items-center">
             <input
               type="text"
               value={inputUri}
               onChange={(e) => setInputUri(e.target.value)}
-              placeholder="mongodb://127.0.0.1:27017"
+              placeholder="postgresql://127.0.0.1:5432"
               className="w-full pl-3.5 pr-20 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
             />
             <button
@@ -290,7 +287,7 @@ export const MongoConnectorCard: React.FC = () => {
             </button>
           </div>
           <p className="text-[11px] text-slate-400 mt-1">
-            Predeterminado para Compass: <code className="text-slate-600">mongodb://127.0.0.1:27017</code>
+            Predeterminado: <code className="text-slate-600">postgresql://postgres:***@127.0.0.1:5432/ferreteria_daynet</code>
           </p>
         </div>
 
@@ -306,7 +303,7 @@ export const MongoConnectorCard: React.FC = () => {
             className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
           />
           <p className="text-[11px] text-slate-400 mt-1">
-            Base de datos que verás dentro de MongoDB Compass.
+            Base de datos relacional dentro de PostgreSQL / pgAdmin.
           </p>
         </div>
       </div>
@@ -325,39 +322,40 @@ export const MongoConnectorCard: React.FC = () => {
 
         <button
           type="button"
-          onClick={handleExportAllToMongo}
+          onClick={handleExportAllToPostgres}
           disabled={!status.connected || isSyncing}
           className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center space-x-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <UploadCloud className={`w-4 h-4 ${isSyncing ? 'animate-bounce' : ''}`} />
-          <span>Volcar Todos los Datos a MongoDB Compass</span>
+          <span>Sincronizar Tablas en PostgreSQL</span>
         </button>
 
         <button
           type="button"
-          onClick={handlePullAllFromMongo}
+          onClick={handlePullAllFromPostgres}
           disabled={!status.connected || isSyncing}
           className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center space-x-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <DownloadCloud className="w-4 h-4" />
-          <span>Restaurar Datos desde MongoDB</span>
+          <span>Restaurar Datos desde PostgreSQL</span>
         </button>
       </div>
 
-      {/* Quick Guide for MongoDB Compass */}
+      {/* Quick Guide for PostgreSQL */}
       <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
         <div className="flex items-center space-x-2 text-xs font-black text-slate-800">
           <HardDrive className="w-4 h-4 text-orange-500" />
-          <span>¿Cómo ver tus datos en MongoDB Compass en cualquier computador?</span>
+          <span>¿Cómo ver tus tablas en PostgreSQL / pgAdmin o DBeaver?</span>
         </div>
         <ol className="text-xs text-slate-600 space-y-1.5 list-decimal list-inside font-medium leading-relaxed">
-          <li>Abre el programa <strong>MongoDB Compass</strong> en tu computador.</li>
-          <li>En la barra de conexión superior, pega: <code className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono font-bold text-slate-900">mongodb://127.0.0.1:27017</code></li>
-          <li>Haz clic en el botón verde <strong>Connect</strong>.</li>
-          <li>En la lista de bases de datos a la izquierda, entra a <strong className="text-emerald-700 font-mono">ferreteria_daynet</strong>.</li>
-          <li>¡Listo! Podrás explorar directamente las colecciones: <code className="font-mono text-slate-800">inventario_productos</code>, <code className="font-mono text-slate-800">facturas_ventas</code>, <code className="font-mono text-slate-800">clientes</code> y <code className="font-mono text-slate-800">usuarios_sistema</code>.</li>
+          <li>Abre <strong>pgAdmin 4</strong> o <strong>DBeaver</strong> en tu computador.</li>
+          <li>Conéctate al servidor local: <code className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono font-bold text-slate-900">127.0.0.1:5432</code> (Usuario: <code className="font-mono text-slate-800">postgres</code>).</li>
+          <li>En la lista de bases de datos, selecciona <strong className="text-emerald-700 font-mono">ferreteria_daynet</strong>.</li>
+          <li>¡Listo! Podrás explorar directamente las tablas relacionales: <code className="font-mono text-slate-800">facturas_ventas</code>, <code className="font-mono text-slate-800">productos</code>, <code className="font-mono text-slate-800">kardex_movimientos</code>, <code className="font-mono text-slate-800">asientos_contables</code> y <code className="font-mono text-slate-800">cola_sri</code>.</li>
         </ol>
       </div>
     </div>
   );
 };
+
+export default PostgresConnectorCard;

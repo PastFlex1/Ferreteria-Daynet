@@ -1,0 +1,128 @@
+{
+  "timestamp": "2026-10-11T06:19:40.560Z",
+  "executedBy": "Terminal_CLI",
+  "database": "ferreteria_daynet",
+  "totalRecordsAnalyzed": 20,
+  "totalRecordsMigrated": 20,
+  "totalIssuesFound": 5,
+  "phases": [
+    {
+      "phase": 1,
+      "phaseName": "Esquema, autenticación y permisos",
+      "totalAnalyzed": 6,
+      "totalMigrated": 6,
+      "issuesCount": 2
+    },
+    {
+      "phase": 2,
+      "phaseName": "Ventas, secuenciales y cola SRI",
+      "totalAnalyzed": 2,
+      "totalMigrated": 2,
+      "issuesCount": 2
+    },
+    {
+      "phase": 3,
+      "phaseName": "Inventario por bodega y kardex",
+      "totalAnalyzed": 4,
+      "totalMigrated": 4,
+      "issuesCount": 0
+    },
+    {
+      "phase": 4,
+      "phaseName": "Contabilidad con partida doble y cierre",
+      "totalAnalyzed": 3,
+      "totalMigrated": 3,
+      "issuesCount": 0
+    },
+    {
+      "phase": 5,
+      "phaseName": "Compras, CxP, retenciones y ATS",
+      "totalAnalyzed": 2,
+      "totalMigrated": 2,
+      "issuesCount": 1
+    },
+    {
+      "phase": 6,
+      "phaseName": "Caja por cajero y punto",
+      "totalAnalyzed": 1,
+      "totalMigrated": 1,
+      "issuesCount": 0
+    },
+    {
+      "phase": 7,
+      "phaseName": "Nómina, activos y reportes",
+      "totalAnalyzed": 2,
+      "totalMigrated": 2,
+      "issuesCount": 0
+    }
+  ],
+  "issues": [
+    {
+      "phase": 1,
+      "phaseName": "Esquema, Autenticación y Permisos",
+      "severity": "ALTA",
+      "entity": "usuarios_sistema",
+      "recordId": "USR-01",
+      "field": "username",
+      "issue": "El usuario 'Administrador Principal' tiene cédula/RUC inválido: Dígito verificador Módulo 11 (Sociedad Privada) erróneo",
+      "rawSample": {
+        "username": "1799999999001",
+        "name": "Administrador Principal"
+      },
+      "recommendation": "Solicitar al cliente la cédula correcta del colaborador para inicio de sesión."
+    },
+    {
+      "phase": 1,
+      "phaseName": "Esquema, Autenticación y Permisos",
+      "severity": "MEDIA",
+      "entity": "usuarios_sistema",
+      "recordId": "USR-01",
+      "field": "password",
+      "issue": "El usuario 'Administrador Principal' tenía contraseña en texto plano. Se actualizó automáticamente con hash bcrypt.",
+      "recommendation": "Notificar al usuario el uso de contraseña cifrada segura."
+    },
+    {
+      "phase": 2,
+      "phaseName": "Ventas, Secuenciales y Cola SRI",
+      "severity": "CRITICA",
+      "entity": "facturas_ventas",
+      "recordId": "inv-1791658856857",
+      "field": "sriStatus",
+      "issue": "FACTURA SIN AUTORIZACIÓN SRI: '001-001-000000002' (Estado: 'SIN_ESTADO'). No cuenta con número de autorización legal.",
+      "rawSample": {
+        "invoiceNumber": "001-001-000000002",
+        "total": 9.77
+      },
+      "recommendation": "Reenviar o reconsultar con la misma clave de acceso en la bandeja de cola SRI."
+    },
+    {
+      "phase": 2,
+      "phaseName": "Ventas, Secuenciales y Cola SRI",
+      "severity": "CRITICA",
+      "entity": "facturas_ventas",
+      "recordId": "fac-001",
+      "field": "sriStatus",
+      "issue": "FACTURA SIN AUTORIZACIÓN SRI: '001-001-000000001' (Estado: 'EMITIDA'). No cuenta con número de autorización legal.",
+      "rawSample": {
+        "invoiceNumber": "001-001-000000001",
+        "date": "2026-09-19",
+        "total": 25.5
+      },
+      "recommendation": "Reenviar o reconsultar con la misma clave de acceso en la bandeja de cola SRI."
+    },
+    {
+      "phase": 5,
+      "phaseName": "Compras, CxP, Retenciones y ATS",
+      "severity": "ALTA",
+      "entity": "proveedores",
+      "recordId": "prov-02",
+      "field": "taxId",
+      "issue": "Proveedor 'Adelca Acería del Ecuador C.A.' con RUC/Cédula fiscal inválido: Dígito verificador Módulo 11 (Sociedad Privada) erróneo",
+      "rawSample": {
+        "name": "Adelca Acería del Ecuador C.A.",
+        "taxId": "0990004523001"
+      },
+      "recommendation": "Corregir el RUC del proveedor para validez del Anexo Transaccional Simplificado (ATS)."
+    }
+  ]
+}

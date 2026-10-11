@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 import { 
   PackageCheck, 
@@ -87,8 +87,8 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [orderToEdit, setOrderToEdit] = useState<Order | null>(null);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<Order | null>(null);
 
-  // Pedidos state initialized from firestore
-  const [orders, setOrders] = useFirestoreSync<Order[]>('ferreteria_orders', []);
+  // Pedidos state initialized from PostgreSQL
+  const [orders, setOrders] = usePostgresSync<Order[]>('ferreteria_orders', []);
 
   const handleSaveOrder = (savedOrder: Order) => {
     setOrders((prev) => {
@@ -144,7 +144,7 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     }
   }, [invoices, orders]);
 
-  const [guias, setGuias] = useFirestoreSync<GuiaRemisionData[]>('ferreteria_guias', []);
+  const [guias, setGuias] = usePostgresSync<GuiaRemisionData[]>('ferreteria_guias', []);
   
   const [isCreateGuiaOpen, setIsCreateGuiaOpen] = useState(false);
 
@@ -153,12 +153,12 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     showAlert('Guía de Remisión generada exitosamente.', 'Éxito', 'success');
   };
 
-  const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
-  const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
-  const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
-  const [secRetention, setSecRetention] = useFirestoreSync<string>('ferreteria_settings_sec_retention', '000000001');
+  const [establishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
+  const [emissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
+  const [secCreditNote, setSecCreditNote] = usePostgresSync<string>('ferreteria_settings_sec_credit_note', '000000001');
+  const [secRetention, setSecRetention] = usePostgresSync<string>('ferreteria_settings_sec_retention', '000000001');
 
-  const [creditNotes, setCreditNotes] = useFirestoreSync<CreditNoteData[]>('ferreteria_credit_notes', []);
+  const [creditNotes, setCreditNotes] = usePostgresSync<CreditNoteData[]>('ferreteria_credit_notes', []);
   const [selectedCreditNoteForView, setSelectedCreditNoteForView] = useState<CreditNoteData | null>(null);
   const [isCreditNoteViewerOpen, setIsCreditNoteViewerOpen] = useState(false);
 
@@ -169,20 +169,20 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     }
   }, [preselectedInvoice, subTab]);
 
-  const [retenciones, setRetenciones] = useFirestoreSync<any[]>('ferreteria_retenciones', []);
-  const [recetas, setRecetas] = useFirestoreSync<any[]>('ferreteria_recetas_medicas', []);
+  const [retenciones, setRetenciones] = usePostgresSync<any[]>('ferreteria_retenciones', []);
+  const [recetas, setRecetas] = usePostgresSync<any[]>('ferreteria_recetas_medicas', []);
   const [isCreditNoteModalOpen, setIsCreditNoteModalOpen] = useState(false);
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState(false);
 
-  const [sellers, setSellers] = useFirestoreSync<any[]>('ferreteria_sellers', defaultSellers);
+  const [sellers, setSellers] = usePostgresSync<any[]>('ferreteria_sellers', defaultSellers);
 
-  const [sriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [selectedInvoiceForSri, setSelectedInvoiceForSri] = useState<Invoice | null>(null);
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
 
-  const [signatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
+  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
+  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
 
   const handleSaveCreditNote = async (data: any) => {
     // Evitar generación de duplicados si ya existe Nota de Crédito para esta factura

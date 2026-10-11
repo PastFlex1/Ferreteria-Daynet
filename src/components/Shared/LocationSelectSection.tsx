@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Globe, Map, MapPin, Plus, X, Check, Sparkles } from 'lucide-react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultCountries, defaultProvinces, defaultCities } from '../../data/initialData';
 import { Select } from './Select';
 
@@ -25,9 +25,9 @@ export const LocationSelectSection: React.FC<LocationSelectSectionProps> = ({
   className = '',
   required = false,
 }) => {
-  const [countries, setCountries] = useFirestoreSync<string[]>('ferreteria_locations_countries', defaultCountries);
-  const [provinces, setProvinces] = useFirestoreSync<string[]>('ferreteria_locations_provinces', defaultProvinces);
-  const [cities, setCities] = useFirestoreSync<string[]>('ferreteria_locations_cities', defaultCities);
+  const [countries, setCountries] = usePostgresSync<string[]>('ferreteria_locations_countries', defaultCountries);
+  const [provinces, setProvinces] = usePostgresSync<string[]>('ferreteria_locations_provinces', defaultProvinces);
+  const [cities, setCities] = usePostgresSync<string[]>('ferreteria_locations_cities', defaultCities);
 
   const countryList = Array.isArray(countries) && countries.length > 0 ? countries : defaultCountries;
   const provinceList = Array.isArray(provinces) && provinces.length > 0 ? provinces : defaultProvinces;

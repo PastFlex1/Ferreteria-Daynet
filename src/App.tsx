@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useFirestoreSync } from './hooks/useFirestoreSync';
+import { usePostgresSync } from './hooks/usePostgresSync';
+import { getApiUrl } from './lib/apiConfig';
 import { Header } from './components/Header';
 import { LoginView } from './components/Auth/LoginView';
 import { BillingTerminal } from './components/POS/BillingTerminal';
@@ -169,14 +170,33 @@ export default function App() {
   };
   
   // App Data State (stored in React state with localStorage persistence backup)
-  const [settings, setSettings] = useFirestoreSync<StoreSettings>('ferreteria_settings', initialStoreSettings);
-  const [establishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
-  const [emissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
-  const [secInvoice, setSecInvoice] = useFirestoreSync<string>('ferreteria_settings_sec_invoice', '000000001');
-  const [secBoleta, setSecBoleta] = useFirestoreSync<string>('ferreteria_settings_sec_boleta', '000001');
-  const [secQuote, setSecQuote] = useFirestoreSync<string>('ferreteria_settings_sec_quote', '000001');
-  const [usersList, setUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
-  const [rolesList, setRolesList] = useFirestoreSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
+  const [settings, setSettings] = usePostgresSync<StoreSettings>('ferreteria_settings', initialStoreSettings);
+  const [establishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
+  const [globalEmissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
+
+  // Punto de Emisión local por terminal física (TDR: Soporte para 4 puntos de emisión simultáneos)
+  const [terminalEmissionPoint, setTerminalEmissionPoint] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ferreteria_terminal_emission_point') || globalEmissionPoint || '001';
+    } catch {
+      return '001';
+    }
+  });
+
+  const handleSetTerminalEmissionPoint = (pto: string) => {
+    const clean = pto.padStart(3, '0').slice(-3);
+    setTerminalEmissionPoint(clean);
+    try {
+      localStorage.setItem('ferreteria_terminal_emission_point', clean);
+    } catch {}
+  };
+
+  const emissionPoint = terminalEmissionPoint;
+  const [secInvoice, setSecInvoice] = usePostgresSync<string>('ferreteria_settings_sec_invoice', '000000001');
+  const [secBoleta, setSecBoleta] = usePostgresSync<string>('ferreteria_settings_sec_boleta', '000001');
+  const [secQuote, setSecQuote] = usePostgresSync<string>('ferreteria_settings_sec_quote', '000001');
+  const [usersList, setUsersList] = usePostgresSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [rolesList, setRolesList] = usePostgresSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
 
   const normalizeUser = (u: any) => {
     if (!u) return null;
@@ -204,6 +224,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     sessionStorage.removeItem('ferreteria_current_user');
+    localStorage.removeItem('ferreteria_auth_token');
   };
 
   const handleConfirmLogout = () => {
@@ -279,12 +300,12 @@ export default function App() {
     link.href = wrenchSvgFavicon;
   }, [settings?.storeName]);
 
-  const [units, setUnits] = useFirestoreSync<any[]>('ferreteria_units', []);
-  const [categories, setCategories] = useFirestoreSync<ProductCategory[]>('ferreteria_categories', []);
-  const [promotions, setPromotions] = useFirestoreSync<Promotion[]>('ferreteria_promotions', []);
-  const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
-  const [products, setProducts] = useFirestoreSync<Product[]>('ferreteria_products', initialProducts);
-  const [customers, setCustomers] = useFirestoreSync<Customer[]>('ferreteria_customers', initialCustomers);
+  const [units, setUnits] = usePostgresSync<any[]>('ferreteria_units', []);
+  const [categories, setCategories] = usePostgresSync<ProductCategory[]>('ferreteria_categories', []);
+  const [promotions, setPromotions] = usePostgresSync<Promotion[]>('ferreteria_promotions', []);
+  const [paymentMethods, setPaymentMethods] = usePostgresSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
+  const [products, setProducts] = usePostgresSync<Product[]>('ferreteria_products', initialProducts);
+  const [customers, setCustomers] = usePostgresSync<Customer[]>('ferreteria_customers', initialCustomers);
   const dbCustomers = customers.filter(c => c.id !== 'cust-general');
   const allCustomers = [CONSUMIDOR_FINAL, ...dbCustomers];
 
@@ -297,10 +318,10 @@ export default function App() {
       }
     }
   }, [customers, setCustomers]);
-  const [invoices, setInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', initialInvoices);
-  const [orders, setOrders] = useFirestoreSync<Order[]>('ferreteria_orders', []);
+  const [invoices, setInvoices] = usePostgresSync<Invoice[]>('ferreteria_invoices', initialInvoices);
+  const [orders, setOrders] = usePostgresSync<Order[]>('ferreteria_orders', []);
   const [posInvoicingOrder, setPosInvoicingOrder] = useState<Order | null>(null);
-  const [cashSession, setCashSession] = useFirestoreSync<CashRegisterSession>('ferreteria_cash_session', {
+  const [cashSession, setCashSession] = usePostgresSync<CashRegisterSession>('ferreteria_cash_session', {
     id: 'cash-0',
     openedAt: new Date().toISOString(),
     initialCash: 0,
@@ -312,12 +333,42 @@ export default function App() {
     totalSalesCredit: 0,
     totalInvoicesCount: 0,
   });
-  const [cashSessionsHistory, setCashSessionsHistory] = useFirestoreSync<any[]>('ferreteria_cash_sessions_history', []);
+  const [cashSessionsHistory, setCashSessionsHistory] = usePostgresSync<any[]>('ferreteria_cash_sessions_history', []);
 
   // Active Invoice Viewer Modal State
   const [selectedInvoiceForView, setSelectedInvoiceForView] = useState<Invoice | null>(null);
   const [isViewerModalOpen, setIsViewerModalOpen] = useState(false);
   const [preselectedInvoiceForCreditNote, setPreselectedInvoiceForCreditNote] = useState<Invoice | null>(null);
+
+  // CONTROL DE CONCURRENCIA: Escuchar eventos SSE de nuevas facturas y stock en tiempo real desde otras terminales
+  useEffect(() => {
+    const handleRemoteInvoice = (e: any) => {
+      const inv = e.detail;
+      if (inv && (inv.id || inv._id)) {
+        const invId = String(inv.id || inv._id);
+        setInvoices((prev) => {
+          if (prev.some((item) => String(item.id || (item as any)._id) === invId)) return prev;
+          return [inv, ...prev];
+        });
+      }
+    };
+
+    const handleRemoteStock = (e: any) => {
+      const { productId, stock } = e.detail || {};
+      if (productId && typeof stock === 'number') {
+        setProducts((prev) =>
+          prev.map((p) => (String(p.id || (p as any)._id) === String(productId) ? { ...p, stock } : p))
+        );
+      }
+    };
+
+    window.addEventListener('ferreteria_remote_invoice', handleRemoteInvoice);
+    window.addEventListener('ferreteria_remote_stock', handleRemoteStock);
+    return () => {
+      window.removeEventListener('ferreteria_remote_invoice', handleRemoteInvoice);
+      window.removeEventListener('ferreteria_remote_stock', handleRemoteStock);
+    };
+  }, []);
 
   const handleOpenCreditNoteForInvoice = (inv: Invoice) => {
     setPreselectedInvoiceForCreditNote(inv);
@@ -349,6 +400,24 @@ export default function App() {
     setInvoices((prev) => [newInvoice, ...prev]);
     setProducts(updatedProducts);
     setSettings(updatedSettings);
+
+    // Persistir atómicamente en el servidor Express con control de concurrencia
+    try {
+      const token = localStorage.getItem('ferreteria_auth_token');
+      fetch(getApiUrl('/api/invoices'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          ...newInvoice,
+          establishment: (newInvoice.fullNumber || '').split('-')[0] || establishment || '001',
+          emissionPoint: (newInvoice.fullNumber || '').split('-')[1] || terminalEmissionPoint || '001',
+          invoiceNumber: newInvoice.fullNumber || (newInvoice as any).invoiceNumber || `FAC-${newInvoice.id}`
+        })
+      }).catch((e) => console.warn('Advertencia guardando factura en servidor:', e));
+    } catch (_) {}
 
     // Si la venta corresponde a un pedido, cambiar automáticamente su estado de PENDIENTE a FACTURADO
     const targetOrderId = newInvoice.orderId || posInvoicingOrder?.id;
@@ -420,6 +489,17 @@ export default function App() {
     setInvoices((prev) =>
       prev.map((inv) => (inv.id === updatedInvoice.id ? updatedInvoice : inv))
     );
+    try {
+      const token = localStorage.getItem('ferreteria_auth_token');
+      fetch('/api/invoices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(updatedInvoice)
+      }).catch(() => {});
+    } catch (_) {}
   };
 
   const handleDeleteInvoice = (invoiceId: string) => {
@@ -755,7 +835,7 @@ export default function App() {
         } catch {}
       }
 
-      await fetch('/api/mongo/sync-all', {
+      await fetch('/api/postgres/sync-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: resetMap })
@@ -830,7 +910,8 @@ export default function App() {
             onCreateCustomer={handleCreateCustomer}
             onOpenInvoiceViewer={handleOpenInvoiceViewer}
             establishment={establishment}
-            emissionPoint={emissionPoint}
+            emissionPoint={terminalEmissionPoint}
+            onSelectEmissionPoint={handleSetTerminalEmissionPoint}
             secInvoice={secInvoice}
             setSecInvoice={setSecInvoice}
             secBoleta={secBoleta}

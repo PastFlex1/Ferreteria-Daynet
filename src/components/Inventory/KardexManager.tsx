@@ -26,7 +26,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import { Product, StoreSettings, Invoice, ProductCategory } from '../../types';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { formatCurrency, formatCostCurrency, getEcuadorianDateTime } from '../../utils/formatters';
 import { exportKardexToModernExcel } from '../../utils/excelExport';
 import { Select } from '../Shared/Select';
@@ -166,9 +166,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   const { showAlert, showToast } = useModal();
 
   // ── Sync with Real Database Collections ────────────────────────────────────
-  const [syncInvoices] = useFirestoreSync<Invoice[]>('ferreteria_invoices', []);
+  const [syncInvoices] = usePostgresSync<Invoice[]>('ferreteria_invoices', []);
 
-  // Combinar reactivamente las facturas de props y las de base de datos MongoDB sin perder ninguna
+  // Combinar reactivamente las facturas de props y las de base de datos PostgreSQL sin perder ninguna
   const invoices = useMemo(() => {
     const map = new Map<string, Invoice>();
     (syncInvoices || []).forEach((inv) => {
@@ -184,13 +184,13 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     return Array.from(map.values());
   }, [propsInvoices, syncInvoices]);
 
-  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
-  const [creditNotes] = useFirestoreSync<any[]>('ferreteria_credit_notes', []);
-  const [stockAdjustments, setStockAdjustments] = useFirestoreSync<StockAdjustmentRecord[]>(
+  const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
+  const [creditNotes] = usePostgresSync<any[]>('ferreteria_credit_notes', []);
+  const [stockAdjustments, setStockAdjustments] = usePostgresSync<StockAdjustmentRecord[]>(
     'ferreteria_stock_adjustments', 
     []
   );
-  const [transfers] = useFirestoreSync<any[]>('ferreteria_transfers', []);
+  const [transfers] = usePostgresSync<any[]>('ferreteria_transfers', []);
 
   // ── Selection & Filter State ───────────────────────────────────────────────
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -327,7 +327,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         docNum = (inv as any).invoiceNumber || (inv as any).numeroFactura || `#${inv.number || inv.id || (inv as any)._id || 'S/N'}`;
       }
 
-      // Extracción robusta de ítems desde múltiples estructuras (API, MongoDB, XML parseado)
+      // Extracción robusta de ítems desde múltiples estructuras (API, PostgreSQL, XML parseado)
       let rawItems: any[] = [];
       if (Array.isArray(inv.items)) {
         rawItems = inv.items;

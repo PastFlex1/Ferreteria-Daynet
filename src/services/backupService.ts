@@ -1,4 +1,5 @@
 import { StoreSettings } from '../types';
+import { getApiUrl, getAuthHeaders } from '../lib/apiConfig';
 
 export interface BackupMetadata {
   system: string;
@@ -93,21 +94,40 @@ export const KNOWN_COLLECTIONS = [
   'ferreteria_settings_auto_session_timeout',
   'ferreteria_settings_sri_mode',
   'ferreteria_settings_sri_api_url',
-  'ferreteria_settings_p12_base64',
-  'ferreteria_settings_p12_filename',
-  'ferreteria_settings_p12_password',
-  'ferreteria_settings_p12_upload_date',
 ];
 
 /**
+ * Borra certificados .p12 y claves de localStorage conforme a los Términos de Referencia y auditoría de seguridad
+ */
+export function purgeClientCertificateStorage(): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('ferreteria_settings_p12_base64');
+      localStorage.removeItem('ferreteria_settings_p12_password');
+      localStorage.removeItem('ferreteria_settings_p12_filename');
+      localStorage.removeItem('ferreteria_settings_p12_filesize');
+      localStorage.removeItem('ferreteria_settings_p12_upload_date');
+      console.log('[Seguridad] Certificados .p12 y contraseñas purgados de localStorage del cliente.');
+    }
+  } catch {}
+}
+
+/**
  * Exports the entire database into a downloadable JSON file.
+ * SEGURIDAD: Certificados .p12 y contraseñas de usuarios son estrictamente excluidos.
  */
 export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ fileName: string; totalCollections: number }> {
+  // Purgar certificados de almacenamiento local
+  purgeClientCertificateStorage();
+
   const exportData: Record<string, any> = {};
 
-  // 1. Attempt to fetch all docs from MongoDB Local (Compass)
+  // 1. Attempt to fetch all docs from PostgreSQL Local
   try {
-    const res = await fetch('/api/mongo/pull-all', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+    const res = await fetch(getApiUrl('/api/postgres/pull-all'), {
+      headers: { 'Accept': 'application/json', ...getAuthHeaders() },
+      cache: 'no-store'
+    });
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.data) {
@@ -115,7 +135,7 @@ export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ 
       }
     }
   } catch (error) {
-    console.warn('Could not read from MongoDB pull-all, falling back to localStorage:', error);
+    console.warn('Could not read from PostgreSQL pull-all, falling back to localStorage:', error);
   }
 
   // 2. Supplement / fallback from localStorage
@@ -134,10 +154,14 @@ export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ 
     }
   }
 
-  // Also include any other local keys starting with ferreteria_
+  // Also include any other local keys starting with ferreteria_ (excluyendo secretos)
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith('ferreteria_') && !exportData[key]) {
+      // Bloquear claves de certificados y credenciales
+      if (key.includes('p12') || key.includes('password') || key.includes('secret')) {
+        continue;
+      }
       try {
         const item = localStorage.getItem(key);
         if (item) {
@@ -149,6 +173,22 @@ export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ 
         }
       } catch (e) {}
     }
+  }
+
+  // SANITIZACIÓN ESTRICTA DE SEGURIDAD (Auditoría Punto 4):
+  // 1. Borrar cualquier clave que mencione p12 o password
+  for (const k of Object.keys(exportData)) {
+    if (k.toLowerCase().includes('p12') || k.toLowerCase().includes('password')) {
+      delete exportData[k];
+    }
+  }
+
+  // 2. Si se exportan usuarios, eliminar el campo password de cada uno
+  if (Array.isArray(exportData.ferreteria_settings_users_list)) {
+    exportData.ferreteria_settings_users_list = exportData.ferreteria_settings_users_list.map((u: any) => {
+      const { password, ...safeUser } = u;
+      return safeUser;
+    });
   }
 
   const productsCount = Array.isArray(exportData.ferreteria_products) ? exportData.ferreteria_products.length : 0;
@@ -254,7 +294,7 @@ export async function inspectBackupFile(file: File): Promise<BackupPayload> {
 }
 
 /**
- * Restores all collections into MongoDB Local (Compass) and localStorage.
+ * Restores all collections into PostgreSQL 18 Local and localStorage.
  */
 export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ restoredCount: number }> {
   const data = backup.data;
@@ -275,18 +315,18 @@ export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ re
     }
   }
 
-  // 2. Synchronize entire backup payload to MongoDB Compass
+  // 2. Synchronize entire backup payload to PostgreSQL
   try {
-    const res = await fetch('/api/mongo/sync-all', {
+    const res = await fetch(getApiUrl('/api/postgres/sync-all'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ data })
     });
     if (!res.ok) {
-      console.warn('MongoDB sync-all returned status:', res.status);
+      console.warn('PostgreSQL sync-all returned status:', res.status);
     }
   } catch (err) {
-    console.warn('Error saving backup to MongoDB:', err);
+    console.warn('Error saving backup to PostgreSQL:', err);
   }
 
   return {

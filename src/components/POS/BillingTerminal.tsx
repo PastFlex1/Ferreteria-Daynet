@@ -28,7 +28,8 @@ import {
   Lock,
   Unlock,
   PackageCheck,
-  Layers
+  Layers,
+  Building2
 } from 'lucide-react';
 import { 
   CartItem, 
@@ -46,7 +47,7 @@ import {
 import { formatCurrency, generateDocumentNumber, getEcuadorianDateTime } from '../../utils/formatters';
 import { useModal } from '../../context/ModalContext';
 import { usePermissions } from '../../context/PermissionsContext';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
 import { Order } from '../Sales/CreateOrderModal';
 import { calculateSriTotals } from '../../utils/sriCalculations';
@@ -67,6 +68,7 @@ interface BillingTerminalProps {
   onOpenInvoiceViewer: (invoice: Invoice) => void;
   establishment: string;
   emissionPoint: string;
+  onSelectEmissionPoint?: (val: string) => void;
   secInvoice: string;
   setSecInvoice: (val: string) => void;
   secBoleta?: string;
@@ -185,6 +187,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   onOpenInvoiceViewer,
   establishment,
   emissionPoint,
+  onSelectEmissionPoint,
   secInvoice,
   setSecInvoice,
   secBoleta = '000001',
@@ -202,9 +205,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 }) => {
   const { showToast, showAlert } = useModal();
   const { can } = usePermissions();
-  const [employees] = useFirestoreSync<any[]>('ferreteria_hr_employees', defaultEmployees);
-  const [usersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
-  const [syncedPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
+  const [employees] = usePostgresSync<any[]>('ferreteria_hr_employees', defaultEmployees);
+  const [usersList] = usePostgresSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [syncedPaymentMethods] = usePostgresSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
 
   // Dynamic payment methods list connected in real-time to Settings
   const activePaymentMethodsList = useMemo(() => {
@@ -319,6 +322,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const [customTaxRate, setCustomTaxRate] = useState<number>(settings.defaultTaxRate || 15);
 
   const [isDocTypeDropdownOpen, setIsDocTypeDropdownOpen] = useState(false);
+  const [isEmissionPointDropdownOpen, setIsEmissionPointDropdownOpen] = useState(false);
   const [isSellerDropdownOpen, setIsSellerDropdownOpen] = useState(false);
   const [openTaxDropdownId, setOpenTaxDropdownId] = useState<string | null>(null);
   const [taxDropdownPos, setTaxDropdownPos] = useState<{ top: number; left: number; openUpwards: boolean } | null>(null);
@@ -326,6 +330,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const customerSearchRef = useRef<HTMLDivElement>(null);
   const productSearchRef = useRef<HTMLDivElement>(null);
   const docTypeDropdownRef = useRef<HTMLDivElement>(null);
+  const emissionPointDropdownRef = useRef<HTMLDivElement>(null);
   const sellerDropdownRef = useRef<HTMLDivElement>(null);
 
   const handleToggleTaxDropdown = (productId: string, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -418,6 +423,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       }
       if (docTypeDropdownRef.current && !docTypeDropdownRef.current.contains(e.target as Node)) {
         setIsDocTypeDropdownOpen(false);
+      }
+      if (emissionPointDropdownRef.current && !emissionPointDropdownRef.current.contains(e.target as Node)) {
+        setIsEmissionPointDropdownOpen(false);
       }
       if (sellerDropdownRef.current && !sellerDropdownRef.current.contains(e.target as Node)) {
         setIsSellerDropdownOpen(false);
@@ -1132,6 +1140,70 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                       </div>
                       {documentType === 'COTIZACION' && <Check className="w-4 h-4 text-white" />}
                     </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Punto de Emisión (4 Puntos según Términos de Referencia) con diseño institucional */}
+              <div className="relative" ref={emissionPointDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsEmissionPointDropdownOpen(!isEmissionPointDropdownOpen)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-amber-200/90 bg-amber-50/80 hover:bg-amber-100/70 transition cursor-pointer shadow-2xs font-bold text-xs text-amber-950"
+                  title="Punto de Emisión asignado a esta terminal (TDR: 4 Puntos de Emisión)"
+                >
+                  <div className="p-1 rounded-lg bg-amber-500/20 text-amber-700">
+                    <Building2 className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 leading-none">Punto Emisión</span>
+                    <span className="font-black text-xs text-amber-950 leading-tight">
+                      {emissionPoint === '002' ? 'Caja 2 (002)' : emissionPoint === '003' ? 'Caja 3 (003)' : emissionPoint === '004' ? 'Caja 4 (004)' : 'Caja 1 (001)'}
+                    </span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 text-amber-600 transition-transform duration-200 ${isEmissionPointDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isEmissionPointDropdownOpen && (
+                  <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200/90 rounded-2xl shadow-2xl z-50 p-1.5 space-y-1 animate-fadeIn ring-1 ring-slate-900/10">
+                    <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Puntos de Emisión SRI (TDR)
+                    </div>
+
+                    {[
+                      { code: '001', name: 'Caja 1', label: 'Caja 1 (001)', desc: 'Caja Principal / Mostrador' },
+                      { code: '002', name: 'Caja 2', label: 'Caja 2 (002)', desc: 'Atención al Cliente' },
+                      { code: '003', name: 'Caja 3', label: 'Caja 3 (003)', desc: 'Patio / Bodega' },
+                      { code: '004', name: 'Caja 4', label: 'Caja 4 (004)', desc: 'Express / Mayorista' }
+                    ].map((pt) => {
+                      const isSelected = emissionPoint === pt.code;
+                      return (
+                        <button
+                          key={pt.code}
+                          type="button"
+                          onClick={() => {
+                            if (onSelectEmissionPoint) onSelectEmissionPoint(pt.code);
+                            setIsEmissionPointDropdownOpen(false);
+                          }}
+                          className={`w-full text-left p-2 rounded-xl flex items-center justify-between transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black shadow-md shadow-orange-500/20'
+                              : 'hover:bg-amber-50/80 text-slate-800 font-bold hover:text-amber-950'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-white/20 text-white' : 'bg-amber-100/70 text-amber-700'}`}>
+                              <Building2 className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <div className="text-xs">{pt.name} <span className="font-mono text-[10px] opacity-80">({pt.code})</span></div>
+                              <div className={`text-[10px] ${isSelected ? 'text-white/80' : 'text-slate-400'} font-normal`}>{pt.desc}</div>
+                            </div>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2694,6 +2766,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         }}
         invoice={createdInvoiceForSri}
         settings={settings}
+        establishment={establishment}
+        emissionPoint={emissionPoint}
         onInvoiceUpdated={(updated) => {
           setCreatedInvoiceForSri(updated);
           if (onUpdateInvoice) {

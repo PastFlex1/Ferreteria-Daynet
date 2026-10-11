@@ -245,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'CFG_FORMATO_IMPRESION', label: 'Formato Impresión',   icon: <Printer className="w-3.5 h-3.5" /> },
     { id: 'CFG_ADMINISTRACION',    label: 'Administración',      icon: <Sliders className="w-3.5 h-3.5" /> },
     { id: 'CFG_DISENO',            label: 'Diseño y Tema',       icon: <Sparkles className="w-3.5 h-3.5 text-purple-400" /> },
-    { id: 'CFG_BACKUP',            label: 'Base de Datos (MongoDB)', icon: <Database className="w-3.5 h-3.5 text-emerald-400" /> },
+    { id: 'CFG_BACKUP',            label: 'Base de Datos (PostgreSQL)', icon: <Database className="w-3.5 h-3.5 text-emerald-400" /> },
   ];
 
   // ─── Module map ──────────────────────────────────────────────────────────────

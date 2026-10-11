@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { useModal } from '../../context/ModalContext';
 import { 
   ShoppingBag, 
@@ -184,13 +184,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 }) => {
   const { showAlert, showConfirm, showToast } = useModal();
   // Sync with the same collection used in SuppliersManager
-  const [suppliers, setSuppliers] = useFirestoreSync<any[]>('ferreteria_suppliers_details', []);
+  const [suppliers, setSuppliers] = usePostgresSync<any[]>('ferreteria_suppliers_details', []);
 
   // Registered Purchase Invoices History
-  const [purchasesHistory, setPurchasesHistory] = useFirestoreSync<PurchaseInvoice[]>('ferreteria_purchases', []);
+  const [purchasesHistory, setPurchasesHistory] = usePostgresSync<PurchaseInvoice[]>('ferreteria_purchases', []);
 
   // Cuentas por Pagar (Payables Sync)
-  const [payables, setPayables] = useFirestoreSync<any[]>('ferreteria_payables', []);
+  const [payables, setPayables] = usePostgresSync<any[]>('ferreteria_payables', []);
 
   // Auto-sync credit purchases with ferreteria_payables
   useEffect(() => {
@@ -235,13 +235,13 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
   }, [purchasesHistory, payables]);
 
   // Sync with the same batches used in Inventory
-  const [batches, setBatches] = useFirestoreSync<any[]>('ferreteria_product_batches', []);
+  const [batches, setBatches] = usePostgresSync<any[]>('ferreteria_product_batches', []);
 
   // Purchase Orders
-  const [purchaseOrders, setPurchaseOrders] = useFirestoreSync<PurchaseOrder[]>('ferreteria_purchase_orders', []);
+  const [purchaseOrders, setPurchaseOrders] = usePostgresSync<PurchaseOrder[]>('ferreteria_purchase_orders', []);
 
   // Pre-Orders / Requisitions State
-  const [preOrders, setPreOrders] = useFirestoreSync<PreOrder[]>('ferreteria_pre_orders', []);
+  const [preOrders, setPreOrders] = usePostgresSync<PreOrder[]>('ferreteria_pre_orders', []);
   const [preOrdersActiveView, setPreOrdersActiveView] = useState<'SUGERIDOS' | 'HISTORIAL'>('SUGERIDOS');
   const [isPreOrderModalOpen, setIsPreOrderModalOpen] = useState(false);
   const [selectedPreOrderView, setSelectedPreOrderView] = useState<PreOrder | null>(null);
@@ -476,7 +476,7 @@ export const PurchasesManager: React.FC<PurchasesManagerProps> = ({
 
 
   // Item selector for purchase form
-  const [taxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const [taxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const activeTaxRates = taxRates.filter(t => t.active !== false);
   const [currentProductId, setCurrentProductId] = useState<string>('');
   const [currentQty, setCurrentQty] = useState<string>('');

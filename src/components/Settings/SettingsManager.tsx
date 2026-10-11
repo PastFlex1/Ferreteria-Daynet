@@ -1,7 +1,7 @@
 import { Select } from '../Shared/Select';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useModal } from '../../context/ModalContext';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultUsersList, defaultPaymentMethods, defaultTaxRates, initialStoreSettings } from '../../data/initialData';
 import { 
   SettingsSubTab, 
@@ -64,7 +64,7 @@ import { RoleModal } from './RoleModal';
 import { useTheme } from '../../context/ThemeContext';
 
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
-import { MongoConnectorCard } from './MongoConnectorCard';
+import { PostgresConnectorCard } from './PostgresConnectorCard';
 import { ROLE_PRESETS, ALL_PERMISSIONS, SystemRole, DEFAULT_SYSTEM_ROLES } from '../../types/permissions';
 
 interface SettingsManagerProps {
@@ -103,16 +103,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   }, [settings]);
 
   // Digital Signature (.p12 / Base64) State
-  const [signatureBase64, setSignatureBase64] = useFirestoreSync<string>('ferreteria_settings_p12_base64', '');
-  const [signatureFileName, setSignatureFileName] = useFirestoreSync<string>('ferreteria_settings_p12_filename', '');
-  const [signatureFileSize, setSignatureFileSize] = useFirestoreSync<string>('ferreteria_settings_p12_filesize', '');
-  const [signaturePassword, setSignaturePassword] = useFirestoreSync<string>('ferreteria_settings_p12_password', '');
-  const [signatureUploadDate, setSignatureUploadDate] = useFirestoreSync<string>('ferreteria_settings_p12_upload_date', '');
+  const [signatureBase64, setSignatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
+  const [signatureFileName, setSignatureFileName] = usePostgresSync<string>('ferreteria_settings_p12_filename', '');
+  const [signatureFileSize, setSignatureFileSize] = usePostgresSync<string>('ferreteria_settings_p12_filesize', '');
+  const [signaturePassword, setSignaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
+  const [signatureUploadDate, setSignatureUploadDate] = usePostgresSync<string>('ferreteria_settings_p12_upload_date', '');
   const [showSignaturePassword, setShowSignaturePassword] = useState(false);
   const [copiedBase64, setCopiedBase64] = useState(false);
 
   // Java Backend API URL State
-  const [sriApiUrl, setSriApiUrl] = useFirestoreSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8080/api/sri');
+  const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8080/api/sri');
   const [isTestingBackend, setIsTestingBackend] = useState(false);
   const [backendStatus, setBackendStatus] = useState<{ tested: boolean; ok: boolean; message: string }>({
     tested: false,
@@ -121,17 +121,17 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   });
 
   // Additional Configuration State Mock Data
-  const [sriMode, setSriMode] = useFirestoreSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
-  const [establishment, setEstablishment] = useFirestoreSync<string>('ferreteria_settings_establishment', '001');
-  const [emissionPoint, setEmissionPoint] = useFirestoreSync<string>('ferreteria_settings_emission_point', '001');
-  const [secInvoice, setSecInvoice] = useFirestoreSync<string>('ferreteria_settings_sec_invoice', '000000001');
-  const [secBoleta, setSecBoleta] = useFirestoreSync<string>('ferreteria_settings_sec_boleta', '000001');
-  const [secQuote, setSecQuote] = useFirestoreSync<string>('ferreteria_settings_sec_quote', '000001');
-  const [secCreditNote, setSecCreditNote] = useFirestoreSync<string>('ferreteria_settings_sec_credit_note', '000000001');
-  const [secRetention, setSecRetention] = useFirestoreSync<string>('ferreteria_settings_sec_retention', '000000001');
+  const [sriMode, setSriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
+  const [establishment, setEstablishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
+  const [emissionPoint, setEmissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
+  const [secInvoice, setSecInvoice] = usePostgresSync<string>('ferreteria_settings_sec_invoice', '000000001');
+  const [secBoleta, setSecBoleta] = usePostgresSync<string>('ferreteria_settings_sec_boleta', '000001');
+  const [secQuote, setSecQuote] = usePostgresSync<string>('ferreteria_settings_sec_quote', '000001');
+  const [secCreditNote, setSecCreditNote] = usePostgresSync<string>('ferreteria_settings_sec_credit_note', '000000001');
+  const [secRetention, setSecRetention] = usePostgresSync<string>('ferreteria_settings_sec_retention', '000000001');
 
   // Tax Rates (IVAs) Management State
-  const [taxRates, setTaxRates] = useFirestoreSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const [taxRates, setTaxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const [showTaxModal, setShowTaxModal] = useState(false);
   const [editingTax, setEditingTax] = useState<TaxRateItem | null>(null);
   const [taxForm, setTaxForm] = useState<{
@@ -151,11 +151,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   });
 
   // Users & Roles Management State
-  const [internalUsersList, setInternalUsersList] = useFirestoreSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
+  const [internalUsersList, setInternalUsersList] = usePostgresSync<any[]>('ferreteria_settings_users_list', defaultUsersList);
   const usersList = propUsersList || internalUsersList;
   const setUsersList = propSetUsersList || setInternalUsersList;
 
-  const [internalRolesList, setInternalRolesList] = useFirestoreSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
+  const [internalRolesList, setInternalRolesList] = usePostgresSync<SystemRole[]>('ferreteria_settings_roles', DEFAULT_SYSTEM_ROLES);
   const rolesList = propRolesList || internalRolesList;
   const setRolesList = propSetRolesList || setInternalRolesList;
 
@@ -203,7 +203,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [userStatusFilter, setUserStatusFilter] = useState('ALL');
 
   // Payment Methods State
-  const [paymentMethods, setPaymentMethods] = useFirestoreSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
+  const [paymentMethods, setPaymentMethods] = usePostgresSync<any[]>('ferreteria_settings_payment_methods', defaultPaymentMethods);
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const [editingPaymentMethod, setEditingPaymentMethod] = useState<any | null>(null);
   const [paymentMethodForm, setPaymentMethodForm] = useState({
@@ -215,15 +215,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   });
 
   // Printing Format State
-  const [printFormat, setPrintFormat] = useFirestoreSync<'TICKET_80MM' | 'TICKET_58MM' | 'RIDE_A4'>('ferreteria_settings_print_format', 'TICKET_80MM');
-  const [includeQrCode, setIncludeQrCode] = useFirestoreSync<boolean>('ferreteria_settings_include_qr', true);
-  const [printLogo, setPrintLogo] = useFirestoreSync<boolean>('ferreteria_settings_print_logo', true);
+  const [printFormat, setPrintFormat] = usePostgresSync<'TICKET_80MM' | 'TICKET_58MM' | 'RIDE_A4'>('ferreteria_settings_print_format', 'TICKET_80MM');
+  const [includeQrCode, setIncludeQrCode] = usePostgresSync<boolean>('ferreteria_settings_include_qr', true);
+  const [printLogo, setPrintLogo] = usePostgresSync<boolean>('ferreteria_settings_print_logo', true);
 
   // General Admin Settings
-  const [allowNegativeStock, setAllowNegativeStock] = useFirestoreSync<boolean>('ferreteria_settings_allow_negative_stock', false);
-  const [blockNoStockSales, setBlockNoStockSales] = useFirestoreSync<boolean>('ferreteria_settings_block_no_stock_sales', true);
-  const [minStockAlert, setMinStockAlert] = useFirestoreSync<boolean>('ferreteria_settings_min_stock_alert', true);
-  const [autoSessionTimeout, setAutoSessionTimeout] = useFirestoreSync<string>('ferreteria_settings_auto_session_timeout', '30');
+  const [allowNegativeStock, setAllowNegativeStock] = usePostgresSync<boolean>('ferreteria_settings_allow_negative_stock', false);
+  const [blockNoStockSales, setBlockNoStockSales] = usePostgresSync<boolean>('ferreteria_settings_block_no_stock_sales', true);
+  const [minStockAlert, setMinStockAlert] = usePostgresSync<boolean>('ferreteria_settings_min_stock_alert', true);
+  const [autoSessionTimeout, setAutoSessionTimeout] = usePostgresSync<string>('ferreteria_settings_auto_session_timeout', '30');
 
   // Backup & Restore State
   const [isExportingBackup, setIsExportingBackup] = useState(false);
@@ -3263,13 +3263,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">Base de Datos Local & Copias de Seguridad</h2>
-                <p className="text-xs text-slate-400 font-medium">Conexión directa con MongoDB Compass, exportación y restauración completa de datos</p>
+                <p className="text-xs text-slate-400 font-medium">Conexión directa con PostgreSQL 18 (pgAdmin / DBeaver), exportación y restauración completa de datos</p>
               </div>
             </div>
           </div>
 
-          {/* MongoDB Local (Compass) Plug-and-Play Card */}
-          <MongoConnectorCard />
+          {/* PostgreSQL 18 Local (pgAdmin / DBeaver) Plug-and-Play Card */}
+          <PostgresConnectorCard />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Export Card */}

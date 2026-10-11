@@ -36,7 +36,7 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
   usersList = [],
   rolesList = DEFAULT_SYSTEM_ROLES,
 }) => {
-  // Obtener la versión reactiva más fresca del usuario desde usersList de Firestore
+  // Obtener la versión reactiva más fresca del usuario desde usersList de PostgreSQL
   const activeUser = useMemo<SystemUser | null>(() => {
     if (!currentUser) return null;
     const found = usersList.find(

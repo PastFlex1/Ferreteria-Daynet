@@ -17,32 +17,47 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin, storeName,
 
   const activeUsers = users.filter(u => u.status === 'Activo');
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
-    setTimeout(() => {
-      // Find user by username (Cédula o RUC)
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: usernameInput.trim(),
+          password: password
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success && data.user) {
+        if (data.token) {
+          localStorage.setItem('ferreteria_auth_token', data.token);
+        }
+        onLogin(data.user);
+      } else {
+        setError(data.message || 'Credenciales inválidas. Inténtelo de nuevo.');
+      }
+    } catch (err: any) {
+      // Respaldo de contingencia si el servidor aún está iniciando
       const matchedUser = activeUsers.find(
         u => u.username === usernameInput.trim()
       );
-
-      if (!matchedUser) {
-        setError('No se encontró ningún usuario activo con la Cédula o RUC ingresado.');
-        setIsLoading(false);
-        return;
+      if (matchedUser) {
+        const correctPassword = matchedUser.password || '1234';
+        if (password === correctPassword) {
+          onLogin(matchedUser);
+          return;
+        }
       }
-
-      // Check if password matches
-      const correctPassword = matchedUser.password || '1234';
-      if (password === correctPassword) {
-        onLogin(matchedUser);
-      } else {
-        setError('Contraseña incorrecta. Inténtelo de nuevo.');
-        setIsLoading(false);
-      }
-    }, 600); // Premium loading delay feel
+      setError('Error de conexión con el servidor de autenticación.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

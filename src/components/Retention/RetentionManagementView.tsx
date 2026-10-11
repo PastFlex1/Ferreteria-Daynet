@@ -23,7 +23,7 @@ import {
   Settings,
   X
 } from 'lucide-react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { StoreSettings } from '../../types';
 import { RetentionRecord, RetentionCatalogItem } from '../../types/retention';
 import { CreateRetentionV2Modal } from './CreateRetentionV2Modal';
@@ -47,9 +47,9 @@ export const RetentionManagementView: React.FC<RetentionManagementViewProps> = (
   secRetention,
   onUpdateSecuencial,
 }) => {
-  // Retenciones almacenadas en Firestore y LocalStorage
-  const [retenciones, setRetenciones] = useFirestoreSync<RetentionRecord[]>('ferreteria_retenciones_v2', []);
-  const [purchases] = useFirestoreSync<any[]>('ferreteria_purchases', []);
+  // Retenciones almacenadas en PostgreSQL y LocalStorage
+  const [retenciones, setRetenciones] = usePostgresSync<RetentionRecord[]>('ferreteria_retenciones_v2', []);
+  const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
 
   // Filtros y Búsqueda
   const [searchTerm, setSearchTerm] = useState<string>('');

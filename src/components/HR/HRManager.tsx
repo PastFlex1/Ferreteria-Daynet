@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useFirestoreSync } from '../../hooks/useFirestoreSync';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { 
   Users, 
   FileText, 
@@ -176,18 +176,18 @@ export const HRManager: React.FC<HRManagerProps> = ({
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
   const [editingDepId, setEditingDepId] = useState<string | null>(null);
   const [editingPosId, setEditingPosId] = useState<string | null>(null);
-  const [departments, setDepartments] = useFirestoreSync<Department[]>('ferreteria_hr_departments', []);
+  const [departments, setDepartments] = usePostgresSync<Department[]>('ferreteria_hr_departments', []);
 
-  const [positions, setPositions] = useFirestoreSync<JobPosition[]>('ferreteria_hr_positions', []);
+  const [positions, setPositions] = usePostgresSync<JobPosition[]>('ferreteria_hr_positions', []);
 
-  const [employees, setEmployees] = useFirestoreSync<Employee[]>('ferreteria_hr_employees', []);
-  const [payrollRoles, setPayrollRoles] = useFirestoreSync<PayrollRole[]>('ferreteria_hr_payroll_roles', []);
-  const [incomes, setIncomes] = useFirestoreSync<ExtraIncome[]>('ferreteria_hr_incomes', []);
-  const [discounts, setDiscounts] = useFirestoreSync<Discount[]>('ferreteria_hr_discounts', []);
-  const [vacations, setVacations] = useFirestoreSync<VacationRecord[]>('ferreteria_hr_vacations', []);
-  const [liquidations, setLiquidations] = useFirestoreSync<SeverancePay[]>('ferreteria_hr_liquidations', []);
-  const [decimos, setDecimos] = useFirestoreSync<DecimoRecord[]>('ferreteria_hr_decimos', []);
-  const [novelties, setNovelties] = useFirestoreSync<HRNovelty[]>('ferreteria_hr_novelties', []);
+  const [employees, setEmployees] = usePostgresSync<Employee[]>('ferreteria_hr_employees', []);
+  const [payrollRoles, setPayrollRoles] = usePostgresSync<PayrollRole[]>('ferreteria_hr_payroll_roles', []);
+  const [incomes, setIncomes] = usePostgresSync<ExtraIncome[]>('ferreteria_hr_incomes', []);
+  const [discounts, setDiscounts] = usePostgresSync<Discount[]>('ferreteria_hr_discounts', []);
+  const [vacations, setVacations] = usePostgresSync<VacationRecord[]>('ferreteria_hr_vacations', []);
+  const [liquidations, setLiquidations] = usePostgresSync<SeverancePay[]>('ferreteria_hr_liquidations', []);
+  const [decimos, setDecimos] = usePostgresSync<DecimoRecord[]>('ferreteria_hr_decimos', []);
+  const [novelties, setNovelties] = usePostgresSync<HRNovelty[]>('ferreteria_hr_novelties', []);
 
   const [searchTerm, setSearchTerm] = useState('');
 
