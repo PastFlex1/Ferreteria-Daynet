@@ -42,8 +42,6 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
   const barcodeRef = useRef<SVGSVGElement>(null);
   const [isTransmitting, setIsTransmitting] = useState(false);
   const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
-  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
   const { showToast, showAlert } = useModal();
 
   const claveAcceso = creditNote?.claveAcceso || creditNote?.numeroAutorizacion || '040920260417900123450011001001000000001123456781';
@@ -67,17 +65,13 @@ export const CreditNoteViewerModal: React.FC<CreditNoteViewerModalProps> = ({
     setIsTransmitting(true);
     showToast('Conectando con backend Java (:8080) para firmar y enviar al SRI...', 'info');
     try {
-      const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
-      const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
       const res = await SriBackendService.emitirNotaCreditoCompleta(
         creditNote,
         settings,
         creditNote.invoiceDate,
         creditNote.establishment || '001',
         creditNote.emissionPoint || '001',
-        sriMode === 'PRODUCCION' ? '2' : '1',
-        certBase64,
-        pass
+        sriMode === 'PRODUCCION' ? '2' : '1'
       );
 
       if (res.success && res.estado === 'AUTORIZADO') {

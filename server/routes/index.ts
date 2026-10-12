@@ -16,10 +16,14 @@ const apiRouter = Router();
 
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/products', productRoutes);
+apiRouter.use('/productos', productRoutes);
 apiRouter.use('/invoices', invoiceRoutes);
+apiRouter.use('/facturas', invoiceRoutes);
 apiRouter.use('/ventas', invoiceRoutes);
 apiRouter.use('/customers', customerRoutes);
+apiRouter.use('/clientes', customerRoutes);
 apiRouter.use('/suppliers', supplierRoutes);
+apiRouter.use('/proveedores', supplierRoutes);
 apiRouter.use('/inventory', inventoryRoutes);
 apiRouter.use('/sri', sriRoutes);
 apiRouter.use('/sync', syncRoutes);

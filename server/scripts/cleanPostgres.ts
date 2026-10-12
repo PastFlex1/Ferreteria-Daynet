@@ -31,11 +31,15 @@ async function cleanPostgresForProduction() {
 
     // Tablas de movimientos/transaccionales de prueba para limpiar antes de producción
     const tablesToTruncate = [
+      'factura_detalles',
       'facturas_ventas',
+      'notas_credito',
+      'cotizaciones_pedidos',
       'cola_sri',
       'kardex_movimientos',
+      'asiento_lineas',
       'asientos_contables',
-      'caja_sesiones',
+      'sesiones_caja',
       'bitacora_auditoria'
     ];
 

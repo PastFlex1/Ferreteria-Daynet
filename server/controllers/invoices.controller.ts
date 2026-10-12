@@ -1,42 +1,66 @@
 import { Request, Response } from 'express';
-import { getDatabase } from '../config/db';
+import { getPgPool } from '../config/db';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { broadcastSse } from './sync.controller';
-import { logAuditEvent } from './audit.controller';
+
+function mapInvoiceRow(r: any, details: any[] = []) {
+  const customData = r.data || {};
+  return {
+    ...customData,
+    id: r.id,
+    invoiceNumber: r.invoice_number,
+    fullNumber: r.invoice_number,
+    establishment: r.establishment,
+    emissionPoint: r.emission_point,
+    sequential: r.sequential,
+    date: r.date,
+    customerId: r.customer_id,
+    customerName: r.customer_name,
+    customerTaxId: r.customer_tax_id,
+    seller: r.seller,
+    subtotal: Number(r.subtotal),
+    tax: Number(r.tax),
+    discount: Number(r.discount),
+    total: Number(r.total),
+    paymentMethod: r.payment_method,
+    status: r.status,
+    sriStatus: r.sri_status,
+    accessKey: r.access_key,
+    authorizationNumber: r.authorization_number,
+    authorizationDate: r.authorization_date,
+    journalEntryId: r.journal_entry_id,
+    items: details.length > 0 ? details : (r.items || []),
+    updatedAt: r.updated_at
+  };
+}
 
 export async function getAllInvoices(req: Request, res: Response) {
   try {
-    const db = await getDatabase();
+    const pool = getPgPool();
     const { startDate, endDate, status } = req.query;
 
-    const filter: any = {};
+    let queryText = 'SELECT * FROM facturas_ventas WHERE 1=1';
+    const params: any[] = [];
+
     if (status) {
-      filter.status = String(status);
-    }
-    if (startDate || endDate) {
-      filter.date = {};
-      if (startDate) filter.date.$gte = String(startDate);
-      if (endDate) filter.date.$lte = String(endDate);
+      params.push(String(status));
+      queryText += ` AND status = $${params.length}`;
     }
 
-    const items = await db.collection('facturas_ventas').find(filter).sort({ date: -1 }).toArray();
-
-    // Fallback app_state
-    if (items.length === 0) {
-      const stateDoc = await db.collection<{ _id: string; data?: any[] }>('app_state').findOne({ _id: 'ferreteria_invoices' });
-      if (stateDoc && Array.isArray(stateDoc.data)) {
-        return res.status(200).json({
-          success: true,
-          count: stateDoc.data.length,
-          data: stateDoc.data
-        });
-      }
+    if (startDate) {
+      params.push(new Date(String(startDate)));
+      queryText += ` AND date >= $${params.length}`;
     }
 
-    const clean = items.map(item => {
-      const { _syncedAt, ...data } = item;
-      return { ...data, id: String(data.id || data._id) };
-    });
+    if (endDate) {
+      params.push(new Date(String(endDate)));
+      queryText += ` AND date <= $${params.length}`;
+    }
+
+    queryText += ' ORDER BY date DESC;';
+
+    const result = await pool.query(queryText, params);
+    const clean = result.rows.map(r => mapInvoiceRow(r));
 
     return res.status(200).json({
       success: true,
@@ -46,7 +70,7 @@ export async function getAllInvoices(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar facturas.',
+      message: 'Error al consultar facturas desde PostgreSQL.',
       error: error.message
     });
   }
@@ -55,23 +79,31 @@ export async function getAllInvoices(req: Request, res: Response) {
 export async function getInvoiceById(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const db = await getDatabase();
+    const pool = getPgPool();
 
-    const invoice = await db.collection('facturas_ventas').findOne({
-      $or: [{ _id: id }, { id: id }, { invoiceNumber: id }, { accessKey: id }]
-    } as any);
+    const invRes = await pool.query(
+      `SELECT * FROM facturas_ventas 
+       WHERE id = $1 OR invoice_number = $1 OR access_key = $1 
+       LIMIT 1;`,
+      [id]
+    );
 
-    if (!invoice) {
+    if (invRes.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Factura no encontrada.'
       });
     }
 
-    const { _syncedAt, ...data } = invoice;
+    const inv = invRes.rows[0];
+    const detRes = await pool.query(
+      `SELECT * FROM factura_detalles WHERE factura_id = $1 ORDER BY created_at ASC;`,
+      [inv.id]
+    );
+
     return res.status(200).json({
       success: true,
-      data: { ...data, id: String(data.id || data._id) }
+      data: mapInvoiceRow(inv, detRes.rows)
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -83,19 +115,24 @@ export async function getInvoiceById(req: Request, res: Response) {
 }
 
 /**
- * LÓGICA DE NEGOCIO EN EL SERVIDOR:
- * - Valida cliente e ítems
- * - Calcula montos e impuestos
- * - Descuenta stock de productos atómicamente
- * - Registra movimientos en Kardex
- * - Guarda factura y emite evento SSE
+ * LÓGICA DE FACTURACIÓN EN EL SERVIDOR:
+ * - Ejecutada dentro de una única transacción ACID en PostgreSQL.
+ * - Secuencial asignado atómicamente con UPDATE secuenciales_emision ... RETURNING current_sequential.
+ * - Validación de períodos fiscales abiertos.
+ * - Deducción atómica de existencias y registro inmutable en kardex_movimientos (RESTRICT).
+ * - Inserción en facturas_ventas y detalle relacional en factura_detalles.
+ * - Partida doble balanceada en asientos_contables y asiento_lineas.
+ * - Actualización de sesiones_caja y encolado en cola_sri.
+ * - CERO escrituras en app_state.
  */
 export async function createInvoice(req: AuthenticatedRequest, res: Response) {
-  try {
-    const db = await getDatabase();
-    let invoiceData = { ...req.body };
+  const pool = getPgPool();
+  const client = await pool.connect();
 
-    // 0. ADAPTADOR DE ENTRADA: Soporta VentaInput { clienteId, lineas, pagos } o modelo estándar
+  try {
+    const invoiceData = { ...req.body };
+
+    // 0. Adaptador de entrada
     if (invoiceData.lineas && Array.isArray(invoiceData.lineas) && !invoiceData.items) {
       invoiceData.items = invoiceData.lineas.map((l: any, idx: number) => ({
         id: l.productoId || l.id || `item-${idx}`,
@@ -107,431 +144,420 @@ export async function createInvoice(req: AuthenticatedRequest, res: Response) {
       }));
     }
 
-    if (invoiceData.clienteId && !invoiceData.customer) {
-      const foundCust = await db.collection<any>('clientes').findOne({
-        $or: [{ _id: String(invoiceData.clienteId) }, { id: String(invoiceData.clienteId) }, { taxId: String(invoiceData.clienteId) }]
-      });
-      invoiceData.customer = foundCust || {
-        id: String(invoiceData.clienteId),
-        name: invoiceData.clienteNombre || 'Consumidor Final',
-        taxId: String(invoiceData.clienteId)
-      };
-    }
-
-    if (invoiceData.pagos && Array.isArray(invoiceData.pagos) && invoiceData.pagos.length > 0 && !invoiceData.paymentMethod) {
-      invoiceData.paymentMethod = invoiceData.pagos[0].metodo || invoiceData.pagos[0].formaPago || '01';
-    }
-
     if (!invoiceData.items || !Array.isArray(invoiceData.items) || invoiceData.items.length === 0) {
+      client.release();
       return res.status(400).json({
         success: false,
         message: 'La transacción requiere al menos un ítem o producto vendido.'
       });
     }
 
-    if (!invoiceData.customer) {
-      invoiceData.customer = {
-        id: 'CONSUMIDOR_FINAL',
-        name: 'CONSUMIDOR FINAL',
-        taxId: '9999999999999'
-      };
-    }
+    // 1. INICIAR TRANSACCIÓN ATÓMICA
+    await client.query('BEGIN;');
 
-    // 1. CONTROL CONTABLE: Validación estricta de Período Fiscal Cerrado
+    // 2. Control de Período Fiscal
     const invoiceDateObj = invoiceData.date ? new Date(invoiceData.date) : new Date();
     const invoiceYear = invoiceDateObj.getFullYear();
-    const invoiceMonth = invoiceDateObj.getMonth() + 1; // 1-12
-    const closedPeriod = await db.collection<any>('periodos_fiscales').findOne({
-      year: invoiceYear,
-      month: invoiceMonth,
-      status: 'CERRADO'
-    });
-    if (closedPeriod) {
+    const invoiceMonth = invoiceDateObj.getMonth() + 1;
+
+    const periodCheck = await client.query(
+      `SELECT id FROM periodos_fiscales WHERE year = $1 AND month = $2 AND status = 'CERRADO';`,
+      [invoiceYear, invoiceMonth]
+    );
+
+    if (periodCheck.rows.length > 0) {
+      await client.query('ROLLBACK;');
+      client.release();
       return res.status(400).json({
         success: false,
         message: `Emisión rechazada: El período fiscal ${invoiceMonth}/${invoiceYear} se encuentra CERRADO.`
       });
     }
 
-    // 2. SECUENCIAL ATÓMICO: Obtener y bloquear secuencial sin saltos en la misma transacción
+    // 3. SECUENCIAL ATÓMICO: Asignado en el servidor dentro de la misma transacción
     const establishment = String(invoiceData.establishment || (req.user as any)?.establecimiento || '001').padStart(3, '0').slice(-3);
     const emissionPoint = String(invoiceData.emissionPoint || (req.user as any)?.puntoEmision || '001').padStart(3, '0').slice(-3);
-    const docType = String(invoiceData.documentType || '01');
+    const documentType = '01'; // 01 = Factura
 
-    let invoiceNumber = invoiceData.invoiceNumber || invoiceData.fullNumber;
-    let customId = invoiceData.id;
+    let currentSequential: number;
 
-    if (!invoiceNumber || invoiceNumber.startsWith('F-') || invoiceNumber.startsWith('inv-') || invoiceNumber.includes('Date.now')) {
-      const key = `${establishment}-${emissionPoint}-${docType}`;
-      const seqCol = db.collection<any>('secuenciales_emision');
-      const updatedSeq = await seqCol.findOneAndUpdate(
-        { _id: key },
-        {
-          $inc: { currentSequential: 1 },
-          $set: { updatedAt: new Date() },
-          $setOnInsert: { establishment, emissionPoint, documentType: docType, name: `Caja ${emissionPoint}` }
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
-      const nextNum = updatedSeq?.value?.currentSequential ?? 1;
-      invoiceNumber = `${establishment}-${emissionPoint}-${String(nextNum).padStart(9, '0')}`;
-      customId = customId || invoiceNumber;
+    const seqUpdateRes = await client.query(`
+      UPDATE secuenciales_emision
+      SET current_sequential = current_sequential + 1, updated_at = NOW()
+      WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
+      RETURNING current_sequential;
+    `, [establishment, emissionPoint, documentType]);
+
+    if (seqUpdateRes.rows.length > 0) {
+      currentSequential = Number(seqUpdateRes.rows[0].current_sequential);
     } else {
-      customId = customId || invoiceNumber;
+      // Si no existe aún registro para ese establecimiento y punto, insertarlo atómicamente con secuencial 1
+      const seqInsertRes = await client.query(`
+        INSERT INTO secuenciales_emision (
+          id, establishment, emission_point, document_type, name, current_sequential, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 1, NOW())
+        ON CONFLICT (establishment, emission_point, document_type)
+        DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+        RETURNING current_sequential;
+      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
+
+      currentSequential = Number(seqInsertRes.rows[0].current_sequential);
     }
 
-    // 3. STOCK & KARDEX: Validar y descontar stock atómicamente con $inc y registrar movimientos
+    const sequentialFormatted = String(currentSequential).padStart(9, '0');
+    const invoiceNumber = `${establishment}-${emissionPoint}-${sequentialFormatted}`;
+    const invoiceId = invoiceData.id || `inv-${Date.now()}-${sequentialFormatted}`;
+
+    // 4. CLIENTE: Validar o registrar en clientes
+    const rawCustomer = invoiceData.customer || {};
+    const custTaxId = String(rawCustomer.taxId || rawCustomer.docNumber || rawCustomer.cedula || rawCustomer.ruc || invoiceData.customerTaxId || '9999999999999').trim();
+    const custName = String(rawCustomer.name || invoiceData.customerName || 'CONSUMIDOR FINAL').trim();
+    const custDocType = rawCustomer.docType || (custTaxId === '9999999999999' ? 'C.I.' : (custTaxId.length === 13 ? 'RUC' : 'C.I.'));
+    const custEmail = rawCustomer.email || null;
+    const custPhone = rawCustomer.phone || null;
+    const custAddress = rawCustomer.address || 'Venta Mostrador';
+
+    let customerDbId: string = 'cust-general';
+    const custCheck = await client.query('SELECT id FROM clientes WHERE tax_id = $1;', [custTaxId]);
+    if (custCheck.rows.length > 0) {
+      customerDbId = custCheck.rows[0].id;
+    } else {
+      customerDbId = `cust-${Date.now()}`;
+      await client.query(`
+        INSERT INTO clientes (id, name, tax_id, doc_type, email, phone, address, current_debt, credit_limit, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 0.00, 0.00, NOW())
+        ON CONFLICT (tax_id) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id;
+      `, [customerDbId, custName, custTaxId, custDocType, custEmail, custPhone, custAddress]);
+    }
+
+    // 5. CÁLCULO DE TOTALES Y VALIDACIONES
+    let calculatedSubtotal = 0;
+    let calculatedTax = 0;
+    let calculatedDiscount = 0;
+
     for (const item of invoiceData.items) {
-      const prodId = item.productId || item.id || item.code;
-      if (prodId) {
-        const product = await db.collection<any>('productos').findOne({
-          $or: [{ _id: String(prodId) }, { id: String(prodId) }, { code: String(prodId) }]
-        });
+      const qty = Math.max(0.01, Number(item.quantity ?? 1));
+      const price = Math.max(0, Number(item.price ?? 0));
+      const disc = Math.max(0, Number(item.discount ?? 0));
+      const lineSubtotal = Math.max(0, qty * price - disc);
+      const hasIva = item.has_iva !== undefined ? Boolean(item.has_iva) : (item.taxRate !== undefined ? Number(item.taxRate) > 0 : true);
+      const ivaRate = hasIva ? Math.max(0, Number(item.taxRate ?? item.iva_rate ?? 15)) : 0;
+      const lineTax = Number((lineSubtotal * (ivaRate / 100)).toFixed(2));
 
-        if (product) {
-          const qty = Number(item.quantity) || 1;
-          const previousStock = Number(product.stock) || 0;
+      calculatedSubtotal += lineSubtotal;
+      calculatedTax += lineTax;
+      calculatedDiscount += disc;
+    }
 
-          const updateResult = await db.collection<any>('productos').findOneAndUpdate(
-            { _id: product._id },
-            { 
-              $inc: { stock: -qty },
-              $set: { updatedAt: new Date() }
-            },
-            { returnDocument: 'after' }
-          );
+    calculatedSubtotal = Number(calculatedSubtotal.toFixed(2));
+    calculatedTax = Number(calculatedTax.toFixed(2));
+    calculatedDiscount = Number(calculatedDiscount.toFixed(2));
+    const calculatedTotal = Number((calculatedSubtotal + calculatedTax).toFixed(2));
 
-          const updatedStock = updateResult?.value?.stock ?? (previousStock - qty);
+    const paymentMethod = invoiceData.paymentMethod || 'EFECTIVO';
+    const seller = req.user?.name || invoiceData.seller || 'Cajero';
+    const accessKey = invoiceData.accessKey || invoiceData.claveAcceso || null;
 
-          await db.collection<any>('kardex_movimientos').insertOne({
-            productId: String(product.id || product._id),
-            productName: product.name,
-            type: 'EGRESO',
-            subtype: 'VENTA',
-            quantity: qty,
-            previousStock: previousStock,
-            newStock: updatedStock,
-            unitPrice: item.price,
-            documentReference: invoiceNumber,
-            customerName: invoiceData.customer?.name || 'Cliente',
-            user: req.user?.name || invoiceData.seller || 'Cajero',
-            date: new Date()
-          });
+    // 6. CONTROL DE EXISTENCIAS Y KARDEX: Lock exclusivo FOR UPDATE por producto
+    for (const item of invoiceData.items) {
+      const prodLookup = item.productId || item.id || item.code;
+      if (prodLookup) {
+        const prodRes = await client.query(`
+          SELECT id, name, stock, cost_price, sale_price 
+          FROM productos 
+          WHERE id = $1 OR code = $1 OR sku = $1 
+          FOR UPDATE;
+        `, [prodLookup]);
+
+        if (prodRes.rows.length > 0) {
+          const product = prodRes.rows[0];
+          const qty = Math.max(0.01, Number(item.quantity ?? 1));
+          const currentStock = Number(product.stock);
+          const newStock = Math.max(0, Number((currentStock - qty).toFixed(2)));
+          const unitCost = Number(product.cost_price);
+          const totalCost = Number((qty * unitCost).toFixed(4));
+
+          await client.query(`
+            UPDATE productos 
+            SET stock = $1, updated_at = NOW() 
+            WHERE id = $2;
+          `, [newStock, product.id]);
+
+          const kardexId = `kdx-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          await client.query(`
+            INSERT INTO kardex_movimientos (
+              id, product_id, product_name, date, type, reason,
+              quantity, cost_unit, total_cost, stock_balance, document_ref, user_id
+            )
+            VALUES ($1, $2, $3, NOW(), 'VENTA', $4, $5, $6, $7, $8, $9, $10);
+          `, [
+            kardexId, product.id, product.name,
+            `Venta mostrador factura ${invoiceNumber}`,
+            -qty, unitCost, totalCost, newStock, invoiceNumber, req.user?.id || null
+          ]);
 
           broadcastSse({
             type: 'product_stock_updated',
-            productId: String(product.id || product._id),
-            stock: updatedStock
+            productId: product.id,
+            stock: newStock
           });
         }
       }
     }
 
-    // 4. FACTURA: Guardar documento formal de factura
-    const calculatedSubtotal = Number(invoiceData.subtotal) || Number(invoiceData.items.reduce((s: number, i: any) => s + (Number(i.subtotal) || (Number(i.quantity) * Number(i.price)) || 0), 0).toFixed(2));
-    const calculatedTax = Number(invoiceData.tax) || Number(invoiceData.taxTotal) || Number((calculatedSubtotal * 0.15).toFixed(2));
-    const calculatedTotal = Number(invoiceData.total) || Number((calculatedSubtotal + calculatedTax).toFixed(2));
+    // 7. INSERTAR FACTURA EN facturas_ventas
+    const insertInvRes = await client.query(`
+      INSERT INTO facturas_ventas (
+        id, invoice_number, establishment, emission_point, sequential,
+        date, customer_id, customer_name, customer_tax_id, seller,
+        subtotal, tax, discount, total, payment_method, status,
+        sri_status, access_key, items, data, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, 'EMITIDA', 'PENDIENTE', $15, $16::jsonb, $17::jsonb, NOW())
+      RETURNING *;
+    `, [
+      invoiceId, invoiceNumber, establishment, emissionPoint, currentSequential,
+      customerDbId, custName, custTaxId, seller,
+      calculatedSubtotal, calculatedTax, calculatedDiscount, calculatedTotal,
+      paymentMethod, accessKey, JSON.stringify(invoiceData.items), JSON.stringify(invoiceData)
+    ]);
 
-    const newInvoiceDoc = {
-      _id: String(customId),
-      id: String(customId),
-      invoiceNumber,
-      fullNumber: invoiceNumber,
-      date: invoiceData.date || new Date().toISOString(),
-      customer: invoiceData.customer,
-      items: invoiceData.items,
-      subtotal: calculatedSubtotal,
-      tax: calculatedTax,
-      total: calculatedTotal,
-      paymentMethod: invoiceData.paymentMethod || '01',
-      status: invoiceData.status || 'EMITIDA',
-      sriStatus: invoiceData.sriStatus || 'PENDIENTE',
-      accessKey: invoiceData.accessKey || '',
-      seller: req.user?.name || invoiceData.seller || 'Cajero Principal',
-      establishment,
-      emissionPoint,
-      createdAt: new Date(),
-      _syncedAt: new Date()
-    };
+    // 8. INSERTAR DETALLES NORMALIZADOS EN factura_detalles
+    for (let i = 0; i < invoiceData.items.length; i++) {
+      const it = invoiceData.items[i];
+      const detId = `${invoiceId}-det-${i + 1}`;
+      const qty = Math.max(0.01, Number(it.quantity ?? 1));
+      const price = Math.max(0, Number(it.price ?? 0));
+      const disc = Math.max(0, Number(it.discount ?? 0));
+      const lineSubt = Math.max(0, qty * price - disc);
+      const hasIva = it.has_iva !== undefined ? Boolean(it.has_iva) : true;
+      const ivaRate = hasIva ? Math.max(0, Number(it.taxRate ?? 15)) : 0;
+      const lineTax = Number((lineSubt * (ivaRate / 100)).toFixed(2));
+      const lineTotal = Number((lineSubt + lineTax).toFixed(2));
 
-    await db.collection<any>('facturas_ventas').updateOne(
-      { _id: newInvoiceDoc._id },
-      { $set: newInvoiceDoc },
-      { upsert: true }
-    );
-
-    // Sincronizar en app_state incrementalmente
-    try {
-      const stateDoc = await db.collection<any>('app_state').findOne({ _id: 'ferreteria_invoices' });
-      let currentList: any[] = [];
-      if (stateDoc && Array.isArray(stateDoc.data)) {
-        currentList = stateDoc.data.filter((i: any) => String(i.id || i._id) !== newInvoiceDoc.id);
+      // Verificar si el producto existe para la FK
+      let validProdId: string | null = null;
+      const pCheck = await client.query('SELECT id FROM productos WHERE id = $1 OR code = $1;', [it.productId || it.id]);
+      if (pCheck.rows.length > 0) {
+        validProdId = pCheck.rows[0].id;
       }
-      currentList = [newInvoiceDoc, ...currentList];
-      await db.collection<any>('app_state').updateOne(
-        { _id: 'ferreteria_invoices' },
-        { $set: { data: currentList, updatedAt: new Date() } },
-        { upsert: true }
-      );
-    } catch {}
 
-    // 5. ASIENTO CONTABLE: Generar y asentar con Partida Doble en el servidor
-    const method = newInvoiceDoc.paymentMethod;
-    let debitAccount = { code: '1.1.01.01', name: 'Caja General / Efectivo' };
-    if (method === 'TRANSFERENCIA' || method === '20') {
-      debitAccount = { code: '1.1.01.02', name: 'Bancos e Instituciones Financieras' };
-    } else if (method === 'TARJETA' || method === 'TARJETA_CREDITO' || method === 'TARJETA_DEBITO' || method === '16' || method === '19') {
-      debitAccount = { code: '1.1.01.03', name: 'Tarjetas de Débito/Crédito por Cobrar' };
-    } else if (method === 'CREDITO' || method === 'CREDITO_CLIENTE') {
-      debitAccount = { code: '1.1.02.01', name: 'Cuentas por Cobrar Clientes' };
+      await client.query(`
+        INSERT INTO factura_detalles (
+          id, factura_id, product_id, codigo, descripcion,
+          cantidad, precio_unitario, descuento, subtotal,
+          has_iva, iva_rate, iva_valor, total, data
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb);
+      `, [
+        detId, invoiceId, validProdId, it.code || it.sku || null,
+        it.name || 'Artículo', qty, price, disc, lineSubt,
+        hasIva, ivaRate, lineTax, lineTotal, JSON.stringify(it)
+      ]);
+    }
+
+    // 9. ASIENTO CONTABLE RELACIONAL CON PARTIDA DOBLE
+    const journalEntryId = `ASI-${invoiceYear}-${invoiceNumber.replace(/[^\w]/g, '_')}`;
+    let debitAccountCode = '1.1.01.01';
+    let debitAccountName = 'Caja General / Efectivo';
+
+    if (paymentMethod === 'TRANSFERENCIA' || paymentMethod === '20') {
+      debitAccountCode = '1.1.01.02';
+      debitAccountName = 'Bancos e Instituciones Financieras';
+    } else if (paymentMethod.includes('TARJETA') || paymentMethod === '16' || paymentMethod === '19') {
+      debitAccountCode = '1.1.01.03';
+      debitAccountName = 'Tarjetas de Débito/Crédito por Cobrar';
+    } else if (paymentMethod.includes('CREDITO')) {
+      debitAccountCode = '1.1.02.01';
+      debitAccountName = 'Cuentas por Cobrar Clientes';
     }
 
     const journalItems = [
-      { accountCode: debitAccount.code, accountName: debitAccount.name, debit: calculatedTotal, credit: 0 },
+      { accountCode: debitAccountCode, accountName: debitAccountName, debit: calculatedTotal, credit: 0 },
       { accountCode: '4.1.01.01', accountName: 'Ventas Mostrador Ferretería', debit: 0, credit: calculatedSubtotal }
     ];
     if (calculatedTax > 0) {
       journalItems.push({ accountCode: '2.1.07.01', accountName: 'IVA Ventas por Pagar SRI', debit: 0, credit: calculatedTax });
     }
 
-    const journalEntryId = `ASI-${invoiceYear}-${newInvoiceDoc.invoiceNumber.replace(/[^\w]/g, '_')}`;
-    const newJournalEntry = {
-      _id: journalEntryId,
-      entryNumber: journalEntryId,
-      date: newInvoiceDoc.date.split('T')[0],
-      concept: `Venta según ${newInvoiceDoc.invoiceNumber} - Cliente: ${newInvoiceDoc.customer?.name}`,
-      type: 'INGRESO',
-      documentReference: newInvoiceDoc.invoiceNumber,
-      items: journalItems,
-      totalDebit: calculatedTotal,
-      totalCredit: Number((calculatedSubtotal + calculatedTax).toFixed(2)),
-      isBalanced: true,
-      status: 'ASENTADO',
-      createdAt: new Date(),
-      createdBy: req.user?.username || newInvoiceDoc.seller
-    };
+    await client.query(`
+      INSERT INTO asientos_contables (
+        id, entry_number, date, concept, type, document_reference,
+        total_debit, total_credit, is_balanced, status, items, data, created_by
+      )
+      VALUES ($1, $2, NOW(), $3, 'INGRESO', $4, $5, $6, true, 'ASENTADO', $7::jsonb, $8::jsonb, $9)
+      ON CONFLICT (id) DO NOTHING;
+    `, [
+      journalEntryId, journalEntryId, `Venta según ${invoiceNumber} - Cliente: ${custName}`,
+      invoiceNumber, calculatedTotal, calculatedTotal, JSON.stringify(journalItems),
+      JSON.stringify({ journalItems }), req.user?.username || seller
+    ]);
 
-    await db.collection('asientos_contables').updateOne(
-      { _id: journalEntryId as any },
-      { $set: newJournalEntry },
-      { upsert: true }
-    );
+    // Insertar líneas contables en asiento_lineas
+    for (let j = 0; j < journalItems.length; j++) {
+      const ji = journalItems[j];
+      const lineaId = `${journalEntryId}-linea-${j + 1}`;
+      let accId: string | null = null;
+      const accRes = await client.query('SELECT id FROM plan_cuentas_contable WHERE code = $1 LIMIT 1;', [ji.accountCode]);
+      if (accRes.rows.length > 0) accId = accRes.rows[0].id;
 
-    // 6. CAJA: Actualización atómica de sesión de caja activa en el servidor
-    const cashIncrement: any = { totalInvoicesCount: 1 };
-    if (method === 'EFECTIVO' || method === '01') {
-      cashIncrement.totalSalesCash = calculatedTotal;
-      cashIncrement.expectedCash = calculatedTotal;
-    } else if (method === 'TRANSFERENCIA' || method === '20') {
-      cashIncrement.totalSalesTransfer = calculatedTotal;
-    } else if (method === 'TARJETA' || method === 'TARJETA_CREDITO' || method === 'TARJETA_DEBITO' || method === '16' || method === '19') {
-      cashIncrement.totalSalesCard = calculatedTotal;
-    } else if (method === 'CREDITO' || method === 'CREDITO_CLIENTE') {
-      cashIncrement.totalSalesCredit = calculatedTotal;
-    } else {
-      cashIncrement.totalSalesCash = calculatedTotal;
-      cashIncrement.expectedCash = calculatedTotal;
+      await client.query(`
+        INSERT INTO asiento_lineas (
+          id, asiento_id, account_id, account_code, account_name, concept, debit, credit
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+      `, [lineaId, journalEntryId, accId, ji.accountCode, ji.accountName, `Factura ${invoiceNumber}`, ji.debit, ji.credit]);
     }
 
-    await db.collection('sesiones_caja').updateOne(
-      { status: 'ABIERTA', emissionPoint },
-      { $inc: cashIncrement, $set: { updatedAt: new Date() } }
-    );
+    // Enlazar factura con el asiento contable
+    await client.query(`
+      UPDATE facturas_ventas SET journal_entry_id = $1 WHERE id = $2;
+    `, [journalEntryId, invoiceId]);
 
-    // Si fue venta a crédito, actualizar cartera del cliente en el servidor
-    if ((method === 'CREDITO' || method === 'CREDITO_CLIENTE') && newInvoiceDoc.customer?.id) {
-      await db.collection('clientes').updateOne(
-        { $or: [{ _id: newInvoiceDoc.customer.id }, { id: newInvoiceDoc.customer.id }] as any },
-        { $inc: { currentDebt: calculatedTotal }, $set: { updatedAt: new Date() } }
-      );
-    }
+    // 10. CAJA: Actualización atómica en sesiones_caja
+    const isCash = paymentMethod === 'EFECTIVO' || paymentMethod === '01';
+    await client.query(`
+      UPDATE sesiones_caja
+      SET total_sales_cash = total_sales_cash + $1,
+          expected_cash = expected_cash + $2,
+          total_sales_transfer = total_sales_transfer + $3,
+          total_sales_card = total_sales_card + $4,
+          total_sales_credit = total_sales_credit + $5,
+          total_invoices_count = total_invoices_count + 1,
+          updated_at = NOW()
+      WHERE status = 'ABIERTA' AND emission_point = $6;
+    `, [
+      isCash ? calculatedTotal : 0,
+      isCash ? calculatedTotal : 0,
+      paymentMethod === 'TRANSFERENCIA' || paymentMethod === '20' ? calculatedTotal : 0,
+      paymentMethod.includes('TARJETA') ? calculatedTotal : 0,
+      paymentMethod.includes('CREDITO') ? calculatedTotal : 0,
+      emissionPoint
+    ]);
 
-    // 7. BITÁCORA DE AUDITORÍA: Registro inmutable de la transacción completa
-    await logAuditEvent(db, {
-      userId: req.user?.id,
-      username: req.user?.username || req.user?.name || invoiceData.seller || 'Cajero',
-      role: req.user?.role || 'Cajero',
-      action: 'TRANSACCION_VENTA_COMPLETA',
-      entity: 'facturas_ventas',
-      entityId: newInvoiceDoc.invoiceNumber,
-      emissionPoint: newInvoiceDoc.emissionPoint,
-      terminal: `Punto Emisión ${newInvoiceDoc.emissionPoint}`,
-      ip: req.ip || req.socket.remoteAddress || '127.0.0.1',
-      details: {
-        total: newInvoiceDoc.total,
-        subtotal: newInvoiceDoc.subtotal,
-        tax: newInvoiceDoc.tax,
-        customerTaxId: newInvoiceDoc.customer?.taxId || newInvoiceDoc.customer?.idNumber,
-        itemsCount: newInvoiceDoc.items.length,
-        journalEntryId,
-        paymentMethod: method
-      }
-    });
+    // 11. BITÁCORA DE AUDITORÍA
+    await client.query(`
+      INSERT INTO bitacora_auditoria (
+        id, timestamp, user_id, username, role, action, entity, entity_id, emission_point, details
+      )
+      VALUES ($1, NOW(), $2, $3, $4, 'EMISION_FACTURA_ACID', 'facturas_ventas', $5, $6, $7::jsonb);
+    `, [
+      `aud-${Date.now()}`, req.user?.id || null, req.user?.username || seller,
+      req.user?.role || 'Cajero', invoiceNumber, emissionPoint,
+      JSON.stringify({ total: calculatedTotal, itemsCount: invoiceData.items.length, sequential: currentSequential })
+    ]);
 
-    // 7.5. COLA_SRI: Encolar comprobante para firma y autorización en segundo plano por el worker
-    try {
-      const queueClave = newInvoiceDoc.accessKey || `TEMP-${newInvoiceDoc.invoiceNumber}`;
-      await db.collection('cola_sri').updateOne(
-        { _id: `QUEUE-${queueClave}` as any },
-        {
-          $setOnInsert: {
-            _id: `QUEUE-${queueClave}`,
-            invoiceId: newInvoiceDoc.id,
-            invoiceNumber: newInvoiceDoc.invoiceNumber,
-            establishment: newInvoiceDoc.establishment,
-            emissionPoint: newInvoiceDoc.emissionPoint,
-            claveAcceso: queueClave,
-            customerName: newInvoiceDoc.customer?.name,
-            customerTaxId: newInvoiceDoc.customer?.taxId || newInvoiceDoc.customer?.idNumber,
-            total: newInvoiceDoc.total,
-            estado: 'EN_COLA',
-            reintentos: 0,
-            maxReintentos: 15,
-            fechaCreacion: new Date()
-          }
-        },
-        { upsert: true }
-      );
-    } catch (queueErr: any) {
-      console.warn('[Cola SRI Enqueue Warning]:', queueErr?.message);
-    }
+    // 12. ENCOLAR EN COLA_SRI
+    const queueClave = accessKey || `PENDIENTE-${invoiceNumber}`;
+    await client.query(`
+      INSERT INTO cola_sri (
+        id, invoice_id, invoice_number, establishment, emission_point,
+        clave_acceso, customer_name, customer_tax_id, total, estado,
+        reintentos, max_reintentos, fecha_creacion
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'EN_COLA', 0, 20, NOW())
+      ON CONFLICT (id) DO UPDATE SET total = EXCLUDED.total;
+    `, [
+      `QUEUE-${queueClave}`, invoiceId, invoiceNumber, establishment, emissionPoint,
+      queueClave, custName, custTaxId, calculatedTotal
+    ]);
 
-    // 8. EVENTOS SSE EN TIEMPO REAL: Notificar a todas las terminales
+    // 13. CONFIRMAR TRANSACCIÓN ACID
+    await client.query('COMMIT;');
+
+    const createdRow = insertInvRes.rows[0];
+    const finalInvoice = mapInvoiceRow(createdRow, invoiceData.items);
+
+    // Notificar por SSE a terminales
     broadcastSse({
       type: 'invoice_created',
-      invoice: newInvoiceDoc,
-      invoiceId: newInvoiceDoc.id,
-      invoiceNumber: newInvoiceDoc.invoiceNumber,
-      journalEntry: newJournalEntry
+      invoice: finalInvoice,
+      invoiceId,
+      invoiceNumber
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Transacción de venta ejecutada atómicamente en el servidor en un solo paso.',
-      data: newInvoiceDoc,
-      invoice: newInvoiceDoc,
-      journalEntry: newJournalEntry,
+      message: 'Factura emitida y registrada exitosamente en PostgreSQL (ACID).',
+      data: finalInvoice,
+      invoice: finalInvoice,
       sequential: invoiceNumber
     });
   } catch (error: any) {
-    console.error('[Create Invoice Server Error]:', error);
+    await client.query('ROLLBACK;');
+    console.error('[Create Invoice Error - Rolled Back]:', error);
     return res.status(500).json({
       success: false,
-      message: 'Error al procesar la transacción de venta en el servidor.',
+      message: 'Error al procesar la factura en la base de datos (transacción revertida).',
       error: error.message
     });
+  } finally {
+    client.release();
   }
 }
 
 /**
  * CONTROL DE CONCURRENCIA: RESERVA ATÓMICA DE SECUENCIALES POR PUNTO DE EMISIÓN
- * Garantiza que dos terminales jamás reciban el mismo número de factura,
- * incluso si emiten en el mismo milisegundo exacto.
  */
 export async function reserveSequential(req: Request, res: Response) {
+  const pool = getPgPool();
   try {
-    const db = await getDatabase();
     const establishment = String(req.body.establishment || '001').padStart(3, '0').slice(-3);
     const emissionPoint = String(req.body.emissionPoint || '001').padStart(3, '0').slice(-3);
-    const docType = String(req.body.documentType || '01'); // 01 = Factura
+    const documentType = '01';
 
-    const key = `${establishment}-${emissionPoint}-${docType}`;
-    const seqCol = db.collection<any>('secuenciales_emision');
-
-    const existing = await seqCol.findOne({ _id: key });
+    const seqRes = await pool.query(`
+      UPDATE secuenciales_emision
+      SET current_sequential = current_sequential + 1, updated_at = NOW()
+      WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
+      RETURNING current_sequential;
+    `, [establishment, emissionPoint, documentType]);
 
     let nextNum: number;
-    if (!existing) {
-      // Determinar punto de partida según facturas existentes en facturas_ventas o app_state
-      let startFrom = 1;
-      const latestInvoice = await db.collection<any>('facturas_ventas')
-        .find({ invoiceNumber: new RegExp(`^${establishment}-${emissionPoint}-`) })
-        .sort({ createdAt: -1 })
-        .limit(1)
-        .toArray();
-
-      if (latestInvoice.length > 0 && latestInvoice[0].invoiceNumber) {
-        const parts = latestInvoice[0].invoiceNumber.split('-');
-        if (parts.length === 3) {
-          const parsed = parseInt(parts[2], 10);
-          if (!isNaN(parsed) && parsed > 0) startFrom = parsed + 1;
-        }
-      } else if (establishment === '001' && emissionPoint === '001') {
-        const appStateSec = await db.collection<any>('app_state').findOne({ _id: 'ferreteria_settings_sec_invoice' });
-        if (appStateSec && appStateSec.data) {
-          const parsed = parseInt(String(appStateSec.data), 10);
-          if (!isNaN(parsed) && parsed > 0) startFrom = parsed;
-        }
-      }
-
-      await seqCol.updateOne(
-        { _id: key },
-        {
-          $set: {
-            _id: key,
-            establishment,
-            emissionPoint,
-            documentType: docType,
-            name: `Caja ${emissionPoint}`,
-            currentSequential: startFrom,
-            updatedAt: new Date()
-          }
-        },
-        { upsert: true }
-      );
-      nextNum = startFrom;
+    if (seqRes.rows.length > 0) {
+      nextNum = Number(seqRes.rows[0].current_sequential);
     } else {
-      // Operación atómica serializada por PostgreSQL Engine (ACID)
-      const updated = await seqCol.findOneAndUpdate(
-        { _id: key },
-        {
-          $inc: { currentSequential: 1 },
-          $set: { updatedAt: new Date() }
-        },
-        { returnDocument: 'after' }
-      );
-      nextNum = updated?.value?.currentSequential ?? (existing.currentSequential + 1);
+      const initRes = await pool.query(`
+        INSERT INTO secuenciales_emision (
+          id, establishment, emission_point, document_type, name, current_sequential, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 1, NOW())
+        ON CONFLICT (establishment, emission_point, document_type)
+        DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+        RETURNING current_sequential;
+      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
+      nextNum = Number(initRes.rows[0].current_sequential);
     }
 
     const sequentialFormatted = String(nextNum).padStart(9, '0');
     const fullNumber = `${establishment}-${emissionPoint}-${sequentialFormatted}`;
 
-    await logAuditEvent(db, {
-      action: 'RESERVA_SECUENCIAL_ATOMICO',
-      entity: 'secuenciales_emision',
-      entityId: key,
-      emissionPoint,
-      terminal: `Punto Emisión ${emissionPoint}`,
-      details: { sequentialNumber: nextNum, fullNumber }
-    });
-
     return res.status(200).json({
       success: true,
       establishment,
       emissionPoint,
-      documentType: docType,
+      documentType,
       sequentialNumber: nextNum,
       sequential: sequentialFormatted,
       fullNumber
     });
   } catch (error: any) {
-    console.error('[Reserve Sequential Error]:', error);
     return res.status(500).json({
       success: false,
-      message: 'Error al reservar secuencial atómico.',
+      message: 'Error al reservar secuencial atómico en PostgreSQL.',
       error: error.message
     });
   }
 }
 
 /**
- * LISTAR LOS 4 PUNTOS DE EMISIÓN EXIGIDOS POR TDR CON SU SECUENCIAL EN TIEMPO REAL
+ * LISTAR LOS 4 PUNTOS DE EMISIÓN CON SU SECUENCIAL DIRECTO DE POSTGRESQL
  */
 export async function getEmissionPoints(req: Request, res: Response) {
+  const pool = getPgPool();
   try {
-    const db = await getDatabase();
-    const seqCol = db.collection<any>('secuenciales_emision');
-
     const DEFAULT_POINTS = [
       { establishment: '001', emissionPoint: '001', name: 'Caja 1 - Principal (001)', description: 'Terminal de caja principal y facturación rápida' },
       { establishment: '001', emissionPoint: '002', name: 'Caja 2 - Mostrador (002)', description: 'Terminal de mostrador y atención al cliente' },
@@ -539,13 +565,20 @@ export async function getEmissionPoints(req: Request, res: Response) {
       { establishment: '001', emissionPoint: '004', name: 'Caja 4 - Express / Mayorista (004)', description: 'Terminal para ventas mayoristas y pedidos especiales' }
     ];
 
-    const records = await seqCol.find({}).toArray();
-    const recordsMap = new Map(records.map(r => [r._id, r]));
+    const records = await pool.query(`
+      SELECT establishment, emission_point, current_sequential 
+      FROM secuenciales_emision 
+      WHERE document_type = '01';
+    `);
+
+    const recordsMap = new Map<string, number>();
+    for (const r of records.rows) {
+      recordsMap.set(`${r.establishment}-${r.emission_point}`, Number(r.current_sequential));
+    }
 
     const result = DEFAULT_POINTS.map(p => {
-      const key = `${p.establishment}-${p.emissionPoint}-01`;
-      const record = recordsMap.get(key);
-      const currentSeq = record ? record.currentSequential : 1;
+      const key = `${p.establishment}-${p.emissionPoint}`;
+      const currentSeq = recordsMap.get(key) ?? 1;
       return {
         ...p,
         currentSequential: currentSeq,

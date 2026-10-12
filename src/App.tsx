@@ -269,14 +269,14 @@ export default function App() {
         return;
       }
 
-      const needsMigration = usersList.some(u => !u.username || !u.password);
+      const needsMigration = usersList.some(u => !u.username || (u as any).password);
       if (needsMigration) {
         const migrated = usersList.map(u => {
           const defaultUser = defaultUsersList.find(d => d.id === u.id || d.email === u.email);
+          const { password, ...safeUser } = u as any;
           return {
-            ...u,
-            username: u.username || defaultUser?.username || '1799999999001',
-            password: u.password || defaultUser?.password || 'admin'
+            ...safeUser,
+            username: safeUser.username || defaultUser?.username || '1799999999001'
           };
         });
         setUsersList(migrated);

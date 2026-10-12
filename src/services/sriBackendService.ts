@@ -101,18 +101,9 @@ export class SriBackendService {
   ): Promise<{ success: boolean; xmlFirmado?: string; claveAcceso?: string; error?: string }> {
     try {
       const baseUrl = this.getBaseUrl();
-      const base64 = certBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || '';
-      const pass = password ?? (localStorage.getItem('ferreteria_settings_p12_password') || '');
-
-      if (!base64) {
-        throw new Error('No se ha cargado la firma electrónica (.p12 en Base64). Diríjase a Configuración > Firma Electrónica para seleccionarla.');
-      }
-
-      const payload = {
-        xml,
-        certificadoBase64: base64,
-        password: pass,
-      };
+      const payload: any = { xml };
+      if (certBase64) payload.certificadoBase64 = certBase64;
+      if (password) payload.password = password;
 
       const resFirma = await fetch(`${baseUrl}/api/sri/firmar`, {
         method: 'POST',

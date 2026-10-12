@@ -59,7 +59,7 @@ export const COMPASS_COLLECTIONS: Record<string, string> = {
   ferreteria_supplier_payments: 'pagos_proveedores',
 
   // Caja, Bancos y Tesorería
-  ferreteria_cash_session: 'caja_sesiones',
+  ferreteria_cash_session: 'sesiones_caja',
   ferreteria_cash_sessions_history: 'caja_historial_cierres',
   ferreteria_bank_accounts: 'cuentas_bancarias',
   ferreteria_bank_transactions: 'transacciones_bancarias',

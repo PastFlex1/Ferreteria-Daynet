@@ -116,6 +116,8 @@ app.use(errorHandler);
 
 import { startSriWorker } from './services/sriWorker';
 
+import { populateRelationalFromAppState } from './scripts/syncRelational';
+
 // 6. Iniciar Servidor y verificar conexión a PostgreSQL
 async function startServer() {
   try {
@@ -123,6 +125,9 @@ async function startServer() {
     const db = await getDatabase();
     await db.admin().ping();
     console.log(`[PostgreSQL] ✓ Conexión exitosa a la base de datos relacional: '${currentDbName}'`);
+
+    // Sincronizar automáticamente registros a tablas relacionales de PostgreSQL
+    await populateRelationalFromAppState();
   } catch (err: any) {
     console.warn(`[PostgreSQL] ⚠ Advertencia al conectar en el arranque: ${err.message}`);
     console.warn(`[PostgreSQL] Verifique credenciales PGUSER/PGPASSWORD en .env`);

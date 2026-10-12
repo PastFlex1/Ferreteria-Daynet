@@ -70,8 +70,6 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const [sriMode] = usePostgresSync<'PRUEBAS' | 'PRODUCCION'>('ferreteria_settings_sri_mode', 'PRUEBAS');
   const [establishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
   const [emissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
-  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
   const barcodeRef = React.useRef<SVGSVGElement | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
@@ -340,9 +338,6 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
         // Firma XAdES-BES (/api/sri/firmar) -> Recepción SRI (/api/sri/recepcion) -> Autorización (/api/sri/autorizacion)
         setAnularStepText('Transmitiendo Nota de Crédito al backend SRI (:8080)...');
         try {
-          const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
-          const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
-
           setAnularStepText('Firmando y enviando Nota de Crédito al SRI...');
           const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
             newCreditNote,
@@ -350,9 +345,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             activeInvoice.createdAt,
             estab,
             ptoEmi,
-            (sriMode === 'PRODUCCION' ? '2' : '1'),
-            certBase64,
-            pass
+            (sriMode === 'PRODUCCION' ? '2' : '1')
           );
 
           if (sriRes) {

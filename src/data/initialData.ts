@@ -220,7 +220,7 @@ export const defaultPaymentMethods = [
 ];
 
 export const defaultUsersList = [
-  { id: 'USR-01', name: 'Administrador Principal', email: 'admin@ferreteria.com', username: '1799999999001', role: 'Administrador', status: 'Activo', password: 'admin' }
+  { id: 'USR-01', name: 'Administrador Principal', email: 'admin@ferreteria.com', username: '1799999999001', role: 'Administrador', status: 'Activo' }
 ];
 
 export const defaultSellers: any[] = [];

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
-import { getDatabase } from '../config/db';
+import { getDatabase, getPgPool } from '../config/db';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { logAuditEvent } from './audit.controller';
 
@@ -101,8 +101,8 @@ export function decryptPassword(encryptedHex: string, ivHex: string): string {
 
 /**
  * SERVICIO DE FIRMA SRI SEGURO EN EL SERVIDOR:
- * El certificado digital .p12 y su contraseña se guardan cifrados con AES-256 en el servidor
- * y NUNCA se transmiten al cliente. Solo los usa el servicio de firma.
+ * El certificado digital .p12 y su contraseña se guardan cifrados con AES-256 en la tabla certificados_sri
+ * y NUNCA se almacenan en app_state ni se transmiten al cliente.
  */
 export async function uploadCertificate(req: AuthenticatedRequest, res: Response) {
   try {
@@ -115,28 +115,25 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
       });
     }
 
-    // Cifrado criptográfico AES-256 de la contraseña en reposo
+    // Cifrado criptográfico AES-256 de la contraseña en reposo usando la llave del entorno
     const encryptedData = encryptPassword(String(password).trim());
 
-    const db = await getDatabase();
-    await db.collection('certificados_sri').updateOne(
-      { _id: 'active_certificate' as any },
-      {
-        $set: {
-          p12Base64,
-          encryptedPassword: encryptedData.encrypted,
-          iv: encryptedData.iv,
-          // Eliminamos cualquier password en texto plano
-          password: '[CIFRADO_AES_256]',
-          environment,
-          updatedAt: new Date(),
-          updatedBy: req.user?.username || 'admin',
-          status: 'ACTIVO'
-        }
-      },
-      { upsert: true }
+    const pool = getPgPool();
+    await pool.query(
+      `INSERT INTO certificados_sri (id, p12_base64, encrypted_password, iv, environment, status, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, 'ACTIVO', NOW(), $6)
+       ON CONFLICT (id) DO UPDATE
+       SET p12_base64 = EXCLUDED.p12_base64,
+           encrypted_password = EXCLUDED.encrypted_password,
+           iv = EXCLUDED.iv,
+           environment = EXCLUDED.environment,
+           status = 'ACTIVO',
+           updated_at = NOW(),
+           updated_by = EXCLUDED.updated_by`,
+      ['active_certificate', p12Base64, encryptedData.encrypted, encryptedData.iv, environment, req.user?.username || 'admin']
     );
 
+    const db = await getDatabase();
     await logAuditEvent(db, {
       userId: req.user?.id,
       username: req.user?.username || 'admin',
@@ -148,7 +145,7 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
 
     return res.status(200).json({
       success: true,
-      message: 'Certificado digital .p12 almacenado con éxito en el servidor seguro.',
+      message: 'Certificado digital .p12 almacenado con éxito en la bóveda segura con cifrado AES-256.',
       environment
     });
   } catch (error: any) {
@@ -165,10 +162,17 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
  */
 export async function getCertificateStatus(req: Request, res: Response) {
   try {
-    const db = await getDatabase();
-    const cert = await db.collection<any>('certificados_sri').findOne({ _id: 'active_certificate' as any });
+    const pool = getPgPool();
+    const result = await pool.query(
+      `SELECT id, environment, status, updated_at, updated_by,
+              (p12_base64 IS NOT NULL AND length(p12_base64) > 0) as has_cert
+       FROM certificados_sri WHERE id = $1`,
+      ['active_certificate']
+    );
 
-    if (!cert || !cert.p12Base64) {
+    const cert = result.rows[0];
+
+    if (!cert || !cert.has_cert) {
       return res.status(200).json({
         installed: false,
         message: 'No hay certificado digital .p12 instalado en el backend.'
@@ -178,8 +182,8 @@ export async function getCertificateStatus(req: Request, res: Response) {
     return res.status(200).json({
       installed: true,
       environment: cert.environment || 'PRUEBAS',
-      updatedAt: cert.updatedAt,
-      updatedBy: cert.updatedBy,
+      updatedAt: cert.updated_at,
+      updatedBy: cert.updated_by,
       status: cert.status || 'ACTIVO'
     });
   } catch (error: any) {
@@ -188,5 +192,111 @@ export async function getCertificateStatus(req: Request, res: Response) {
       message: 'Error al consultar estado del certificado.',
       error: error.message
     });
+  }
+}
+
+/**
+ * Elimina el certificado digital de la bóveda segura
+ */
+export async function deleteCertificate(req: AuthenticatedRequest, res: Response) {
+  try {
+    const pool = getPgPool();
+    await pool.query('DELETE FROM certificados_sri WHERE id = $1', ['active_certificate']);
+
+    const db = await getDatabase();
+    await logAuditEvent(db, {
+      userId: req.user?.id,
+      username: req.user?.username || 'admin',
+      action: 'ELIMINACION_CERTIFICADO_SRI',
+      entity: 'certificados_sri',
+      entityId: 'active_certificate',
+      details: { reason: 'Eliminado por el administrador' }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certificado digital eliminado de la bóveda segura.'
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error al eliminar certificado.',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Obtiene el certificado activo y desencripta su contraseña en memoria para el proceso de firma
+ */
+export async function getActiveCertificate(): Promise<{ p12Base64: string; password: string; environment: string } | null> {
+  try {
+    const pool = getPgPool();
+    const result = await pool.query(
+      `SELECT p12_base64, encrypted_password, iv, environment, status
+       FROM certificados_sri WHERE id = $1 AND status = 'ACTIVO'`,
+      ['active_certificate']
+    );
+
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    const password = decryptPassword(row.encrypted_password, row.iv);
+    return {
+      p12Base64: row.p12_base64,
+      password,
+      environment: row.environment || 'PRUEBAS'
+    };
+  } catch (err: any) {
+    console.error('[SRI Vault Error retrieving certificate]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Endpoint de firmado seguro: Si no se provee certificado en el body,
+ * se utiliza el certificado cifrado almacenado en la bóveda certificados_sri.
+ */
+export async function signXmlHandler(req: Request, res: Response) {
+  try {
+    const { xml } = req.body;
+    if (!xml) {
+      return res.status(400).send('El parámetro XML es requerido.');
+    }
+
+    // Firma EXCLUSIVA en el backend desde certificados_sri
+    const activeCert = await getActiveCertificate();
+    if (!activeCert) {
+      return res.status(400).send('No hay certificado digital activo en la bóveda certificados_sri. Cargue su archivo .p12 en Configuración.');
+    }
+
+    const certBase64 = activeCert.p12Base64;
+    const password = activeCert.password;
+
+    // Purgar de forma definitiva cualquier clave residual de p12 en app_state
+    try {
+      const pool = getPgPool();
+      await pool.query("DELETE FROM app_state WHERE id LIKE 'ferreteria_settings_p12%';");
+    } catch {}
+
+    // Intentar reenviar al backend Java local de firma si está configurado
+    const javaBackendUrl = process.env.SRI_JAVA_URL || 'http://localhost:8080/api/sri/firmar';
+    try {
+      const javaRes = await fetch(javaBackendUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xml, certificadoBase64: certBase64, password })
+      });
+
+      if (javaRes.ok) {
+        const signedXml = await javaRes.text();
+        return res.status(200).type('application/xml').send(signedXml);
+      }
+    } catch {
+      // Si el backend Java no está activo en este momento
+    }
+
+    return res.status(503).send('Servicio de firma digital local Java (:8080) no disponible. Verifique que el servicio de firma esté en ejecución.');
+  } catch (error: any) {
+    return res.status(500).send(`Error en el servicio de firma: ${error.message}`);
   }
 }

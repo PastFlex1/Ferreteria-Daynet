@@ -53,9 +53,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
 
   const establishment = propEstablishment || syncedEstablishment || '001';
   const emissionPoint = propEmissionPoint || (typeof window !== 'undefined' ? localStorage.getItem('ferreteria_terminal_emission_point') : null) || syncedEmissionPoint || '001';
-  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword, setSignaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
-  const [inputPassword, setInputPassword] = useState(signaturePassword || '');
+  const [inputPassword, setInputPassword] = useState('');
 
   // Pipeline execution state
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1); // 1: Firma, 2: Recepción, 3: Autorización, 4: Terminado
@@ -212,10 +210,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         setStep1Status('LOADING');
         setStep1Details(`Generando estructura XML (${workingInvoice.fullNumber}) y firmando con certificado digital...`);
 
-        const base64ToSend = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || '';
-        const passwordToSend = signaturePassword ?? (localStorage.getItem('ferreteria_settings_p12_password') || '');
-
-        const fRes = await SriBackendService.firmarXml(xmlOriginal, base64ToSend, passwordToSend);
+        const fRes = await SriBackendService.firmarXml(xmlOriginal, undefined, inputPassword || undefined);
 
         if (!fRes.success || !fRes.xmlFirmado) {
           setStep1Status('ERROR');
@@ -753,15 +748,11 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
                       type="button"
                       onClick={() => {
                         if (!inputPassword) return;
-                        setSignaturePassword(inputPassword);
-                        try {
-                          localStorage.setItem('ferreteria_settings_p12_password', inputPassword);
-                        } catch (e) {}
                         ejecutarProcesoEmisionSRI();
                       }}
                       className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-xl shadow-xs transition cursor-pointer whitespace-nowrap"
                     >
-                      Guardar y Firmar
+                      Continuar y Firmar
                     </button>
                   </div>
                 </div>

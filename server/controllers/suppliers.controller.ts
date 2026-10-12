@@ -1,40 +1,39 @@
 import { Request, Response } from 'express';
-import { getDatabase } from '../config/db';
+import { getPgPool } from '../config/db';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
+
+function mapSupplierRow(r: any) {
+  const customData = r.data || {};
+  return {
+    ...customData,
+    id: r.id,
+    name: r.name,
+    taxId: r.tax_id,
+    email: r.email || '',
+    phone: r.phone || '',
+    address: r.address || '',
+    contactPerson: r.contact_person || '',
+    updatedAt: r.updated_at
+  };
+}
 
 export async function getAllSuppliers(req: Request, res: Response) {
   try {
-    const db = await getDatabase();
+    const pool = getPgPool();
     const { q } = req.query;
 
-    const filter: any = {};
+    let queryText = 'SELECT * FROM proveedores WHERE 1=1';
+    const params: any[] = [];
+
     if (q) {
-      const searchRegex = new RegExp(String(q), 'i');
-      filter.$or = [
-        { name: searchRegex },
-        { taxId: searchRegex },
-        { contactPerson: searchRegex },
-        { email: searchRegex }
-      ];
+      params.push(`%${String(q).trim()}%`);
+      queryText += ` AND (name ILIKE $${params.length} OR tax_id ILIKE $${params.length} OR email ILIKE $${params.length} OR contact_person ILIKE $${params.length})`;
     }
 
-    const items = await db.collection('proveedores').find(filter).toArray();
+    queryText += ' ORDER BY name ASC;';
 
-    if (items.length === 0 && !q) {
-      const stateDoc = await db.collection<{ _id: string; data?: any[] }>('app_state').findOne({ _id: 'ferreteria_suppliers' });
-      if (stateDoc && Array.isArray(stateDoc.data)) {
-        return res.status(200).json({
-          success: true,
-          count: stateDoc.data.length,
-          data: stateDoc.data
-        });
-      }
-    }
-
-    const clean = items.map(item => {
-      const { _syncedAt, ...data } = item;
-      return { ...data, id: String(data.id || data._id) };
-    });
+    const result = await pool.query(queryText, params);
+    const clean = result.rows.map(mapSupplierRow);
 
     return res.status(200).json({
       success: true,
@@ -44,7 +43,7 @@ export async function getAllSuppliers(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar proveedores.',
+      message: 'Error al consultar proveedores desde PostgreSQL.',
       error: error.message
     });
   }
@@ -52,42 +51,38 @@ export async function getAllSuppliers(req: Request, res: Response) {
 
 export async function createSupplier(req: AuthenticatedRequest, res: Response) {
   try {
-    const db = await getDatabase();
-    const supplierData = req.body;
+    const pool = getPgPool();
+    const s = req.body;
+    const taxId = (s.taxId || s.tax_id || s.ruc || s.cedula || '').trim();
 
-    if (!supplierData.name || !supplierData.taxId) {
+    if (!s.name || !taxId) {
       return res.status(400).json({
         success: false,
         message: 'Razón Social y RUC/Identificación del proveedor son obligatorios.'
       });
     }
 
-    const customId = supplierData.id || `prov-${Date.now()}`;
-    const newDoc = {
-      _id: String(customId),
-      id: String(customId),
-      taxId: supplierData.taxId.trim(),
-      name: supplierData.name.trim(),
-      contactPerson: supplierData.contactPerson || '',
-      email: supplierData.email || '',
-      phone: supplierData.phone || '',
-      address: supplierData.address || '',
-      category: supplierData.category || 'General',
-      paymentTerms: supplierData.paymentTerms || 'Contado',
-      createdAt: new Date(),
-      _syncedAt: new Date()
-    };
+    const id = String(s.id || `prov-${Date.now()}`);
+    const name = String(s.name).trim();
+    const email = s.email || null;
+    const phone = s.phone || null;
+    const address = s.address || null;
+    const contact = s.contactPerson || s.contact_person || null;
 
-    await db.collection('proveedores').updateOne(
-      { _id: newDoc._id } as any,
-      { $set: newDoc },
-      { upsert: true }
-    );
+    const insertRes = await pool.query(`
+      INSERT INTO proveedores (id, name, tax_id, email, phone, address, contact_person, data)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      ON CONFLICT (id) DO UPDATE
+      SET name = EXCLUDED.name, tax_id = EXCLUDED.tax_id, email = EXCLUDED.email,
+          phone = EXCLUDED.phone, address = EXCLUDED.address,
+          contact_person = EXCLUDED.contact_person, data = EXCLUDED.data
+      RETURNING *;
+    `, [id, name, taxId, email, phone, address, contact, JSON.stringify(s)]);
 
     return res.status(201).json({
       success: true,
-      message: 'Proveedor registrado exitosamente.',
-      data: newDoc
+      message: 'Proveedor registrado exitosamente en PostgreSQL.',
+      data: mapSupplierRow(insertRes.rows[0])
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -101,32 +96,38 @@ export async function createSupplier(req: AuthenticatedRequest, res: Response) {
 export async function updateSupplier(req: AuthenticatedRequest, res: Response) {
   try {
     const { id } = req.params;
-    const db = await getDatabase();
+    const pool = getPgPool();
     const updates = req.body;
 
-    const existing = await db.collection('proveedores').findOne({
-      $or: [{ _id: id }, { id: id }, { taxId: id }]
-    } as any);
-
-    if (!existing) {
+    const checkRes = await pool.query('SELECT * FROM proveedores WHERE id = $1 OR tax_id = $1 LIMIT 1;', [id]);
+    if (checkRes.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Proveedor no encontrado.'
       });
     }
 
-    const { _id, id: docId, ...cleanUpdates } = updates;
-    cleanUpdates.updatedAt = new Date();
-    cleanUpdates._syncedAt = new Date();
+    const current = checkRes.rows[0];
+    const name = updates.name ? String(updates.name).trim() : current.name;
+    const taxId = updates.taxId || updates.tax_id || current.tax_id;
+    const email = updates.email !== undefined ? updates.email : current.email;
+    const phone = updates.phone !== undefined ? updates.phone : current.phone;
+    const address = updates.address !== undefined ? updates.address : current.address;
+    const contact = updates.contactPerson !== undefined ? updates.contactPerson : current.contact_person;
 
-    await db.collection('proveedores').updateOne(
-      { _id: existing._id } as any,
-      { $set: cleanUpdates }
-    );
+    const mergedData = { ...(current.data || {}), ...updates };
+
+    const updateRes = await pool.query(`
+      UPDATE proveedores
+      SET name = $2, tax_id = $3, email = $4, phone = $5, address = $6, contact_person = $7, data = $8::jsonb
+      WHERE id = $1
+      RETURNING *;
+    `, [current.id, name, taxId, email, phone, address, contact, JSON.stringify(mergedData)]);
 
     return res.status(200).json({
       success: true,
-      message: 'Proveedor actualizado exitosamente.'
+      message: 'Proveedor actualizado exitosamente en PostgreSQL.',
+      data: mapSupplierRow(updateRes.rows[0])
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -140,13 +141,11 @@ export async function updateSupplier(req: AuthenticatedRequest, res: Response) {
 export async function deleteSupplier(req: AuthenticatedRequest, res: Response) {
   try {
     const { id } = req.params;
-    const db = await getDatabase();
+    const pool = getPgPool();
 
-    const result = await db.collection('proveedores').deleteOne({
-      $or: [{ _id: id }, { id: id }]
-    } as any);
+    const result = await pool.query('DELETE FROM proveedores WHERE id = $1 OR tax_id = $1 RETURNING id, name;', [id]);
 
-    if (result.deletedCount === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Proveedor no encontrado.'
@@ -155,7 +154,7 @@ export async function deleteSupplier(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: 'Proveedor eliminado correctamente.'
+      message: `Proveedor '${result.rows[0].name}' eliminado correctamente de PostgreSQL.`
     });
   } catch (error: any) {
     return res.status(500).json({

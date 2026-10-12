@@ -62,6 +62,7 @@ import { validateEcuadorianDocument } from '../../utils/ecuadorianValidator';
 import { UserPermissionsModal } from './UserPermissionsModal';
 import { RoleModal } from './RoleModal';
 import { useTheme } from '../../context/ThemeContext';
+import { getApiUrl, getAuthHeaders } from '../../lib/apiConfig';
 
 import { exportDatabaseBackup, inspectBackupFile, restoreDatabaseBackup, BackupPayload } from '../../services/backupService';
 import { PostgresConnectorCard } from './PostgresConnectorCard';
@@ -102,14 +103,37 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setFormData({ ...initialStoreSettings, ...settings });
   }, [settings]);
 
-  // Digital Signature (.p12 / Base64) State
-  const [signatureBase64, setSignatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
-  const [signatureFileName, setSignatureFileName] = usePostgresSync<string>('ferreteria_settings_p12_filename', '');
-  const [signatureFileSize, setSignatureFileSize] = usePostgresSync<string>('ferreteria_settings_p12_filesize', '');
-  const [signaturePassword, setSignaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
-  const [signatureUploadDate, setSignatureUploadDate] = usePostgresSync<string>('ferreteria_settings_p12_upload_date', '');
+  // Digital Signature (.p12 / Base64) Secure Vault State
+  const [signatureBase64, setSignatureBase64] = useState<string>('');
+  const [signatureFileName, setSignatureFileName] = useState<string>('');
+  const [signatureFileSize, setSignatureFileSize] = useState<string>('');
+  const [signaturePassword, setSignaturePassword] = useState<string>('');
+  const [isSavingCertificate, setIsSavingCertificate] = useState<boolean>(false);
+  const [vaultCertStatus, setVaultCertStatus] = useState<{
+    installed: boolean;
+    environment?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+    status?: string;
+  } | null>(null);
   const [showSignaturePassword, setShowSignaturePassword] = useState(false);
   const [copiedBase64, setCopiedBase64] = useState(false);
+
+  const fetchCertificateStatus = async () => {
+    try {
+      const res = await fetch(getApiUrl('/api/sri/certificate/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setVaultCertStatus(data);
+      }
+    } catch (err) {
+      console.warn('Error consultando estado del certificado en bóveda:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCertificateStatus();
+  }, []);
 
   // Java Backend API URL State
   const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8080/api/sri');
@@ -580,15 +604,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setSignatureBase64(cleanBase64);
       setSignatureFileName(file.name);
       setSignatureFileSize(`${(file.size / 1024).toFixed(1)} KB`);
-      setSignatureUploadDate(new Date().toISOString());
 
-      try {
-        localStorage.setItem('ferreteria_settings_p12_base64', cleanBase64);
-        localStorage.setItem('ferreteria_settings_p12_filename', file.name);
-        localStorage.setItem('ferreteria_settings_p12_filesize', `${(file.size / 1024).toFixed(1)} KB`);
-      } catch (err) {}
-
-      showToast(`Certificado digital "${file.name}" cargado y convertido a Base64 exitosamente.`, 'success');
+      showToast(`Archivo "${file.name}" cargado en memoria. Ingrese la contraseña y guarde para cifrarlo en el servidor con AES-256.`, 'success');
     };
     reader.onerror = () => {
       showAlert('Ocurrió un error al leer el archivo .p12. Intente nuevamente.', 'Error de Lectura', 'error');
@@ -598,19 +615,28 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   const handleRemoveSignature = () => {
     showConfirm(
-      '¿Está seguro de eliminar el certificado digital actual? Deberá cargar un nuevo archivo .p12 para firmar facturas electrónicas del SRI.',
-      () => {
-        setSignatureBase64('');
-        setSignatureFileName('');
-        setSignatureFileSize('');
-        setSignaturePassword('');
-        setSignatureUploadDate('');
+      '¿Está seguro de eliminar el certificado digital actual de la bóveda segura? Deberá cargar un nuevo archivo .p12 para firmar facturas electrónicas del SRI.',
+      async () => {
         try {
-          localStorage.removeItem('ferreteria_settings_p12_base64');
-          localStorage.removeItem('ferreteria_settings_p12_filename');
-          localStorage.removeItem('ferreteria_settings_p12_password');
-        } catch (err) {}
-        showToast('Certificado digital eliminado.', 'info');
+          const res = await fetch(getApiUrl('/api/sri/certificate'), {
+            method: 'DELETE',
+            headers: {
+              ...getAuthHeaders(),
+            },
+          });
+          if (res.ok) {
+            setSignatureBase64('');
+            setSignatureFileName('');
+            setSignatureFileSize('');
+            setSignaturePassword('');
+            await fetchCertificateStatus();
+            showToast('Certificado digital eliminado de la bóveda segura del servidor.', 'info');
+          } else {
+            showAlert('No se pudo eliminar el certificado del servidor.', 'Error', 'error');
+          }
+        } catch (err: any) {
+          showAlert(`Error: ${err.message}`, 'Error', 'error');
+        }
       },
       'Eliminar Firma Electrónica'
     );
@@ -622,6 +648,56 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setCopiedBase64(true);
     showToast('Cadena Base64 copiada al portapapeles.', 'success');
     setTimeout(() => setCopiedBase64(false), 2500);
+  };
+
+  const handleSaveCertificateToVault = async () => {
+    SriBackendService.setBaseUrl(sriApiUrl);
+
+    if (signatureBase64) {
+      if (!signaturePassword) {
+        showAlert('Por favor ingrese la contraseña del certificado .p12 para cifrarlo con AES-256 en el servidor.', 'Contraseña Requerida', 'warning');
+        return;
+      }
+
+      setIsSavingCertificate(true);
+      try {
+        const res = await fetch(getApiUrl('/api/sri/certificate'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({
+            p12Base64: signatureBase64,
+            password: signaturePassword,
+            environment: sriMode,
+          }),
+        });
+
+        const data = await res.json();
+        setIsSavingCertificate(false);
+
+        if (res.ok && data.success) {
+          setSignatureBase64('');
+          setSignaturePassword('');
+          setSignatureFileName('');
+          setSignatureFileSize('');
+          await fetchCertificateStatus();
+          setSavedSuccess(true);
+          showToast('Certificado digital y contraseña cifrados con AES-256 y guardados en la tabla certificados_sri.', 'success');
+          setTimeout(() => setSavedSuccess(false), 3000);
+        } else {
+          showAlert(data.message || 'Error al almacenar el certificado en la bóveda.', 'Error en Servidor', 'error');
+        }
+      } catch (err: any) {
+        setIsSavingCertificate(false);
+        showAlert(`Error de comunicación con el servidor: ${err.message}`, 'Error de Red', 'error');
+      }
+    } else {
+      setSavedSuccess(true);
+      showToast('Configuración de firma y backend actualizada correctamente.', 'success');
+      setTimeout(() => setSavedSuccess(false), 3000);
+    }
   };
 
   const handleTestBackendConnection = async () => {
@@ -1260,25 +1336,86 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
             </div>
             <span className={`px-3 py-1 rounded-full text-xs font-black border flex items-center gap-1.5 ${
-              signatureBase64
+              vaultCertStatus?.installed
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                 : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
             }`}>
-              {signatureBase64 ? (
+              {vaultCertStatus?.installed ? (
                 <>
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Firma Vinculada (Base64)</span>
+                  <span>Certificado Cifrado en Bóveda (AES-256)</span>
                 </>
               ) : (
                 <>
                   <AlertTriangle className="w-4 h-4 text-rose-400" />
-                  <span>Sin Firma Digital</span>
+                  <span>Sin Certificado en Servidor</span>
                 </>
               )}
             </span>
           </div>
 
           <div className="space-y-6">
+            {/* 1. ESTADO DEL CERTIFICADO EN BÓVEDA SEGURA */}
+            {vaultCertStatus?.installed ? (
+              <div className="p-5 bg-emerald-950/20 rounded-2xl border border-emerald-500/30 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+                      <ShieldCheck className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black text-white uppercase tracking-wider">
+                          Certificado Digital Instalado en el Servidor
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          {vaultCertStatus.status || 'ACTIVO'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Almacenado de forma segura en tabla protegida <code>certificados_sri</code> con cifrado <strong>AES-256-CBC</strong>. La llave reside en variable de entorno.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveSignature}
+                    className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                    title="Eliminar Firma de la Bóveda"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Eliminar Certificado</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-[11px] border-t border-emerald-500/20 text-slate-400">
+                  <div>
+                    <span className="text-slate-500 block">Ambiente:</span>
+                    <strong className="text-white">{vaultCertStatus.environment || 'PRUEBAS'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">Última Actualización:</span>
+                    <strong className="text-white">
+                      {vaultCertStatus.updatedAt ? new Date(vaultCertStatus.updatedAt).toLocaleString('es-EC') : 'Reciente'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">Usuario:</span>
+                    <strong className="text-white">{vaultCertStatus.updatedBy || 'admin'}</strong>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 bg-amber-500/5 rounded-2xl border border-amber-500/20 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-slate-300">
+                  <p className="font-bold text-amber-300">Ningún certificado digital instalado en el servidor seguro</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Para emitir facturas electrónicas con validez tributaria ante el SRI, cargue su archivo de firma (.p12 o .pfx) a continuación. El archivo y su contraseña se cifrarán con AES-256 en el servidor y nunca se guardarán en texto plano.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Uploader Box */}
             <div className="p-6 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1380,12 +1517,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <input
                   type={showSignaturePassword ? 'text' : 'password'}
                   value={signaturePassword}
-                  onChange={(e) => {
-                    setSignaturePassword(e.target.value);
-                    try {
-                      localStorage.setItem('ferreteria_settings_p12_password', e.target.value);
-                    } catch (err) {}
-                  }}
+                  onChange={(e) => setSignaturePassword(e.target.value)}
                   placeholder="Ingrese la contraseña de su archivo .p12"
                   className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-amber-500 pr-10"
                 />
@@ -1543,16 +1675,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             <div className="pt-4 border-t border-slate-800 flex justify-end">
               <button
                 type="button"
-                onClick={() => {
-                  SriBackendService.setBaseUrl(sriApiUrl);
-                  setSavedSuccess(true);
-                  showToast('Firma electrónica, contraseña y URL de Backend guardadas exitosamente.', 'success');
-                  setTimeout(() => setSavedSuccess(false), 3000);
-                }}
-                className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-black rounded-xl text-xs transition shadow-md shadow-amber-500/20 flex items-center space-x-2 cursor-pointer"
+                disabled={isSavingCertificate}
+                onClick={handleSaveCertificateToVault}
+                className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-black rounded-xl text-xs transition shadow-md shadow-amber-500/20 flex items-center space-x-2 cursor-pointer disabled:opacity-50"
               >
-                <Save className="w-4 h-4" />
-                <span>Guardar Configuración de Firma & API</span>
+                <Save className={`w-4 h-4 ${isSavingCertificate ? 'animate-spin' : ''}`} />
+                <span>{isSavingCertificate ? 'Cifrando y Guardando...' : 'Guardar Configuración de Firma & Bóveda'}</span>
               </button>
             </div>
           </div>

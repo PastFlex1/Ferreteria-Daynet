@@ -181,9 +181,6 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
   const [selectedInvoiceForSri, setSelectedInvoiceForSri] = useState<Invoice | null>(null);
   const [isSriModalOpen, setIsSriModalOpen] = useState(false);
 
-  const [signatureBase64] = usePostgresSync<string>('ferreteria_settings_p12_base64', '');
-  const [signaturePassword] = usePostgresSync<string>('ferreteria_settings_p12_password', '');
-
   const handleSaveCreditNote = async (data: any) => {
     // Evitar generación de duplicados si ya existe Nota de Crédito para esta factura
     const alreadyExists = creditNotes.some(
@@ -226,17 +223,13 @@ export const SalesModuleView: React.FC<SalesModuleViewProps> = ({
     } else {
       showToast('Transmitiendo Nota de Crédito a API local (:8080)...', 'info');
       try {
-        const certBase64 = signatureBase64 || localStorage.getItem('ferreteria_settings_p12_base64') || undefined;
-        const pass = signaturePassword || localStorage.getItem('ferreteria_settings_p12_password') || undefined;
         const sriRes = await SriBackendService.emitirNotaCreditoCompleta(
           data,
           settings,
           targetInvoice?.createdAt,
           establishment,
           emissionPoint,
-          sriMode === 'PRODUCCION' ? '2' : '1',
-          certBase64,
-          pass
+          sriMode === 'PRODUCCION' ? '2' : '1'
         );
 
         if (sriRes) {
