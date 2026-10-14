@@ -27,7 +27,8 @@ apiRouter.use('/proveedores', supplierRoutes);
 apiRouter.use('/inventory', inventoryRoutes);
 apiRouter.use('/sri', sriRoutes);
 apiRouter.use('/sync', syncRoutes);
-apiRouter.use('/postgres', syncRoutes);
+apiRouter.use('/sqlite', syncRoutes);
+apiRouter.use('/postgres', syncRoutes); // Alias retrocompatible
 apiRouter.use('/audit', auditRoutes);
 apiRouter.use('/accounting', accountingRoutes);
 apiRouter.use('/backup', backupRoutes);
@@ -40,7 +41,7 @@ apiRouter.get('/', (req, res) => {
     service: 'Ferretería Daynet - Core ERP Backend API Institucional',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
-    concurrencyControl: 'Habilitado (PostgreSQL ACID Concurrency + SSE)',
+    concurrencyControl: 'Habilitado (SQLite ACID WAL Concurrency + SSE)',
     emissionPointsTDR: '4 Puntos de Emisión activos (001, 002, 003, 004)',
     architectureCompliance: {
       spaStaticServer: 'dist/ servido con Nginx/Express en puerto 5000',

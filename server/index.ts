@@ -118,19 +118,18 @@ import { startSriWorker } from './services/sriWorker';
 
 import { populateRelationalFromAppState } from './scripts/syncRelational';
 
-// 6. Iniciar Servidor y verificar conexión a PostgreSQL
+// 6. Iniciar Servidor y verificar conexión a SQLite
 async function startServer() {
   try {
-    console.log(`[Express] Conectando a PostgreSQL en: ${currentUri}...`);
+    console.log(`[Express] Conectando a SQLite en: ${currentUri}...`);
     const db = await getDatabase();
     await db.admin().ping();
-    console.log(`[PostgreSQL] ✓ Conexión exitosa a la base de datos relacional: '${currentDbName}'`);
+    console.log(`[SQLite] ✓ Conexión exitosa a la base de datos relacional: '${currentDbName}'`);
 
-    // Sincronizar automáticamente registros a tablas relacionales de PostgreSQL
+    // Sincronizar automáticamente registros a tablas relacionales de SQLite
     await populateRelationalFromAppState();
   } catch (err: any) {
-    console.warn(`[PostgreSQL] ⚠ Advertencia al conectar en el arranque: ${err.message}`);
-    console.warn(`[PostgreSQL] Verifique credenciales PGUSER/PGPASSWORD en .env`);
+    console.warn(`[SQLite] ⚠ Advertencia al conectar en el arranque: ${err.message}`);
   }
 
   // Iniciar worker de fondo de cola SRI (según auditoría: cola_sri con reintentos sin cambio de secuencial)

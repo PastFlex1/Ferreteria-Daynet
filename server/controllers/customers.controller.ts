@@ -47,7 +47,7 @@ export async function getAllCustomers(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar clientes desde PostgreSQL.',
+      message: 'Error al consultar clientes desde SQLite.',
       error: error.message
     });
   }
@@ -121,7 +121,7 @@ export async function createCustomer(req: AuthenticatedRequest, res: Response) {
 
     return res.status(201).json({
       success: true,
-      message: 'Cliente registrado exitosamente en PostgreSQL.',
+      message: 'Cliente registrado exitosamente en SQLite.',
       data: mapCustomerRow(insertRes.rows[0])
     });
   } catch (error: any) {
@@ -177,7 +177,7 @@ export async function updateCustomer(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: 'Cliente actualizado exitosamente en PostgreSQL.',
+      message: 'Cliente actualizado exitosamente en SQLite.',
       data: mapCustomerRow(updateRes.rows[0])
     });
   } catch (error: any) {
@@ -205,7 +205,7 @@ export async function deleteCustomer(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: `Cliente '${result.rows[0].name}' eliminado correctamente de PostgreSQL.`
+      message: `Cliente '${result.rows[0].name}' eliminado correctamente de SQLite.`
     });
   } catch (error: any) {
     if (error.code === '23503') {

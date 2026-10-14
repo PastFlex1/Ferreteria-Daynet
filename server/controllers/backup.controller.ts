@@ -40,7 +40,7 @@ export async function generateServerDump(req: AuthenticatedRequest, res: Respons
 
     const payload = {
       metadata: {
-        engine: 'PostgreSQL Server Dump Institucional',
+        engine: 'SQLite Database Dump Institucional',
         database: currentDbName,
         exportedAt: new Date().toISOString(),
         exportedBy: req.user?.username || 'admin',

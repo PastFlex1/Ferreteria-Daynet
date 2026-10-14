@@ -35,7 +35,7 @@ function requireDocReadAuth(req: AuthenticatedRequest, res: Response, next: Next
 // 1. Canal de eventos SSE en tiempo real (admite autenticación con JWT por header o query parameter)
 router.get('/events', optionalToken, sseEvents);
 
-// 2. Consulta de estado y diagnóstico de PostgreSQL
+// 2. Consulta de estado y diagnóstico de SQLite
 router.get('/status', optionalToken, getStatus);
 
 // 3. Probar o cambiar conexión a base de datos
@@ -44,13 +44,13 @@ router.post('/test-connection', optionalToken, testConnection);
 // 4. Lectura de documentos
 router.get('/doc/:docId', optionalToken, getDoc);
 
-// 5. Escritura atómica de documentos en PostgreSQL
+// 5. Escritura atómica de documentos en SQLite
 router.post('/doc/:docId', optionalToken, saveDoc);
 
-// 6. Sincronización masiva hacia PostgreSQL
+// 6. Sincronización masiva hacia SQLite
 router.post('/sync-all', optionalToken, syncAll);
 
-// 7. Extracción masiva de la base de datos PostgreSQL
+// 7. Extracción masiva de la base de datos SQLite
 router.get('/pull-all', optionalToken, pullAll);
 
 export default router;

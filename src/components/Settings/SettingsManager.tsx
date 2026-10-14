@@ -3391,12 +3391,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">Base de Datos Local & Copias de Seguridad</h2>
-                <p className="text-xs text-slate-400 font-medium">Conexión directa con PostgreSQL 18 (pgAdmin / DBeaver), exportación y restauración completa de datos</p>
+                <p className="text-xs text-slate-400 font-medium">Base de datos SQLite 3 relacional autónoma, exportación y restauración completa de datos</p>
               </div>
             </div>
           </div>
 
-          {/* PostgreSQL 18 Local (pgAdmin / DBeaver) Plug-and-Play Card */}
+          {/* SQLite 3 Local (DBeaver / SQLiteStudio) Plug-and-Play Card */}
           <PostgresConnectorCard />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

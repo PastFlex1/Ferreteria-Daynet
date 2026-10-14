@@ -70,7 +70,7 @@ export async function getAllInvoices(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar facturas desde PostgreSQL.',
+      message: 'Error al consultar facturas desde SQLite.',
       error: error.message
     });
   }
@@ -116,7 +116,7 @@ export async function getInvoiceById(req: Request, res: Response) {
 
 /**
  * LÓGICA DE FACTURACIÓN EN EL SERVIDOR:
- * - Ejecutada dentro de una única transacción ACID en PostgreSQL.
+ * - Ejecutada dentro de una única transacción ACID en SQLite.
  * - Secuencial asignado atómicamente con UPDATE secuenciales_emision ... RETURNING current_sequential.
  * - Validación de períodos fiscales abiertos.
  * - Deducción atómica de existencias y registro inmutable en kardex_movimientos (RESTRICT).
@@ -480,7 +480,7 @@ export async function createInvoice(req: AuthenticatedRequest, res: Response) {
 
     return res.status(201).json({
       success: true,
-      message: 'Factura emitida y registrada exitosamente en PostgreSQL (ACID).',
+      message: 'Factura emitida y registrada exitosamente en SQLite (ACID).',
       data: finalInvoice,
       invoice: finalInvoice,
       sequential: invoiceNumber
@@ -546,14 +546,14 @@ export async function reserveSequential(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al reservar secuencial atómico en PostgreSQL.',
+      message: 'Error al reservar secuencial atómico en SQLite.',
       error: error.message
     });
   }
 }
 
 /**
- * LISTAR LOS 4 PUNTOS DE EMISIÓN CON SU SECUENCIAL DIRECTO DE POSTGRESQL
+ * LISTAR LOS 4 PUNTOS DE EMISIÓN CON SU SECUENCIAL DIRECTO DE SQLITE
  */
 export async function getEmissionPoints(req: Request, res: Response) {
   const pool = getPgPool();

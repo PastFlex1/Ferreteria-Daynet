@@ -60,7 +60,7 @@ export async function getAllProducts(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar productos de PostgreSQL.',
+      message: 'Error al consultar productos de SQLite.',
       error: error.message
     });
   }
@@ -153,13 +153,13 @@ export async function createProduct(req: AuthenticatedRequest, res: Response) {
 
     return res.status(201).json({
       success: true,
-      message: 'Producto registrado exitosamente en PostgreSQL.',
+      message: 'Producto registrado exitosamente en SQLite.',
       data: mapProductRow(insertRes.rows[0])
     });
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al registrar producto en PostgreSQL.',
+      message: 'Error al registrar producto en SQLite.',
       error: error.message
     });
   }
@@ -207,7 +207,7 @@ export async function updateProduct(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: 'Producto actualizado exitosamente en PostgreSQL.',
+      message: 'Producto actualizado exitosamente en SQLite.',
       data: mapProductRow(updateRes.rows[0])
     });
   } catch (error: any) {
@@ -235,10 +235,10 @@ export async function deleteProduct(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: `Producto '${result.rows[0].name}' eliminado correctamente de PostgreSQL.`
+      message: `Producto '${result.rows[0].name}' eliminado correctamente de SQLite.`
     });
   } catch (error: any) {
-    // Código de violación de llave foránea en PostgreSQL (RESTRICT)
+    // Violación de llave foránea (RESTRICT)
     if (error.code === '23503') {
       return res.status(409).json({
         success: false,

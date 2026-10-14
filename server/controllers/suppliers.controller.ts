@@ -43,7 +43,7 @@ export async function getAllSuppliers(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar proveedores desde PostgreSQL.',
+      message: 'Error al consultar proveedores desde SQLite.',
       error: error.message
     });
   }
@@ -81,7 +81,7 @@ export async function createSupplier(req: AuthenticatedRequest, res: Response) {
 
     return res.status(201).json({
       success: true,
-      message: 'Proveedor registrado exitosamente en PostgreSQL.',
+      message: 'Proveedor registrado exitosamente en SQLite.',
       data: mapSupplierRow(insertRes.rows[0])
     });
   } catch (error: any) {
@@ -126,7 +126,7 @@ export async function updateSupplier(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: 'Proveedor actualizado exitosamente en PostgreSQL.',
+      message: 'Proveedor actualizado exitosamente en SQLite.',
       data: mapSupplierRow(updateRes.rows[0])
     });
   } catch (error: any) {
@@ -154,7 +154,7 @@ export async function deleteSupplier(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: `Proveedor '${result.rows[0].name}' eliminado correctamente de PostgreSQL.`
+      message: `Proveedor '${result.rows[0].name}' eliminado correctamente de SQLite.`
     });
   } catch (error: any) {
     return res.status(500).json({

@@ -1,8 +1,8 @@
 import bcrypt from 'bcryptjs';
-import { getPgPool } from '../config/postgres';
+import { getSqlitePool as getPool } from '../config/sqlite';
 
 export async function fixSecurityAlerts() {
-  const pool = getPgPool();
+  const pool = getPool();
   console.log('🔒 INICIANDO APLICACIÓN DE PARCHES DE SEGURIDAD...');
 
   // =========================================================================

@@ -1,29 +1,38 @@
 import dotenv from 'dotenv';
-import { getPgPool, PostgresDatabase, initializePostgresSchema, pgConfig } from './postgres';
+import { 
+  getSqlitePool, 
+  getSqliteDb,
+  SqliteDatabase, 
+  initializeSqliteSchema, 
+  currentDbName, 
+  currentUri,
+  sqliteFilePath 
+} from './sqlite';
 
 dotenv.config();
 
-export const currentDbName = process.env.PGDATABASE || 'ferreteria_daynet';
-export const currentUri = process.env.DATABASE_URL || 
-  `postgresql://${pgConfig.user}:***@${pgConfig.host}:${pgConfig.port}/${currentDbName}`;
+export { currentDbName, currentUri, sqliteFilePath };
 
-let cachedDb: PostgresDatabase | null = null;
+let cachedDb: SqliteDatabase | null = null;
 
 /**
- * Retorna la instancia de Base de Datos PostgreSQL Institucional:
- * 100% PostgreSQL con soporte para transacciones ACID, tablas relacionales y JSONB.
+ * Retorna la instancia de Base de Datos SQLite Institucional:
+ * 100% Offline, portable, embebida y con soporte completo para transacciones ACID.
  */
-export async function getDatabase(): Promise<PostgresDatabase> {
+export async function getDatabase(): Promise<SqliteDatabase> {
   if (!cachedDb) {
-    const pool = getPgPool();
-    cachedDb = new PostgresDatabase(currentDbName, pool);
-    // Verificar esquema al conectar
-    await initializePostgresSchema();
+    cachedDb = new SqliteDatabase(currentDbName);
+    // Verificar y crear esquema al conectar
+    await initializeSqliteSchema();
   }
   return cachedDb;
 }
 
-export { getPgPool };
+// Exportamos el pool SQLite bajo el alias getPgPool para que ningún controlador falle
+export const getPgPool = getSqlitePool;
+export { getSqlitePool, getSqliteDb, initializeSqliteSchema };
+export const initializePostgresSchema = initializeSqliteSchema;
+export { SqliteDatabase as PostgresDatabase };
 
 export const COMPASS_COLLECTIONS: Record<string, string> = {
   // Productos e Inventario

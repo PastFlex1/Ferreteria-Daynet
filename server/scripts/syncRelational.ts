@@ -1,7 +1,7 @@
-import { getPgPool } from '../config/postgres';
+import { getSqlitePool as getPool } from '../config/sqlite';
 
 export async function populateRelationalFromAppState() {
-  const pool = getPgPool();
+  const pool = getPool();
   console.log('🔄 Sincronizando datos de app_state hacia tablas relacionales...');
 
   // 1. Obtener todo app_state

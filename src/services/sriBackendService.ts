@@ -487,7 +487,7 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_invoice', nextSecSetting);
-            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_invoice'), {
+            fetch(getApiUrl('/api/sqlite/doc/ferreteria_settings_sec_invoice'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
@@ -617,7 +617,7 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
+            fetch(getApiUrl('/api/sqlite/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
@@ -665,7 +665,7 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
+            fetch(getApiUrl('/api/sqlite/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
@@ -698,7 +698,7 @@ export class SriBackendService {
           const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
           try {
             localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch(getApiUrl('/api/postgres/doc/ferreteria_settings_sec_credit_note'), {
+            fetch(getApiUrl('/api/sqlite/doc/ferreteria_settings_sec_credit_note'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ data: nextSecSetting })
@@ -846,7 +846,7 @@ export class SriBackendService {
       const numMatch = aRes.autorizacion ? aRes.autorizacion.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/) : null;
       const fechaMatch = aRes.autorizacion ? aRes.autorizacion.match(/<fechaAutorizacion.*?>(.*?)<\/fechaAutorizacion>/) : null;
 
-      // Actualizar secuencial en almacenamiento local y PostgreSQL si procede
+      // Actualizar secuencial en almacenamiento local y SQLite si procede
       const nextSecNumber = parseInt(formattedSec, 10) + 1;
       localStorage.setItem('ferreteria_settings_sec_retention', String(nextSecNumber));
 

@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import {
   getDatabase,
@@ -584,7 +583,7 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
       await col.updateOne({ _id: docId }, { $set: data }, { upsert: true });
     }
   } catch (err: any) {
-    console.warn(`[PostgreSQL Sync] Warning syncing to relational table for '${docId}':`, err?.message);
+    console.warn(`[SQLite Sync] Warning syncing to relational table for '${docId}':`, err?.message);
   }
 }
 
@@ -618,7 +617,7 @@ export async function getStatus(req: Request, res: Response) {
 
     return res.status(200).json({
       connected: true,
-      engine: 'PostgreSQL 18 Relacional',
+      engine: 'SQLite 3 Local Relacional',
       uri: currentUri,
       dbName: currentDbName,
       collections: cols.map(c => c.name),
@@ -628,10 +627,10 @@ export async function getStatus(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(200).json({
       connected: false,
-      engine: 'PostgreSQL 18 Relacional',
+      engine: 'SQLite 3 Local Relacional',
       uri: currentUri,
       dbName: currentDbName,
-      error: error.message || 'No se pudo conectar a PostgreSQL',
+      error: error.message || 'No se pudo conectar a SQLite',
       timestamp: new Date().toISOString()
     });
   }
@@ -639,26 +638,19 @@ export async function getStatus(req: Request, res: Response) {
 
 export async function testConnection(req: Request, res: Response) {
   try {
-    const testUri = (req.body.uri || currentUri).trim();
-    const testClient = new pg.Client({
-      connectionString: testUri.includes('postgresql://') ? testUri : undefined,
-      connectionTimeoutMillis: 3000
-    });
-
-    await testClient.connect();
-    const result = await testClient.query('SELECT current_database(), version();');
-    await testClient.end();
+    const pool = getPgPool();
+    const result = await pool.query('SELECT 1 as test;');
 
     return res.status(200).json({
       success: true,
-      message: `Conexión exitosa con PostgreSQL`,
-      database: result.rows[0]?.current_database,
-      version: result.rows[0]?.version
+      message: `Conexión exitosa con SQLite`,
+      database: currentDbName,
+      version: 'SQLite 3 (Embedded Local)'
     });
   } catch (error: any) {
     return res.status(200).json({
       success: false,
-      message: error.message || 'Error al conectar con PostgreSQL',
+      message: error.message || 'Error al conectar con SQLite',
       error: error.message
     });
   }
@@ -1033,7 +1025,7 @@ export async function syncAll(req: Request, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: `Se sincronizaron ${docIds.length} tablas con PostgreSQL relacional exitosamente.`,
+      message: `Se sincronizaron ${docIds.length} tablas con SQLite relacional exitosamente.`,
       collectionsSynced: docIds
     });
   } catch (error: any) {

@@ -122,9 +122,9 @@ export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ 
 
   const exportData: Record<string, any> = {};
 
-  // 1. Attempt to fetch all docs from PostgreSQL Local
+  // 1. Attempt to fetch all docs from SQLite Local
   try {
-    const res = await fetch(getApiUrl('/api/postgres/pull-all'), {
+    const res = await fetch(getApiUrl('/api/sqlite/pull-all'), {
       headers: { 'Accept': 'application/json', ...getAuthHeaders() },
       cache: 'no-store'
     });
@@ -135,7 +135,7 @@ export async function exportDatabaseBackup(settings?: StoreSettings): Promise<{ 
       }
     }
   } catch (error) {
-    console.warn('Could not read from PostgreSQL pull-all, falling back to localStorage:', error);
+    console.warn('Could not read from SQLite pull-all, falling back to localStorage:', error);
   }
 
   // 2. Supplement / fallback from localStorage
@@ -294,7 +294,7 @@ export async function inspectBackupFile(file: File): Promise<BackupPayload> {
 }
 
 /**
- * Restores all collections into PostgreSQL 18 Local and localStorage.
+ * Restores all collections into SQLite Local and localStorage.
  */
 export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ restoredCount: number }> {
   const data = backup.data;
@@ -315,18 +315,18 @@ export async function restoreDatabaseBackup(backup: BackupPayload): Promise<{ re
     }
   }
 
-  // 2. Synchronize entire backup payload to PostgreSQL
+  // 2. Synchronize entire backup payload to SQLite
   try {
-    const res = await fetch(getApiUrl('/api/postgres/sync-all'), {
+    const res = await fetch(getApiUrl('/api/sqlite/sync-all'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ data })
     });
     if (!res.ok) {
-      console.warn('PostgreSQL sync-all returned status:', res.status);
+      console.warn('SQLite sync-all returned status:', res.status);
     }
   } catch (err) {
-    console.warn('Error saving backup to PostgreSQL:', err);
+    console.warn('Error saving backup to SQLite:', err);
   }
 
   return {

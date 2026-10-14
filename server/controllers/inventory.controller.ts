@@ -42,7 +42,7 @@ export async function getKardexMovements(req: Request, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al consultar movimientos del Kardex desde PostgreSQL.',
+      message: 'Error al consultar movimientos del Kardex desde SQLite.',
       error: error.message
     });
   }
@@ -114,7 +114,7 @@ export async function createAdjustment(req: AuthenticatedRequest, res: Response)
 
     return res.status(201).json({
       success: true,
-      message: 'Ajuste de inventario procesado en PostgreSQL correctamente.',
+      message: 'Ajuste de inventario procesado en SQLite correctamente.',
       data: {
         product: product.name,
         previousStock: currentStock,

@@ -258,7 +258,7 @@ export async function getUsers(req: AuthenticatedRequest, res: Response) {
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al listar usuarios desde PostgreSQL.',
+      message: 'Error al listar usuarios desde SQLite.',
       error: error.message
     });
   }
@@ -316,13 +316,13 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
 
     return res.status(200).json({
       success: true,
-      message: 'Usuario guardado exitosamente con contraseña cifrada en PostgreSQL.',
+      message: 'Usuario guardado exitosamente con contraseña cifrada en SQLite.',
       user: safeData
     });
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      message: 'Error al guardar usuario en PostgreSQL.',
+      message: 'Error al guardar usuario en SQLite.',
       error: error.message
     });
   }
