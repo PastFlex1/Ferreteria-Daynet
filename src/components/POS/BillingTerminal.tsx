@@ -579,11 +579,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       const discountPct = promo ? Math.max(promo.discountPercent, manualDiscount) : manualDiscount;
       const appliedPromo = promo ? `${promo.code} · ${promo.discountPercent}% OFF` : (existing?.appliedPromo ?? undefined);
 
-      const itemSubtotal = newQty * baseUnitPrice;
-      const itemDiscountAmount = itemSubtotal * (discountPct / 100);
-      const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
-      const itemTaxAmount = baseAfterDiscount * taxRate;
-      const itemTotal = baseAfterDiscount + itemTaxAmount;
+      const itemSubtotal = Math.round(newQty * baseUnitPrice * 100) / 100;
+      const itemDiscountAmount = Math.round((itemSubtotal * (discountPct / 100)) * 100) / 100;
+      const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+      const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
+      const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
 
       const updatedItem: CartItem = {
         product,
@@ -646,11 +646,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
           appliedPromo = undefined;
         }
 
-        const itemSubtotal = newQty * baseUnitPrice;
-        const itemDiscountAmount = itemSubtotal * (discountPct / 100);
-        const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
-        const itemTaxAmount = baseAfterDiscount * taxRate;
-        const itemTotal = baseAfterDiscount + itemTaxAmount;
+        const itemSubtotal = Math.round(newQty * baseUnitPrice * 100) / 100;
+        const itemDiscountAmount = Math.round((itemSubtotal * (discountPct / 100)) * 100) / 100;
+        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
+        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
 
         return {
           ...item,
@@ -668,7 +668,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   };
 
   const handleUpdateUnitPrice = (productId: string, newUnitPrice: number) => {
-    const safePrice = Math.max(0, Math.round(newUnitPrice * 100) / 100);
+    const safePrice = Math.max(0, Math.round(newUnitPrice * 10000) / 10000);
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
@@ -695,11 +695,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRate = newTaxRate / 100;
-        const itemSubtotal = item.quantity * item.unitPrice;
-        const itemDiscountAmount = itemSubtotal * (item.discountPercent / 100);
-        const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
-        const itemTaxAmount = baseAfterDiscount * taxRate;
-        const itemTotal = baseAfterDiscount + itemTaxAmount;
+        const itemSubtotal = Math.round(item.quantity * item.unitPrice * 100) / 100;
+        const itemDiscountAmount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
+        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
+        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
 
         return {
           ...item,
@@ -720,11 +720,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-        const itemSubtotal = item.quantity * item.unitPrice;
-        const itemDiscountAmount = itemSubtotal * (safeDiscount / 100);
-        const baseAfterDiscount = itemSubtotal - itemDiscountAmount;
-        const itemTaxAmount = baseAfterDiscount * taxRate;
-        const itemTotal = baseAfterDiscount + itemTaxAmount;
+        const itemSubtotal = Math.round(item.quantity * item.unitPrice * 100) / 100;
+        const itemDiscountAmount = Math.round((itemSubtotal * (safeDiscount / 100)) * 100) / 100;
+        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
+        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
 
         return {
           ...item,
@@ -838,7 +838,13 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   }, [products, productSearch]);
 
   // Direct Invoicing / Transmitting
-  const handleDirectEmission = () => {
+  const handleDirectEmission = (overrideOptions?: {
+    paymentMethod?: PaymentMethod;
+    tendered?: number;
+    change?: number;
+    paymentReference?: string;
+    notes?: string;
+  }) => {
     if (cartItems.length === 0) {
       showAlert('Agregue al menos un producto a la orden antes de emitir el comprobante.', 'Orden Vacía', 'warning');
       return;
@@ -856,7 +862,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       return;
     }
 
-    executeInvoiceEmission();
+    executeInvoiceEmission(overrideOptions);
   };
 
   const handleConfirmOpenCash = (e: React.FormEvent) => {
@@ -875,7 +881,13 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     }
   };
 
-  const executeInvoiceEmission = () => {
+  const executeInvoiceEmission = (overrideOptions?: {
+    paymentMethod?: PaymentMethod;
+    tendered?: number;
+    change?: number;
+    paymentReference?: string;
+    notes?: string;
+  }) => {
     if (cartItems.length === 0 || !selectedCustomer) return;
 
     // Generate Document Number
@@ -889,8 +901,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       secQuote
     );
 
-    const tendered = parseFloat(cashAmountTendered) || sriBreakdown.valorAPagar;
-    const change = Math.max(0, tendered - sriBreakdown.valorAPagar);
+    const pm = overrideOptions?.paymentMethod || selectedPaymentMethod;
+    const tendered = overrideOptions?.tendered !== undefined
+      ? overrideOptions.tendered
+      : (parseFloat(cashAmountTendered) || sriBreakdown.valorAPagar);
+    const rawChange = overrideOptions?.change !== undefined
+      ? overrideOptions.change
+      : Math.max(0, tendered - sriBreakdown.valorAPagar);
+    const change = Math.round(rawChange * 100) / 100;
 
     const newInvoice: Invoice = {
       id: `inv-${Date.now()}`,
@@ -918,16 +936,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       discountTotal: sriBreakdown.totalDescuento,
       taxTotal: sriBreakdown.iva15 + sriBreakdown.iva5 + sriBreakdown.ivaEspecial,
       total: sriBreakdown.valorAPagar,
-      paymentMethod: selectedPaymentMethod,
+      paymentMethod: pm,
       paymentStatus: documentType === 'COTIZACION' ? 'PENDIENTE' : 'PAGADA',
-      amountTendered: selectedPaymentMethod === 'EFECTIVO' ? tendered : sriBreakdown.valorAPagar,
-      changeGiven: selectedPaymentMethod === 'EFECTIVO' ? change : 0,
-      paymentReference: paymentReference || undefined,
+      amountTendered: pm === 'EFECTIVO' ? tendered : sriBreakdown.valorAPagar,
+      changeGiven: pm === 'EFECTIVO' ? change : 0,
+      paymentReference: overrideOptions?.paymentReference || paymentReference || undefined,
       sellerName: sellerName || 'Juan Pérez',
       orderId: invoicingOrder?.id,
-      notes: invoicingOrder
+      notes: overrideOptions?.notes || (invoicingOrder
         ? `Pedido N° ${invoicingOrder.id}${invoicingOrder.notes ? ' - ' + invoicingOrder.notes : ''}`
-        : undefined,
+        : undefined),
     };
 
     // Deduct stock for active sales (not quote)
@@ -1243,7 +1261,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
               <button
                 type="button"
-                onClick={handleDirectEmission}
+                onClick={() => handleDirectEmission()}
                 disabled={cartItems.length === 0}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-xs rounded-xl transition cursor-pointer flex items-center gap-2 shadow-md shadow-emerald-600/20"
               >
@@ -2123,7 +2141,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   const tendered = parseFloat(cashAmountTendered) || 0;
                   const total = sriBreakdown.valorAPagar;
                   if (tendered >= total && total > 0) {
-                    const change = tendered - total;
+                    const change = Math.round((tendered - total) * 100) / 100;
                     return (
                       <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/90 rounded-xl flex items-center justify-between animate-fadeIn">
                         <div className="flex items-center gap-2">
@@ -2406,7 +2424,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 const tendered = parseFloat(cashAmountTendered) || 0;
                 const total = sriBreakdown.valorAPagar;
                 if (tendered >= total && total > 0) {
-                  const change = tendered - total;
+                  const change = Math.round((tendered - total) * 100) / 100;
                   return (
                     <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex items-center justify-between animate-fadeIn">
                       <div>
@@ -2446,7 +2464,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
             {/* Big Action Button */}
             <button
               type="button"
-              onClick={handleDirectEmission}
+              onClick={() => handleDirectEmission()}
               disabled={cartItems.length === 0}
               className="w-full mt-3 py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm rounded-2xl transition shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 cursor-pointer"
             >
@@ -2749,10 +2767,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         paymentMethods={paymentMethods}
         onCompleteSale={(pm, tendered, change, notes, ref) => {
           setSelectedPaymentMethod(pm);
-          if (tendered) setCashAmountTendered(tendered.toString());
+          if (tendered !== undefined) setCashAmountTendered(tendered.toString());
           if (ref) setPaymentReference(ref);
           setIsPaymentModalOpen(false);
-          handleDirectEmission();
+          handleDirectEmission({
+            paymentMethod: pm,
+            tendered,
+            change,
+            paymentReference: ref,
+            notes,
+          });
         }}
       />
 

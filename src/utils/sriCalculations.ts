@@ -56,21 +56,33 @@ export function calculateSriTotals(
       rateBreakdowns[taxRate] = { base: 0, tax: 0 };
     }
     rateBreakdowns[taxRate].base = Math.round((rateBreakdowns[taxRate].base + baseAfterDiscount) * 100) / 100;
-    rateBreakdowns[taxRate].tax = Math.round((rateBreakdowns[taxRate].tax + calculatedTax) * 100) / 100;
 
     if (taxRate === 15) {
       subtotal15 = Math.round((subtotal15 + baseAfterDiscount) * 100) / 100;
-      iva15 = Math.round((iva15 + calculatedTax) * 100) / 100;
     } else if (taxRate === 5) {
       subtotal5 = Math.round((subtotal5 + baseAfterDiscount) * 100) / 100;
-      iva5 = Math.round((iva5 + calculatedTax) * 100) / 100;
     } else if (taxRate === 0) {
       subtotal0 = Math.round((subtotal0 + baseAfterDiscount) * 100) / 100;
     } else {
       subtotalEspecial = Math.round((subtotalEspecial + baseAfterDiscount) * 100) / 100;
-      ivaEspecial = Math.round((ivaEspecial + calculatedTax) * 100) / 100;
     }
   });
+
+  // Calcular impuestos consolidados directamente sobre las bases imponibles por tarifa (norma tributaria SRI)
+  // Esto elimina el error acumulativo de redondear centavos línea por línea que sumaba 1 a 3 centavos de más.
+  iva15 = Math.round(subtotal15 * 0.15 * 100) / 100;
+  iva5 = Math.round(subtotal5 * 0.05 * 100) / 100;
+
+  Object.keys(rateBreakdowns).forEach((rateKey) => {
+    const rate = Number(rateKey);
+    const tax = rate > 0 ? Math.round(rateBreakdowns[rate].base * (rate / 100) * 100) / 100 : 0;
+    rateBreakdowns[rate].tax = tax;
+    if (rate !== 15 && rate !== 5 && rate !== 0) {
+      ivaEspecial = Math.round((ivaEspecial + tax) * 100) / 100;
+    }
+  });
+  if (rateBreakdowns[15]) rateBreakdowns[15].tax = iva15;
+  if (rateBreakdowns[5]) rateBreakdowns[5].tax = iva5;
 
   const totalTaxableBase = Math.round((subtotal15 + subtotal5 + subtotalEspecial + subtotal0 + subtotalNoObjeto + subtotalExento) * 100) / 100;
   const totalIva = Math.round((iva15 + iva5 + ivaEspecial) * 100) / 100;

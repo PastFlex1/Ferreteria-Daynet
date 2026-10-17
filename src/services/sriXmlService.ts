@@ -156,19 +156,22 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
     totalDescuentoCalculado += discount;
     const netLine = Math.max(0, totalLine - discount);
     
-    const baseVal = netLine;
-    const taxVal = Math.round(netLine * mapping.multiplier * 100) / 100;
-    
     if (!taxGroups[key]) {
       taxGroups[key] = { base: 0, valor: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa };
     }
-    taxGroups[key].base += baseVal;
-    taxGroups[key].valor += taxVal;
+    taxGroups[key].base += netLine;
   });
 
-  const subtotalTotal = Object.values(taxGroups).reduce((acc, g) => acc + g.base, 0);
-  const valorIVA = Object.values(taxGroups).reduce((acc, g) => acc + g.valor, 0);
-  const totalConImpuestosCalculado = subtotalTotal + valorIVA;
+  // Consolidar bases y calcular el impuesto exacto por tarifa según estándar SRI
+  Object.values(taxGroups).forEach(group => {
+    group.base = Math.round(group.base * 100) / 100;
+    const pct = parseFloat(group.tarifa) || 0;
+    group.valor = Math.round(group.base * (pct / 100) * 100) / 100;
+  });
+
+  const subtotalTotal = Math.round(Object.values(taxGroups).reduce((acc, g) => acc + g.base, 0) * 100) / 100;
+  const valorIVA = Math.round(Object.values(taxGroups).reduce((acc, g) => acc + g.valor, 0) * 100) / 100;
+  const totalConImpuestosCalculado = Math.round((subtotalTotal + valorIVA) * 100) / 100;
 
   let tipoId = '05'; // Cédula por defecto
   const idStr = (data.cliente.identificacion || '').trim();
@@ -565,18 +568,22 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
     const discount = safe(i.descuento);
     totalDescuento += discount;
     const netLine = Math.max(0, totalLine - discount);
-    const taxVal = Math.round(netLine * mapping.multiplier * 100) / 100;
-
     if (!taxGroups[key]) {
       taxGroups[key] = { base: 0, valor: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa };
     }
     taxGroups[key].base += netLine;
-    taxGroups[key].valor += taxVal;
   });
 
-  const subtotalTotal = Object.values(taxGroups).reduce((acc, g) => acc + g.base, 0);
-  const valorIVA = Object.values(taxGroups).reduce((acc, g) => acc + g.valor, 0);
-  const totalModificacion = subtotalTotal + valorIVA;
+  // Consolidar bases y calcular el impuesto exacto por tarifa según estándar SRI
+  Object.values(taxGroups).forEach(group => {
+    group.base = Math.round(group.base * 100) / 100;
+    const pct = parseFloat(group.tarifa) || 0;
+    group.valor = Math.round(group.base * (pct / 100) * 100) / 100;
+  });
+
+  const subtotalTotal = Math.round(Object.values(taxGroups).reduce((acc, g) => acc + g.base, 0) * 100) / 100;
+  const valorIVA = Math.round(Object.values(taxGroups).reduce((acc, g) => acc + g.valor, 0) * 100) / 100;
+  const totalModificacion = Math.round((subtotalTotal + valorIVA) * 100) / 100;
 
   let tipoId = '05';
   const idStr = (data.cliente.identificacion || '').trim();

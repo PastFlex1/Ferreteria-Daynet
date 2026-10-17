@@ -167,7 +167,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const pWithTax = parseFloat(clean) || 0;
     const t = parseFloat(taxRate);
     const finalT = isNaN(t) ? defaultTaxRate : t;
-    setPrice((pWithTax / (1 + finalT / 100)).toFixed(2));
+    const calculatedBase = pWithTax / (1 + finalT / 100);
+    const rounded2 = Math.round(calculatedBase * 100) / 100;
+    if (Math.abs(Math.round(rounded2 * (1 + finalT / 100) * 100) / 100 - pWithTax) < 0.005) {
+      setPrice(rounded2.toFixed(2));
+    } else {
+      setPrice((Math.round(calculatedBase * 10000) / 10000).toString());
+    }
   };
 
   const handleTaxRateChange = (val: string) => {
@@ -192,7 +198,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handlePriceBlur = () => {
     if (price && !isNaN(parseFloat(price))) {
-      setPrice(parseFloat(price).toFixed(2));
+      const p = parseFloat(price);
+      setPrice(Number.isInteger(Math.round(p * 10000) / 100) ? p.toFixed(2) : (Math.round(p * 10000) / 10000).toString());
     }
   };
 

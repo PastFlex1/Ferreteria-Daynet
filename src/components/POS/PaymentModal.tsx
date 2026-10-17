@@ -157,7 +157,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const finalTotalToPay = sriBreakdown.valorAPagar;
 
   const amountTendered = parseFloat(amountTenderedStr) || 0;
-  const changeGiven = amountTendered - finalTotalToPay;
+  const changeGiven = Math.round((amountTendered - finalTotalToPay) * 100) / 100;
   const isCashValid = documentType === 'COTIZACION' || paymentMethod !== 'EFECTIVO' || amountTendered >= finalTotalToPay - 0.01;
 
   // Credit check
@@ -170,7 +170,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   const handleExactCash = () => {
-    setAmountTenderedStr(total.toFixed(2));
+    setAmountTenderedStr(finalTotalToPay.toFixed(2));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
