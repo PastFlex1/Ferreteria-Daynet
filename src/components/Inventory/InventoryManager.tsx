@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { Layers, Search, Plus, UploadCloud, Download, AlertTriangle, Boxes, BadgeDollarSign, TrendingUp, Filter, MapPin, ArrowUpDown, Edit3, Trash2 } from 'lucide-react';
-import { Category, Product, ProductCategory, StoreSettings } from '../../types';
+import { Category, Product, ProductCategory, StoreSettings, TaxRateItem } from '../../types';
 import { formatCurrency, formatCostCurrency } from '../../utils/formatters';
 import { exportToModernExcel } from '../../utils/excelExport';
 import { ProductModal } from './ProductModal';
 import { BulkProductImporterModal } from './BulkProductImporterModal';
 import { Select } from '../Shared/Select';
 import { usePermissions } from '../../context/PermissionsContext';
+import { usePostgresSync } from '../../hooks/usePostgresSync';
+import { defaultTaxRates } from '../../data/initialData';
 
 
 interface InventoryManagerProps {
@@ -29,6 +31,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   units,
 }) => {
   const { can } = usePermissions();
+  const [syncedTaxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
+  const availableTaxRates = useMemo(() => (syncedTaxRates && syncedTaxRates.length > 0 ? syncedTaxRates : defaultTaxRates).filter(t => t.active !== false), [syncedTaxRates]);
   const [searchTerm, setSearchTerm] = useState('');
 
   const [selectedCategory, setSelectedCategory] = useState<string>('TODAS');
@@ -96,7 +100,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
   const handleExportCSV = () => {
     const data = products.map((p) => {
-      const taxRate = (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) / 100;
+      const taxRateNum = typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate;
+      const taxRate = taxRateNum / 100;
       const priceWithTax = p.price * (1 + taxRate);
       const marginPct = p.costPrice > 0 ? (((p.price - p.costPrice) / p.costPrice) * 100).toFixed(0) : '100';
 
@@ -108,6 +113,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         unit: p.unit,
         costPrice: p.costPrice,
         price: p.price,
+        taxRate: `${taxRateNum}%`,
         priceWithTax: priceWithTax,
         margin: `+${marginPct}%`,
         stock: p.stock,
@@ -128,6 +134,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         { header: 'Unidad', key: 'unit', width: 10, format: 'center' },
         { header: 'Costo', key: 'costPrice', width: 15, format: 'currency' },
         { header: 'P. Venta (Sin IVA)', key: 'price', width: 15, format: 'currency' },
+        { header: 'Tarifa IVA', key: 'taxRate', width: 12, format: 'center' },
         { header: 'P. Venta (Con IVA)', key: 'priceWithTax', width: 15, format: 'currency' },
         { header: 'Margen', key: 'margin', width: 10, format: 'center' },
         { header: 'Stock Actual', key: 'stock', width: 15, format: 'center' },
@@ -279,6 +286,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <th className="py-3 px-4 text-center">Unidad</th>
                 {can('inventory.view_cost_price') && <th className="py-3 px-4 text-right">Costo</th>}
                 <th className="py-3 px-4 text-right">P. Venta (Sin IVA)</th>
+                <th className="py-3 px-4 text-center">Tarifa IVA</th>
                 <th className="py-3 px-4 text-right">P. Venta (Con IVA)</th>
                 {can('inventory.view_cost_price') && <th className="py-3 px-4 text-center">Margen</th>}
                 <th className="py-3 px-4 text-center">Stock</th>
@@ -290,7 +298,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             <tbody className="divide-y divide-slate-100 bg-white">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500">
+                  <td colSpan={12} className="py-12 text-center text-slate-500">
                     <Layers className="w-10 h-10 mx-auto mb-2 text-slate-400" />
                     <p className="font-semibold text-slate-600">No hay productos en esta búsqueda</p>
                   </td>
@@ -338,6 +346,51 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       )}
                       <td className="py-3 px-4 text-right font-mono font-extrabold text-orange-600">
                         {formatCurrency(p.price, settings.currencySymbol)}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {can('inventory.edit_sale_price') || can('inventory.edit_product') ? (
+                          <select
+                            value={typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate}
+                            onChange={(e) => {
+                              const newRate = parseFloat(e.target.value);
+                              if (!isNaN(newRate)) {
+                                onSaveProduct({
+                                  ...p,
+                                  taxRate: newRate,
+                                });
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer font-mono outline-none shadow-2xs ${
+                              (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 15
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                : (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 5
+                                ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                            }`}
+                            title="Seleccionar tarifa de IVA para este producto"
+                          >
+                            {availableTaxRates.map(t => (
+                              <option key={t.id} value={t.rate}>
+                                {t.rate}% {t.rate === 15 ? '(General)' : t.rate === 5 ? '(Construcción)' : t.rate === 0 ? '(0%)' : ''}
+                              </option>
+                            ))}
+                            {!availableTaxRates.some(t => t.rate === (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate)) && (
+                              <option value={p.taxRate}>{p.taxRate}%</option>
+                            )}
+                          </select>
+                        ) : (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold font-mono border ${
+                              (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 15
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 5
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate}%
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 bg-slate-50">
                         {formatCurrency(priceWithTax, settings.currencySymbol)}
