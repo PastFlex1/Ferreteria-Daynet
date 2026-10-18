@@ -80,6 +80,7 @@ interface BillingTerminalProps {
   initialCustomer?: Customer | null;
   invoicingOrder?: Order | null;
   onCancelInvoicingOrder?: () => void;
+  onClearInitialData?: () => void;
   paymentMethods?: PaymentMethodItem[];
   isCashRegisterOpen?: boolean;
   onOpenCashRegister?: (initialCash: number) => void;
@@ -199,6 +200,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   initialCustomer = null,
   invoicingOrder = null,
   onCancelInvoicingOrder,
+  onClearInitialData,
   paymentMethods,
   isCashRegisterOpen = true,
   onOpenCashRegister,
@@ -735,7 +737,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   };
 
   const handleRemoveItem = (productId: string) => {
-    setCartItems((prev) => prev.filter((item) => item.product.id !== productId));
+    setCartItems((prev) => {
+      const filtered = prev.filter((item) => item.product.id !== productId);
+      if (filtered.length === 0) {
+        onCancelInvoicingOrder?.();
+        onClearInitialData?.();
+      }
+      return filtered;
+    });
   };
 
   const handleClearAll = () => {
@@ -772,6 +781,10 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCustomPrice('10.00');
     setCustomQty('1');
     setCustomTaxRate(settings.defaultTaxRate || 15);
+
+    // Desvincular pedido y limpiar cotización o pedido precargado en App.tsx
+    onCancelInvoicingOrder?.();
+    onClearInitialData?.();
 
     showToast('Terminal restablecido. Se han limpiado todos los datos.', 'success');
   };
@@ -986,6 +999,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems([]);
     setCashAmountTendered('');
     setPaymentReference('');
+    onClearInitialData?.();
+    onCancelInvoicingOrder?.();
 
     if (documentType === 'FACTURA') {
       setCreatedInvoiceForSri(newInvoice);
@@ -1031,7 +1046,10 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
               {onCancelInvoicingOrder && (
                 <button
                   type="button"
-                  onClick={onCancelInvoicingOrder}
+                  onClick={() => {
+                    onCancelInvoicingOrder();
+                    onClearInitialData?.();
+                  }}
                   className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-xs"
                   title="Desvincular pedido de esta venta"
                 >

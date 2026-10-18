@@ -435,6 +435,8 @@ export default function App() {
         )
       );
       setPosInvoicingOrder(null);
+      setPosInitialCart([]);
+      setPosInitialCustomer(null);
       showToast(`Pedido ${targetOrderId} facturado con éxito con ${newInvoice.fullNumber}`, 'success');
     }
 
@@ -483,6 +485,10 @@ export default function App() {
         )
       );
     }
+
+    setPosInvoicingOrder(null);
+    setPosInitialCart([]);
+    setPosInitialCustomer(null);
   };
 
   const handleUpdateInvoice = (updatedInvoice: Invoice) => {
@@ -505,6 +511,12 @@ export default function App() {
   const handleDeleteInvoice = (invoiceId: string) => {
     setInvoices((prev) => prev.filter((inv) => inv.id !== invoiceId));
     showToast('Comprobante eliminado del historial.', 'info');
+  };
+
+  const handleClearPosPreloadedData = () => {
+    setPosInitialCart([]);
+    setPosInitialCustomer(null);
+    setPosInvoicingOrder(null);
   };
 
   const handleOpenInvoiceViewer = (invoice: Invoice) => {
@@ -922,7 +934,12 @@ export default function App() {
             initialCartItems={posInitialCart}
             initialCustomer={posInitialCustomer}
             invoicingOrder={posInvoicingOrder}
-            onCancelInvoicingOrder={() => setPosInvoicingOrder(null)}
+            onCancelInvoicingOrder={() => {
+              setPosInvoicingOrder(null);
+              setPosInitialCart([]);
+              setPosInitialCustomer(null);
+            }}
+            onClearInitialData={handleClearPosPreloadedData}
             paymentMethods={paymentMethods}
             isCashRegisterOpen={cashSession.status === 'ABIERTA'}
             onOpenCashRegister={handleOpenCashRegister}

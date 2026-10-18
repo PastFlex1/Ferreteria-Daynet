@@ -2,14 +2,14 @@ import { DocumentType, Invoice, StoreSettings } from '../types';
 
 export const formatCurrency = (amount: number | string | null | undefined, symbol: string = '$', maxDecimals: number = 2): string => {
   if (amount == null || amount === '') {
-    return `${symbol} 0.00`;
+    return `${symbol}\u00A00.00`;
   }
   const cleanStr = typeof amount === 'string' ? amount.trim().replace(/,/g, '.') : amount;
   const num = typeof cleanStr === 'string' ? parseFloat(cleanStr) : cleanStr;
   if (isNaN(num)) {
-    return `${symbol} 0.00`;
+    return `${symbol}\u00A00.00`;
   }
-  return `${symbol} ${num.toLocaleString('es-MX', {
+  return `${symbol}\u00A0${num.toLocaleString('es-MX', {
     minimumFractionDigits: 2,
     maximumFractionDigits: maxDecimals,
   })}`;
