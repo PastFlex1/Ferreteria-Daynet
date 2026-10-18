@@ -1,6 +1,48 @@
 import { CartItem, InvoiceItem } from '../types';
 import { SriTotalsBreakdown } from '../components/POS/SriTotalsTable';
 
+export function calculateCartItemFinancials(
+  quantity: number,
+  baseUnitPrice: number,
+  taxRatePercent: number,
+  discountPercent: number = 0
+) {
+  const taxRate = taxRatePercent / 100;
+  const unitPriceWithTax = Math.round(baseUnitPrice * (1 + taxRate) * 100) / 100;
+  const safeDiscount = Math.max(0, Math.min(100, discountPercent));
+
+  const itemSubtotal = Math.round(quantity * baseUnitPrice * 100) / 100;
+  const itemDiscountAmount = Math.round((itemSubtotal * (safeDiscount / 100)) * 100) / 100;
+  const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
+
+  let itemTotal: number;
+  let itemTaxAmount: number;
+
+  if (taxRate > 0) {
+    const rawTotalWithTax = quantity * unitPriceWithTax * (1 - safeDiscount / 100);
+    itemTotal = Math.round(rawTotalWithTax * 100) / 100;
+    itemTaxAmount = Math.round((itemTotal - baseAfterDiscount) * 100) / 100;
+
+    // Control de seguridad: asegurar que itemTaxAmount no exceda la tolerancia SRI (+/- 0.01) frente al impuesto estándar
+    const standardTax = Math.round(baseAfterDiscount * taxRate * 100) / 100;
+    if (Math.round(Math.abs(itemTaxAmount - standardTax) * 100) / 100 > 0.01) {
+      itemTaxAmount = standardTax;
+      itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+    }
+  } else {
+    itemTaxAmount = 0;
+    itemTotal = baseAfterDiscount;
+  }
+
+  return {
+    subtotal: itemSubtotal,
+    discountAmount: itemDiscountAmount,
+    baseAfterDiscount,
+    taxAmount: itemTaxAmount,
+    total: itemTotal,
+  };
+}
+
 export function calculateSriTotals(
   items: (CartItem | InvoiceItem)[],
   defaultTaxRate: number = 15,
@@ -15,14 +57,13 @@ export function calculateSriTotals(
   let subtotalExento = 0;
   let totalDescuento = 0;
   let totalDescuentoConIva = 0;
-  let iva15 = 0;
-  let iva5 = 0;
-  let ivaEspecial = 0;
+  let sumItemTax15 = 0;
+  let sumItemTax5 = 0;
 
-  const rateBreakdowns: Record<number, { base: number; tax: number }> = {};
+  const rateBreakdowns: Record<number, { base: number; tax: number; sumItemTax: number }> = {};
 
   items.forEach((item) => {
-    const rawSubtotal = item.subtotal || item.unitPrice * item.quantity;
+    const rawSubtotal = item.subtotal !== undefined ? item.subtotal : (item.unitPrice * item.quantity);
     const itemSubtotal = Math.round(rawSubtotal * 100) / 100;
     const itemDiscount = Math.round(((itemSubtotal * (item.discountPercent || 0)) / 100) * 100) / 100;
     const baseAfterDiscount = Math.round((itemSubtotal - itemDiscount) * 100) / 100;
@@ -53,14 +94,17 @@ export function calculateSriTotals(
       : (taxRate > 0 ? Math.round(baseAfterDiscount * (taxRate / 100) * 100) / 100 : 0);
 
     if (!rateBreakdowns[taxRate]) {
-      rateBreakdowns[taxRate] = { base: 0, tax: 0 };
+      rateBreakdowns[taxRate] = { base: 0, tax: 0, sumItemTax: 0 };
     }
     rateBreakdowns[taxRate].base = Math.round((rateBreakdowns[taxRate].base + baseAfterDiscount) * 100) / 100;
+    rateBreakdowns[taxRate].sumItemTax = Math.round((rateBreakdowns[taxRate].sumItemTax + calculatedTax) * 100) / 100;
 
     if (taxRate === 15) {
       subtotal15 = Math.round((subtotal15 + baseAfterDiscount) * 100) / 100;
+      sumItemTax15 = Math.round((sumItemTax15 + calculatedTax) * 100) / 100;
     } else if (taxRate === 5) {
       subtotal5 = Math.round((subtotal5 + baseAfterDiscount) * 100) / 100;
+      sumItemTax5 = Math.round((sumItemTax5 + calculatedTax) * 100) / 100;
     } else if (taxRate === 0) {
       subtotal0 = Math.round((subtotal0 + baseAfterDiscount) * 100) / 100;
     } else {
@@ -68,17 +112,24 @@ export function calculateSriTotals(
     }
   });
 
-  // Calcular impuestos consolidados directamente sobre las bases imponibles por tarifa (norma tributaria SRI)
-  // Esto elimina el error acumulativo de redondear centavos línea por línea que sumaba 1 a 3 centavos de más.
-  iva15 = Math.round(subtotal15 * 0.15 * 100) / 100;
-  iva5 = Math.round(subtotal5 * 0.05 * 100) / 100;
+  // Calcular impuestos consolidados respetando la tolerancia normativa del SRI (+/- 0.01 por tarifa)
+  // Esto previene discrepancias de 1 centavo en ventas al detalle por unidad (PVP) mientras mantiene validez legal ante el SRI.
+  const standardIva15 = Math.round(subtotal15 * 0.15 * 100) / 100;
+  const standardIva5 = Math.round(subtotal5 * 0.05 * 100) / 100;
+
+  const iva15 = Math.round(Math.abs(sumItemTax15 - standardIva15) * 100) / 100 <= 0.01 ? sumItemTax15 : standardIva15;
+  const iva5 = Math.round(Math.abs(sumItemTax5 - standardIva5) * 100) / 100 <= 0.01 ? sumItemTax5 : standardIva5;
+  let ivaEspecial = 0;
 
   Object.keys(rateBreakdowns).forEach((rateKey) => {
     const rate = Number(rateKey);
-    const tax = rate > 0 ? Math.round(rateBreakdowns[rate].base * (rate / 100) * 100) / 100 : 0;
-    rateBreakdowns[rate].tax = tax;
+    const standardTax = rate > 0 ? Math.round(rateBreakdowns[rate].base * (rate / 100) * 100) / 100 : 0;
+    const finalTax = Math.round(Math.abs(rateBreakdowns[rate].sumItemTax - standardTax) * 100) / 100 <= 0.01
+      ? rateBreakdowns[rate].sumItemTax
+      : standardTax;
+    rateBreakdowns[rate].tax = finalTax;
     if (rate !== 15 && rate !== 5 && rate !== 0) {
-      ivaEspecial = Math.round((ivaEspecial + tax) * 100) / 100;
+      ivaEspecial = Math.round((ivaEspecial + finalTax) * 100) / 100;
     }
   });
   if (rateBreakdowns[15]) rateBreakdowns[15].tax = iva15;

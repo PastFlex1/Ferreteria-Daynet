@@ -50,7 +50,7 @@ import { usePermissions } from '../../context/PermissionsContext';
 import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
 import { Order } from '../Sales/CreateOrderModal';
-import { calculateSriTotals } from '../../utils/sriCalculations';
+import { calculateSriTotals, calculateCartItemFinancials } from '../../utils/sriCalculations';
 import { CustomerSelectModal } from './CustomerSelectModal';
 import { PaymentModal } from './PaymentModal';
 import { SriEmissionProgressModal } from './SriEmissionProgressModal';
@@ -569,7 +569,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         newQty = existing.quantity + qty;
       }
 
-      const taxRate = (typeof product.taxRate === 'number' ? product.taxRate : settings.defaultTaxRate) / 100;
+      const taxRateNum = typeof product.taxRate === 'number' ? product.taxRate : settings.defaultTaxRate;
       const baseUnitPrice = getPriceForQuantity(product, newQty);
       const activeScale = getActiveScaleForQuantity(product, newQty);
       const appliedScale = activeScale ? activeScale.name : undefined;
@@ -579,20 +579,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       const discountPct = promo ? Math.max(promo.discountPercent, manualDiscount) : manualDiscount;
       const appliedPromo = promo ? `${promo.code} · ${promo.discountPercent}% OFF` : (existing?.appliedPromo ?? undefined);
 
-      const itemSubtotal = Math.round(newQty * baseUnitPrice * 100) / 100;
-      const itemDiscountAmount = Math.round((itemSubtotal * (discountPct / 100)) * 100) / 100;
-      const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
-      const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
-      const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+      const financials = calculateCartItemFinancials(newQty, baseUnitPrice, taxRateNum, discountPct);
 
       const updatedItem: CartItem = {
         product,
         quantity: newQty,
         unitPrice: baseUnitPrice,
         discountPercent: discountPct,
-        subtotal: itemSubtotal,
-        taxAmount: itemTaxAmount,
-        total: itemTotal,
+        subtotal: financials.subtotal,
+        taxAmount: financials.taxAmount,
+        total: financials.total,
         appliedPromo,
         appliedScale,
       };
@@ -623,7 +619,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+        const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
         const baseUnitPrice = getPriceForQuantity(item.product, newQty);
         const activeScale = getActiveScaleForQuantity(item.product, newQty);
         const appliedScale = activeScale ? activeScale.name : undefined;
@@ -646,20 +642,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
           appliedPromo = undefined;
         }
 
-        const itemSubtotal = Math.round(newQty * baseUnitPrice * 100) / 100;
-        const itemDiscountAmount = Math.round((itemSubtotal * (discountPct / 100)) * 100) / 100;
-        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
-        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
-        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+        const financials = calculateCartItemFinancials(newQty, baseUnitPrice, taxRateNum, discountPct);
 
         return {
           ...item,
           quantity: newQty,
           unitPrice: baseUnitPrice,
           discountPercent: discountPct,
-          subtotal: itemSubtotal,
-          taxAmount: itemTaxAmount,
-          total: itemTotal,
+          subtotal: financials.subtotal,
+          taxAmount: financials.taxAmount,
+          total: financials.total,
           appliedPromo,
           appliedScale,
         };
@@ -672,19 +664,15 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-        const itemSubtotal = Math.round(item.quantity * safePrice * 100) / 100;
-        const itemDiscountAmount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
-        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
-        const itemTaxAmount = Math.round((baseAfterDiscount * taxRate) * 100) / 100;
-        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+        const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
+        const financials = calculateCartItemFinancials(item.quantity, safePrice, taxRateNum, item.discountPercent);
 
         return {
           ...item,
           unitPrice: safePrice,
-          subtotal: itemSubtotal,
-          taxAmount: itemTaxAmount,
-          total: itemTotal,
+          subtotal: financials.subtotal,
+          taxAmount: financials.taxAmount,
+          total: financials.total,
         };
       })
     );
@@ -694,12 +682,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const taxRate = newTaxRate / 100;
-        const itemSubtotal = Math.round(item.quantity * item.unitPrice * 100) / 100;
-        const itemDiscountAmount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
-        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
-        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
-        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+        const financials = calculateCartItemFinancials(item.quantity, item.unitPrice, newTaxRate, item.discountPercent);
 
         return {
           ...item,
@@ -707,8 +690,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
             ...item.product,
             taxRate: newTaxRate,
           },
-          taxAmount: itemTaxAmount,
-          total: itemTotal,
+          taxAmount: financials.taxAmount,
+          total: financials.total,
         };
       })
     );
@@ -719,19 +702,15 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const taxRate = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-        const itemSubtotal = Math.round(item.quantity * item.unitPrice * 100) / 100;
-        const itemDiscountAmount = Math.round((itemSubtotal * (safeDiscount / 100)) * 100) / 100;
-        const baseAfterDiscount = Math.round((itemSubtotal - itemDiscountAmount) * 100) / 100;
-        const itemTaxAmount = Math.round(baseAfterDiscount * taxRate * 100) / 100;
-        const itemTotal = Math.round((baseAfterDiscount + itemTaxAmount) * 100) / 100;
+        const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
+        const financials = calculateCartItemFinancials(item.quantity, item.unitPrice, taxRateNum, safeDiscount);
 
         return {
           ...item,
           discountPercent: safeDiscount,
-          subtotal: itemSubtotal,
-          taxAmount: itemTaxAmount,
-          total: itemTotal,
+          subtotal: financials.subtotal,
+          taxAmount: financials.taxAmount,
+          total: financials.total,
         };
       })
     );
