@@ -89,7 +89,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
       const pVal = productToEdit.price !== undefined && productToEdit.price !== null ? productToEdit.price : 0;
       const pStr = pVal.toString();
-      setPrice(pStr.startsWith('.') ? '0' + pStr : (pVal > 0 && pVal < 1 ? pVal.toFixed(2) : pVal.toFixed(2)));
+      setPrice(pStr.startsWith('.') ? '0' + pStr : (Number.isInteger(Math.round(pVal * 10000) / 100) ? pVal.toFixed(2) : (Math.round(pVal * 10000) / 10000).toString()));
 
       const cpVal = productToEdit.costPrice !== undefined && productToEdit.costPrice !== null ? productToEdit.costPrice : 0;
       const cpStr = cpVal.toString();
@@ -305,7 +305,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       if (s.id !== scaleId) return s;
       const p = parseFloat(s.price?.toString() || '');
       if (isNaN(p)) return s;
-      const formatted = p.toFixed(2);
+      const formatted = Number.isInteger(Math.round(p * 10000) / 100) ? p.toFixed(2) : (Math.round(p * 10000) / 10000).toString();
       const t = parseFloat(taxRate);
       const finalT = isNaN(t) ? defaultTaxRate : t;
       return {
@@ -574,7 +574,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.0001"
+                  step="any"
                   min="0"
                   disabled={!can('inventory.edit_cost_price')}
                   placeholder="0.00"
@@ -598,7 +598,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0"
                 required
                 disabled={!can('inventory.edit_sale_price')}
@@ -622,7 +622,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   disabled={!can('inventory.edit_sale_price')}
                   placeholder="0.00"
@@ -819,7 +819,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step="0.01"
+                          step="any"
                           min="0"
                           placeholder="0.00"
                           value={scale.price !== undefined && scale.price !== null ? scale.price : ''}
@@ -838,7 +838,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         </label>
                         <input
                           type="number"
-                          step="0.01"
+                          step="any"
                           min="0"
                           placeholder="0.00"
                           value={scalePriceWithTaxDisplay}
