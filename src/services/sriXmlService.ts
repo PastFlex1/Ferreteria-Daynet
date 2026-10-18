@@ -29,6 +29,8 @@ export interface SRIInvoiceData {
     precioUnitario: number;
     descuento?: number;
     ivaRate?: string | number;
+    subtotal?: number;
+    taxAmount?: number;
   }>;
   formaPago: string; // "01" Efectivo, "20" Otros con Sist. Financiero, "19" Tarjeta Crédito, "16" Tarjeta Débito
   tipoComprobante?: string; // "01" Factura, "04" Nota de Crédito
@@ -151,19 +153,21 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
   (data.items || []).forEach(i => {
     const mapping = getIvaMapping(i.ivaRate);
     const key = `${mapping.codigoPorcentaje}`;
-    const totalLine = safe(i.cantidad) * safe(i.precioUnitario);
+    const rawLine = (i as any).subtotal !== undefined
+      ? safe((i as any).subtotal)
+      : (safe(i.cantidad) * safe(i.precioUnitario));
     const discount = safe(i.descuento);
-    totalDescuentoCalculado += discount;
-    const netLine = Math.max(0, totalLine - discount);
+    totalDescuentoCalculado = Math.round((totalDescuentoCalculado + discount) * 100) / 100;
+    const netLine = Math.round(Math.max(0, rawLine - discount) * 100) / 100;
     const itemTax = (i as any).taxAmount !== undefined && (i as any).taxAmount >= 0
-      ? (i as any).taxAmount
-      : (netLine * mapping.multiplier);
+      ? safe((i as any).taxAmount)
+      : Math.round(netLine * mapping.multiplier * 100) / 100;
     
     if (!taxGroups[key]) {
       taxGroups[key] = { base: 0, valor: 0, sumItemTax: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa } as any;
     }
-    taxGroups[key].base += netLine;
-    (taxGroups[key] as any).sumItemTax = ((taxGroups[key] as any).sumItemTax || 0) + itemTax;
+    taxGroups[key].base = Math.round((taxGroups[key].base + netLine) * 100) / 100;
+    (taxGroups[key] as any).sumItemTax = Math.round((((taxGroups[key] as any).sumItemTax || 0) + itemTax) * 100) / 100;
   });
 
   // Consolidar bases y calcular el impuesto exacto por tarifa según estándar SRI
@@ -260,17 +264,19 @@ export function generateInvoiceXML(data: SRIInvoiceData): { xml: string; claveAc
 
   xml += `    <detalles>\n`;
   (data.items || []).forEach((item, index) => {
-    const totalLine = safe(item.cantidad) * safe(item.precioUnitario);
+    const rawLine = (item as any).subtotal !== undefined
+      ? safe((item as any).subtotal)
+      : (safe(item.cantidad) * safe(item.precioUnitario));
     const discount = safe(item.descuento);
-    const baseVal = Math.max(0, totalLine - discount);
+    const baseVal = Math.round(Math.max(0, rawLine - discount) * 100) / 100;
     const mapping = getIvaMapping(item.ivaRate);
     const taxVal = (item as any).taxAmount !== undefined && (item as any).taxAmount >= 0
-      ? (item as any).taxAmount
-      : (baseVal * mapping.multiplier);
+      ? safe((item as any).taxAmount)
+      : Math.round(baseVal * mapping.multiplier * 100) / 100;
     const unitPrice = safe(item.precioUnitario);
-    const unitPriceFormatted = Number.isInteger(Math.round(unitPrice * 100))
+    const unitPriceFormatted = Math.abs(unitPrice - Math.round(unitPrice * 100) / 100) < 0.00001
       ? unitPrice.toFixed(2)
-      : (Math.round(unitPrice * 10000) / 10000).toString();
+      : (Math.round(unitPrice * 1000000) / 1000000).toString();
     
     xml += `        <detalle>\n`;
     xml += `            <codigoPrincipal>${escapeXml(item.codigo || (index + 1).toString().padStart(3, '0'))}</codigoPrincipal>\n`;
@@ -371,15 +377,32 @@ export function convertERPInvoiceToSRI(
         ivaRate = settings.defaultTaxRate;
       }
 
-      const discount = Math.round(((item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100) * 100) / 100;
+      let baseUnitPrice = item.unitPrice;
+      let discount = 0;
+      let itemSubtotal = item.subtotal;
+
+      if (itemSubtotal !== undefined && item.quantity > 0) {
+        baseUnitPrice = itemSubtotal / item.quantity;
+        if (item.discountPercent && item.discountPercent > 0) {
+          discount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
+        }
+      } else if (ivaRate > 0) {
+        baseUnitPrice = item.unitPrice / (1 + ivaRate / 100);
+        itemSubtotal = Math.round(item.quantity * baseUnitPrice * 100) / 100;
+        discount = Math.round(((itemSubtotal * (item.discountPercent || 0)) / 100) * 100) / 100;
+      } else {
+        discount = Math.round(((item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100) * 100) / 100;
+      }
 
       return {
         codigo: item.sku || '0101',
         descripcion: item.productName,
         cantidad: item.quantity,
-        precioUnitario: item.unitPrice,
+        precioUnitario: baseUnitPrice,
         descuento: discount,
         ivaRate,
+        subtotal: itemSubtotal,
+        taxAmount: item.taxAmount,
       };
     }),
     formaPago: getSriPaymentCode(invoice.paymentMethod),
@@ -511,15 +534,32 @@ export function convertCreditNoteToSRI(
     else if (item.taxAmount === 0 && (item.subtotal || item.unitPrice) > 0) ivaRate = 0;
     else if (typeof settings.defaultTaxRate === 'number') ivaRate = settings.defaultTaxRate;
 
-    const discount = Math.round(((item.unitPrice * item.quantity * (item.discountPercent || 0)) / 100) * 100) / 100;
+    let baseUnitPrice = item.unitPrice || item.price || 0;
+    let discount = 0;
+    let itemSubtotal = item.subtotal;
+
+    if (itemSubtotal !== undefined && item.quantity > 0) {
+      baseUnitPrice = itemSubtotal / item.quantity;
+      if (item.discountPercent && item.discountPercent > 0) {
+        discount = Math.round((itemSubtotal * (item.discountPercent / 100)) * 100) / 100;
+      }
+    } else if (ivaRate > 0) {
+      baseUnitPrice = baseUnitPrice / (1 + ivaRate / 100);
+      itemSubtotal = Math.round(item.quantity * baseUnitPrice * 100) / 100;
+      discount = Math.round(((itemSubtotal * (item.discountPercent || 0)) / 100) * 100) / 100;
+    } else {
+      discount = Math.round(((baseUnitPrice * (item.quantity || 1) * (item.discountPercent || 0)) / 100) * 100) / 100;
+    }
 
     return {
       codigo: item.sku || item.productId || '0101',
       descripcion: item.productName || item.description || 'Producto devuelto',
       cantidad: item.quantity || 1,
-      precioUnitario: item.unitPrice || item.price || 0,
+      precioUnitario: baseUnitPrice,
       descuento: discount,
       ivaRate,
+      subtotal: itemSubtotal,
+      taxAmount: item.taxAmount,
     };
   });
 
@@ -575,18 +615,20 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
   (data.items || []).forEach((i) => {
     const mapping = getIvaMapping(i.ivaRate);
     const key = `${mapping.codigoPorcentaje}`;
-    const totalLine = safe(i.cantidad) * safe(i.precioUnitario);
+    const rawLine = (i as any).subtotal !== undefined
+      ? safe((i as any).subtotal)
+      : (safe(i.cantidad) * safe(i.precioUnitario));
     const discount = safe(i.descuento);
-    totalDescuento += discount;
-    const netLine = Math.max(0, totalLine - discount);
+    totalDescuento = Math.round((totalDescuento + discount) * 100) / 100;
+    const netLine = Math.round(Math.max(0, rawLine - discount) * 100) / 100;
     const itemTax = (i as any).taxAmount !== undefined && (i as any).taxAmount >= 0
-      ? (i as any).taxAmount
-      : (netLine * mapping.multiplier);
+      ? safe((i as any).taxAmount)
+      : Math.round(netLine * mapping.multiplier * 100) / 100;
     if (!taxGroups[key]) {
       taxGroups[key] = { base: 0, valor: 0, sumItemTax: 0, codigoPorcentaje: mapping.codigoPorcentaje, tarifa: mapping.tarifa } as any;
     }
-    taxGroups[key].base += netLine;
-    (taxGroups[key] as any).sumItemTax = ((taxGroups[key] as any).sumItemTax || 0) + itemTax;
+    taxGroups[key].base = Math.round((taxGroups[key].base + netLine) * 100) / 100;
+    (taxGroups[key] as any).sumItemTax = Math.round((((taxGroups[key] as any).sumItemTax || 0) + itemTax) * 100) / 100;
   });
 
   // Consolidar bases y calcular el impuesto exacto por tarifa según estándar SRI
@@ -676,17 +718,19 @@ export function generateCreditNoteXML(data: SRICreditNoteData): { xml: string; c
 
   xml += `    <detalles>\n`;
   (data.items || []).forEach((item, index) => {
-    const totalLine = safe(item.cantidad) * safe(item.precioUnitario);
+    const rawLine = (item as any).subtotal !== undefined
+      ? safe((item as any).subtotal)
+      : (safe(item.cantidad) * safe(item.precioUnitario));
     const discount = safe(item.descuento);
-    const baseVal = Math.max(0, totalLine - discount);
+    const baseVal = Math.round(Math.max(0, rawLine - discount) * 100) / 100;
     const mapping = getIvaMapping(item.ivaRate);
     const taxVal = (item as any).taxAmount !== undefined && (item as any).taxAmount >= 0
-      ? (item as any).taxAmount
-      : (baseVal * mapping.multiplier);
+      ? safe((item as any).taxAmount)
+      : Math.round(baseVal * mapping.multiplier * 100) / 100;
     const unitPrice = safe(item.precioUnitario);
-    const unitPriceFormatted = Number.isInteger(Math.round(unitPrice * 100))
+    const unitPriceFormatted = Math.abs(unitPrice - Math.round(unitPrice * 100) / 100) < 0.00001
       ? unitPrice.toFixed(2)
-      : (Math.round(unitPrice * 10000) / 10000).toString();
+      : (Math.round(unitPrice * 1000000) / 1000000).toString();
 
     xml += `        <detalle>\n`;
     xml += `            <codigoInterno>${escapeXml(item.codigo || (index + 1).toString().padStart(3, '0'))}</codigoInterno>\n`;

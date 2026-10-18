@@ -50,7 +50,7 @@ import { usePermissions } from '../../context/PermissionsContext';
 import { usePostgresSync } from '../../hooks/usePostgresSync';
 import { defaultEmployees, defaultUsersList, defaultPaymentMethods } from '../../data/initialData';
 import { Order } from '../Sales/CreateOrderModal';
-import { calculateSriTotals, calculateCartItemFinancials } from '../../utils/sriCalculations';
+import { calculateSriTotals, calculateCartItemFinancials, calculateCartItemFinancialsFromPvp } from '../../utils/sriCalculations';
 import { CustomerSelectModal } from './CustomerSelectModal';
 import { PaymentModal } from './PaymentModal';
 import { SriEmissionProgressModal } from './SriEmissionProgressModal';
@@ -554,11 +554,22 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     return null;
   };
 
-  const getPriceForQuantity = (product: Product, qty: number): number => {
+  const getPvpForQuantity = (product: Product, qty: number): number => {
+    const taxRateNum = typeof product.taxRate === 'number' ? product.taxRate : settings.defaultTaxRate;
     const scale = getActiveScaleForQuantity(product, qty);
-    if (scale) return scale.price;
-    return Number(product.price) || 0;
+    if (scale) {
+      if (scale.priceWithTax !== undefined && scale.priceWithTax !== null && !isNaN(Number(scale.priceWithTax)) && Number(scale.priceWithTax) > 0) {
+        return Number(scale.priceWithTax);
+      }
+      return Math.round(Number(scale.price) * (1 + taxRateNum / 100) * 100) / 100;
+    }
+    if (product.priceWithTax !== undefined && product.priceWithTax !== null && !isNaN(Number(product.priceWithTax)) && Number(product.priceWithTax) > 0) {
+      return Number(product.priceWithTax);
+    }
+    return Math.round(Number(product.price || 0) * (1 + taxRateNum / 100) * 100) / 100;
   };
+
+  const getPriceForQuantity = getPvpForQuantity;
 
   // Cart operations
   const handleAddToCart = (product: Product, qty: number = 1) => {
@@ -570,7 +581,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       }
 
       const taxRateNum = typeof product.taxRate === 'number' ? product.taxRate : settings.defaultTaxRate;
-      const baseUnitPrice = getPriceForQuantity(product, newQty);
+      const unitPricePvp = getPvpForQuantity(product, newQty);
       const activeScale = getActiveScaleForQuantity(product, newQty);
       const appliedScale = activeScale ? activeScale.name : undefined;
 
@@ -579,12 +590,12 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       const discountPct = promo ? Math.max(promo.discountPercent, manualDiscount) : manualDiscount;
       const appliedPromo = promo ? `${promo.code} · ${promo.discountPercent}% OFF` : (existing?.appliedPromo ?? undefined);
 
-      const financials = calculateCartItemFinancials(newQty, baseUnitPrice, taxRateNum, discountPct);
+      const financials = calculateCartItemFinancialsFromPvp(newQty, unitPricePvp, taxRateNum, discountPct);
 
       const updatedItem: CartItem = {
         product,
         quantity: newQty,
-        unitPrice: baseUnitPrice,
+        unitPrice: unitPricePvp,
         discountPercent: discountPct,
         subtotal: financials.subtotal,
         taxAmount: financials.taxAmount,
@@ -595,7 +606,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
       if (existing) {
         if (activeScale && existing.appliedScale !== activeScale.name) {
-          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(unitPricePvp, settings.currencySymbol)} c/u)`, 'info'), 0);
         }
         if (promo && !existing.appliedPromo) {
           setTimeout(() => showToast(`🏷️ Promo aplicada: ${promo.name} (${promo.discountPercent}% OFF)`, 'success'), 0);
@@ -603,7 +614,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         return prev.map((item) => (item.product.id === product.id ? updatedItem : item));
       } else {
         if (activeScale) {
-          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(unitPricePvp, settings.currencySymbol)} c/u)`, 'info'), 0);
         }
         if (promo) {
           setTimeout(() => showToast(`🏷️ Promo aplicada: ${promo.name} (${promo.discountPercent}% OFF)`, 'success'), 0);
@@ -620,12 +631,18 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
-        const baseUnitPrice = getPriceForQuantity(item.product, newQty);
         const activeScale = getActiveScaleForQuantity(item.product, newQty);
         const appliedScale = activeScale ? activeScale.name : undefined;
 
+        let unitPricePvp = item.unitPrice;
+        if (activeScale) {
+          unitPricePvp = getPvpForQuantity(item.product, newQty);
+        } else if (item.appliedScale) {
+          unitPricePvp = getPvpForQuantity(item.product, newQty);
+        }
+
         if (activeScale && item.appliedScale !== activeScale.name) {
-          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(activeScale.price, settings.currencySymbol)} c/u)`, 'info'), 0);
+          setTimeout(() => showToast(`✨ Escala aplicada: "${activeScale.name}" (${formatCurrency(unitPricePvp, settings.currencySymbol)} c/u)`, 'info'), 0);
         } else if (!activeScale && item.appliedScale) {
           setTimeout(() => showToast(`ℹ️ Cantidad menor al rango de escala. Aplicando precio regular.`, 'info'), 0);
         }
@@ -637,17 +654,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
           discountPct = Math.max(promo.discountPercent, item.discountPercent);
           appliedPromo = `${promo.code} · ${promo.discountPercent}% OFF`;
         } else if (item.appliedPromo) {
-          // Si ya no cumple la promoción (por ej. cantidad reducida)
           discountPct = 0;
           appliedPromo = undefined;
         }
 
-        const financials = calculateCartItemFinancials(newQty, baseUnitPrice, taxRateNum, discountPct);
+        const financials = calculateCartItemFinancialsFromPvp(newQty, unitPricePvp, taxRateNum, discountPct);
 
         return {
           ...item,
           quantity: newQty,
-          unitPrice: baseUnitPrice,
+          unitPrice: unitPricePvp,
           discountPercent: discountPct,
           subtotal: financials.subtotal,
           taxAmount: financials.taxAmount,
@@ -665,7 +681,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
-        const financials = calculateCartItemFinancials(item.quantity, safePrice, taxRateNum, item.discountPercent);
+        const financials = calculateCartItemFinancialsFromPvp(item.quantity, safePrice, taxRateNum, item.discountPercent);
 
         return {
           ...item,
@@ -682,14 +698,16 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setCartItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        const financials = calculateCartItemFinancials(item.quantity, item.unitPrice, newTaxRate, item.discountPercent);
+        const updatedProduct = {
+          ...item.product,
+          taxRate: newTaxRate,
+        };
+        const financials = calculateCartItemFinancialsFromPvp(item.quantity, item.unitPrice, newTaxRate, item.discountPercent);
 
         return {
           ...item,
-          product: {
-            ...item.product,
-            taxRate: newTaxRate,
-          },
+          product: updatedProduct,
+          subtotal: financials.subtotal,
           taxAmount: financials.taxAmount,
           total: financials.total,
         };
@@ -703,7 +721,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
       prev.map((item) => {
         if (item.product.id !== productId) return item;
         const taxRateNum = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
-        const financials = calculateCartItemFinancials(item.quantity, item.unitPrice, taxRateNum, safeDiscount);
+        const financials = calculateCartItemFinancialsFromPvp(item.quantity, item.unitPrice, taxRateNum, safeDiscount);
 
         return {
           ...item,
@@ -1667,7 +1685,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   <tr>
                     <th className="py-2.5 px-3">DESCRIPCIÓN</th>
                     <th className="py-2.5 px-2 text-center w-24">CANT.</th>
-                    <th className="py-2.5 px-2 text-right w-24">PRECIO UNIT.</th>
+                    <th className="py-2.5 px-2 text-right w-24" title="Precio unitario final de venta con IVA incluido (PVP)">PRECIO UNIT.</th>
                     <th className="py-2.5 px-2 text-center w-24">TARIFA</th>
                     <th className="py-2.5 px-2 text-center w-16">DESC.</th>
                     <th className="py-2.5 px-3 text-right w-28">VALOR TOTAL</th>
@@ -1716,9 +1734,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                 </span>
                               )}
                               {item.discountPercent > 0 && (() => {
-                                const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                                const discConIva = Math.round(((item.quantity * item.unitPrice) - item.total) * 100) / 100;
                                 const discSinIva = item.subtotal * (item.discountPercent / 100);
-                                const discConIva = discSinIva * (1 + taxR);
                                 return (
                                   <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold text-[10px]" title={`Descuento base SRI: -$${discSinIva.toFixed(2)} | Ahorro al cliente: -$${discConIva.toFixed(2)}`}>
                                     Ahorro: -${discConIva.toFixed(2)} con IVA
@@ -1879,9 +1896,8 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                   {item.appliedPromo ? '🏷️ Promo' : '% desc.'}
                                 </span>
                                 {(() => {
-                                  const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
+                                  const discConIva = Math.round(((item.quantity * item.unitPrice) - item.total) * 100) / 100;
                                   const discSinIva = item.subtotal * (item.discountPercent / 100);
-                                  const discConIva = discSinIva * (1 + taxR);
                                   return (
                                     <span className="text-[9px] font-bold text-emerald-600 font-mono block whitespace-nowrap" title={`Descuento Sin IVA: -$${discSinIva.toFixed(2)} | Ahorro Con IVA: -$${discConIva.toFixed(2)}`}>
                                       -${discConIva.toFixed(2)}
@@ -1896,8 +1912,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         {/* Valor Total */}
                         <td className="py-2.5 px-3 text-right">
                           {item.discountPercent > 0 && (() => {
-                            const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-                            const originalTotalConIva = (item.quantity * item.unitPrice) * (1 + taxR);
+                            const originalTotalConIva = item.quantity * item.unitPrice;
                             return (
                               <span className="block text-[10px] font-mono text-slate-400 line-through">
                                 {formatCurrency(originalTotalConIva, settings.currencySymbol)}

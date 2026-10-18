@@ -212,18 +212,12 @@ export const Cart: React.FC<CartProps> = ({
                     <span className="text-[10px] font-black text-slate-700 px-1.5 py-0.2 rounded bg-slate-200/70">
                       {item.product.unit.toUpperCase()}
                     </span>
-                    {(() => {
-                      const itemTaxRate = typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate;
-                      const unitPriceWithTax = item.unitPrice * (1 + itemTaxRate / 100);
-                      return (
-                        <span 
-                          className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200"
-                          title={`Precio sin IVA: ${formatCurrency(item.unitPrice, settings.currencySymbol)}`}
-                        >
-                          P.U (IVA incl.): {formatCurrency(unitPriceWithTax, settings.currencySymbol)}
-                        </span>
-                      );
-                    })()}
+                    <span 
+                      className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200"
+                      title={`Precio unitario de venta (PVP con IVA incluido)`}
+                    >
+                      P.U: {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                    </span>
                   </div>
                   {/* Promo Badge */}
                   {item.appliedPromo && (
@@ -334,10 +328,8 @@ export const Cart: React.FC<CartProps> = ({
                 {/* Item Total */}
                 <div className="text-right">
                   {item.discountPercent > 0 && (() => {
-                    const taxR = (typeof item.product.taxRate === 'number' ? item.product.taxRate : settings.defaultTaxRate) / 100;
-                    const originalTotalConIva = (item.quantity * item.unitPrice) * (1 + taxR);
-                    const discSinIva = item.subtotal * (item.discountPercent / 100);
-                    const discConIva = discSinIva * (1 + taxR);
+                    const originalTotalConIva = item.quantity * item.unitPrice;
+                    const discConIva = Math.round((originalTotalConIva - item.total) * 100) / 100;
                     return (
                       <>
                         <span className="block text-[9px] font-mono text-slate-400 line-through">
@@ -346,7 +338,7 @@ export const Cart: React.FC<CartProps> = ({
                         <span className="font-mono font-black text-slate-950 text-sm block">
                           {formatCurrency(item.total, settings.currencySymbol)}
                         </span>
-                        <span className="block text-[9px] font-bold text-emerald-600 font-mono" title={`Descuento Sin IVA: -$${discSinIva.toFixed(2)} | Ahorro Con IVA: -$${discConIva.toFixed(2)}`}>
+                        <span className="block text-[9px] font-bold text-emerald-600 font-mono" title={`Ahorro Con IVA: -$${discConIva.toFixed(2)}`}>
                           Ahorro: -{formatCurrency(discConIva, settings.currencySymbol)}
                         </span>
                       </>

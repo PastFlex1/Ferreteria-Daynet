@@ -1,6 +1,58 @@
 import { CartItem, InvoiceItem } from '../types';
 import { SriTotalsBreakdown } from '../components/POS/SriTotalsTable';
 
+export function calculateCartItemFinancialsFromPvp(
+  quantity: number,
+  unitPricePvp: number,
+  taxRatePercent: number,
+  discountPercent: number = 0
+) {
+  const taxRate = taxRatePercent / 100;
+  const safeDiscount = Math.max(0, Math.min(100, discountPercent));
+
+  // 1. Total exacto a cobrar al cliente con PVP final
+  const grossTotal = Math.round(quantity * unitPricePvp * 100) / 100;
+  const discountTotalPvp = Math.round(grossTotal * (safeDiscount / 100) * 100) / 100;
+  const itemTotal = Math.round((grossTotal - discountTotalPvp) * 100) / 100;
+
+  let baseAfterDiscount: number;
+  let itemTaxAmount: number;
+
+  if (taxRate > 0) {
+    // Desglose hacia atrás: Base Imponible neta sin IVA
+    baseAfterDiscount = Math.round((itemTotal / (1 + taxRate)) * 100) / 100;
+    // Impuesto = Total - Base (Garantiza matemáticamente que base + impuesto === total)
+    itemTaxAmount = Math.round((itemTotal - baseAfterDiscount) * 100) / 100;
+  } else {
+    baseAfterDiscount = itemTotal;
+    itemTaxAmount = 0;
+  }
+
+  // Desglose del subtotal antes de descuento y descuento sin IVA
+  let itemSubtotal: number;
+  let itemDiscountAmount: number;
+  if (taxRate > 0) {
+    itemSubtotal = Math.round((grossTotal / (1 + taxRate)) * 100) / 100;
+    itemDiscountAmount = Math.round((itemSubtotal - baseAfterDiscount) * 100) / 100;
+  } else {
+    itemSubtotal = grossTotal;
+    itemDiscountAmount = discountTotalPvp;
+  }
+
+  // Precio unitario sin IVA para SRI (hasta 6 decimales de precisión)
+  const baseUnitPrice = quantity > 0 ? (itemSubtotal / quantity) : (taxRate > 0 ? unitPricePvp / (1 + taxRate) : unitPricePvp);
+
+  return {
+    unitPricePvp,
+    baseUnitPrice,
+    subtotal: itemSubtotal,
+    discountAmount: itemDiscountAmount,
+    baseAfterDiscount,
+    taxAmount: itemTaxAmount,
+    total: itemTotal,
+  };
+}
+
 export function calculateCartItemFinancials(
   quantity: number,
   baseUnitPrice: number,
@@ -63,7 +115,14 @@ export function calculateSriTotals(
   const rateBreakdowns: Record<number, { base: number; tax: number; sumItemTax: number }> = {};
 
   items.forEach((item) => {
-    const rawSubtotal = item.subtotal !== undefined ? item.subtotal : (item.unitPrice * item.quantity);
+    let rawSubtotal: number;
+    if (item.subtotal !== undefined) {
+      rawSubtotal = item.subtotal;
+    } else if (item.total !== undefined && item.taxAmount !== undefined) {
+      rawSubtotal = Math.round((item.total - item.taxAmount) * 100) / 100;
+    } else {
+      rawSubtotal = item.unitPrice * item.quantity;
+    }
     const itemSubtotal = Math.round(rawSubtotal * 100) / 100;
     const itemDiscount = Math.round(((itemSubtotal * (item.discountPercent || 0)) / 100) * 100) / 100;
     const baseAfterDiscount = Math.round((itemSubtotal - itemDiscount) * 100) / 100;

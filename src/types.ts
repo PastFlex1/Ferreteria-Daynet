@@ -28,6 +28,7 @@ export interface Product {
   description?: string;
   unit: UnitOfMeasure;
   price: number; // Precio de venta sin o con IVA segun config
+  priceWithTax?: number | string; // Precio de venta con IVA incluido (PVP)
   costPrice: number; // Precio de costo
   stock: number;
   minStock: number;
