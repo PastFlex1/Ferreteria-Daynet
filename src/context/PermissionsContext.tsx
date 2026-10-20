@@ -57,10 +57,23 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
 
   const isSuperAdmin = useMemo(() => {
     if (!activeUser) return false;
-    // Únicamente el usuario root maestro inmutable del sistema (USR-01 / 1799999999001) es superadmin absoluto
-    if (activeUser.username === '1799999999001' || activeUser.id === 'USR-01') {
+    const username = String(activeUser.username || '').toLowerCase().trim();
+    const id = String(activeUser.id || '').toUpperCase().trim();
+    const roleStr = getRoleStr(activeUser.role).toLowerCase().trim();
+
+    // 1. El Administrador principal por username o ID (admin, 1799999999001, USR-01) es superadmin absoluto
+    if (username === 'admin' || username === '1799999999001' || id === 'USR-01') {
       return true;
     }
+
+    // 2. Cualquier usuario con rol Administrador que NO tenga permisos personalizados restrictivos
+    if (roleStr === 'administrador' || roleStr === 'admin') {
+      if (activeUser.hasCustomPermissions && activeUser.permissions) {
+        return false;
+      }
+      return true;
+    }
+
     return false;
   }, [activeUser]);
 
@@ -72,8 +85,8 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
       return ROLE_PRESETS.Administrador.permissions;
     }
 
-    // 1. Si el usuario tiene permisos personalizados explícitos (incluso si tiene 0 permisos / objeto vacío)
-    if (activeUser.hasCustomPermissions || (activeUser.permissions && typeof activeUser.permissions === 'object' && Object.keys(activeUser.permissions).length > 0)) {
+    // 1. Si el usuario tiene permisos personalizados explícitos configurados
+    if (activeUser.hasCustomPermissions && activeUser.permissions && typeof activeUser.permissions === 'object') {
       const customPermissions = activeUser.permissions || {};
       const effective: PermissionMap = {};
       ALL_PERMISSIONS.forEach((p) => {
@@ -88,7 +101,7 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
     const matchedRole = rolesList.find(
       (r) => r.name.toLowerCase() === userRoleStr.toLowerCase() || r.id === userRoleStr
     );
-    const rolePerms = matchedRole?.permissions || combinedPresets[userRoleStr]?.permissions || {};
+    const rolePerms = matchedRole?.permissions || combinedPresets[userRoleStr]?.permissions || ROLE_PRESETS[userRoleStr]?.permissions || {};
     const effective: PermissionMap = {};
     ALL_PERMISSIONS.forEach((p) => {
       effective[p.id] = !!rolePerms[p.id];
