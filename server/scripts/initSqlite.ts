@@ -44,14 +44,20 @@ async function initSqlite() {
     console.log(`[SQLite] ✓ Secuenciales de emisión (001, 002, 003, 004) verificados.`);
 
     // 3. Sembrar roles y usuario Administrador por defecto si no existen
-    db.run(`
-      INSERT OR IGNORE INTO roles_sistema (id, name, description, permissions)
-      VALUES ('role-admin', 'Administrador', 'Control total del sistema', '["*"]');
-    `);
-    db.run(`
-      INSERT OR IGNORE INTO roles_sistema (id, name, description, permissions)
-      VALUES ('role-cajero', 'Cajero', 'Punto de venta y cobros', '["pos", "invoices", "customers"]');
-    `);
+    const defaultRoles = [
+      { id: 'role-admin', name: 'Administrador', desc: 'Control total del sistema', perms: '["*"]' },
+      { id: 'role-cajero', name: 'Cajero', desc: 'Punto de venta y cobros', perms: '["pos", "invoices", "customers"]' },
+      { id: 'role-vendedor', name: 'Vendedor', desc: 'Catálogo, proformas y pedidos', perms: '["sales", "quotes", "orders", "customers"]' },
+      { id: 'role-bodeguero', name: 'Bodeguero', desc: 'Inventario, almacén y recepción', perms: '["inventory", "purchases", "kardex"]' },
+      { id: 'role-contador', name: 'Contador', desc: 'Contabilidad, balances, ATS y reportes', perms: '["accounting", "ats", "reports"]' },
+      { id: 'role-supervisor', name: 'Supervisor', desc: 'Supervisión de operaciones y caja', perms: '["pos", "sales", "inventory", "reports"]' }
+    ];
+    for (const r of defaultRoles) {
+      db.run(`
+        INSERT OR IGNORE INTO roles_sistema (id, name, description, permissions)
+        VALUES (?, ?, ?, ?);
+      `, [r.id, r.name, r.desc, r.perms]);
+    }
 
     // Verificar si hay usuarios registrados
     db.get(`SELECT count(*) as count FROM usuarios_sistema;`, [], async (_err, row: any) => {

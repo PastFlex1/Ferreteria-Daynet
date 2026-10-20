@@ -849,9 +849,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     showToast(`XML de prueba generado con clave: ${claveAcceso}`, 'success');
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUser.name || !newUser.email || !newUser.username || !newUser.password) return;
+    if (!newUser.name || !newUser.email || !newUser.username) {
+      showToast('Nombre, identificación y correo son obligatorios.', 'warning');
+      return;
+    }
+    if (!editingUser && !newUser.password) {
+      showToast('Debe ingresar una contraseña para el nuevo usuario.', 'warning');
+      return;
+    }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+
     if (editingUser) {
       const currentEditingRole = getRoleString(editingUser.role).toLowerCase();
       const newRoleStr = getRoleString(newUser.role).toLowerCase();
@@ -874,10 +884,42 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
       const updatedUser = {
         ...editingUser,
-        ...newUser,
+        name: newUser.name,
+        email: newUser.email,
+        username: newUser.username,
+        role: newUser.role,
+        ...(newUser.password ? { password: newUser.password } : {}),
         permissions: newPermissions,
         hasCustomPermissions
       };
+
+      try {
+        const response = await fetch(getApiUrl('/api/auth/users'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            id: updatedUser.id,
+            name: updatedUser.name,
+            username: updatedUser.username,
+            email: updatedUser.email,
+            role: typeof updatedUser.role === 'object' ? updatedUser.role.name : updatedUser.role,
+            status: updatedUser.status || 'Activo',
+            password: newUser.password ? newUser.password : undefined,
+            permissions: newPermissions,
+            hasCustomPermissions
+          })
+        });
+        const resData = await response.json();
+        if (!response.ok || !resData.success) {
+          showToast(resData.message || 'Error al guardar usuario en la base de datos.', 'error');
+          return;
+        }
+      } catch (err: any) {
+        console.warn('[handleSaveUser API Warning]:', err.message);
+      }
 
       setUsersList(
         (usersList || []).map(u => u.id === editingUser.id ? updatedUser : u)
@@ -887,7 +929,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       if (currentUser && (currentUser.id === editingUser.id || currentUser.username === editingUser.username)) {
         const updatedCurr = { 
           ...currentUser, 
-          ...newUser, 
+          name: newUser.name,
+          email: newUser.email,
+          username: newUser.username,
+          role: newUser.role,
           permissions: newPermissions,
           hasCustomPermissions
         };
@@ -911,21 +956,42 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         newMap[p.id] = !!initialRolePermissions[p.id];
       });
 
+      const newUserId = `USR-${Date.now()}`;
+      const userPayload = {
+        id: newUserId,
+        name: newUser.name,
+        email: newUser.email,
+        username: newUser.username,
+        role: newUser.role,
+        status: 'Activo',
+        password: newUser.password,
+        permissions: newMap,
+        hasCustomPermissions: false
+      };
+
+      try {
+        const response = await fetch(getApiUrl('/api/auth/users'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(userPayload)
+        });
+        const resData = await response.json();
+        if (!response.ok || !resData.success) {
+          showToast(resData.message || 'Error al registrar usuario en la base de datos.', 'error');
+          return;
+        }
+      } catch (err: any) {
+        console.warn('[handleSaveUser API Warning]:', err.message);
+      }
+
       setUsersList([
         ...(usersList || []),
-        {
-          id: `USR-${Date.now()}`,
-          name: newUser.name,
-          email: newUser.email,
-          username: newUser.username,
-          role: newUser.role,
-          status: 'Activo',
-          password: newUser.password,
-          permissions: newMap,
-          hasCustomPermissions: false
-        }
+        userPayload
       ]);
-      showToast('Usuario creado correctamente', 'success');
+      showToast('Usuario creado correctamente y listo para iniciar sesión', 'success');
     }
     setNewUser({ name: '', email: '', username: '', role: safeRolesList[0]?.name || 'Vendedor', password: '' });
     setEditingUser(null);
@@ -1019,16 +1085,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setEditingUser(user);
     setShowNewUserPassword(false);
     setNewUser({
-      name: user.name,
-      email: user.email,
-      username: user.username,
-      role: user.role,
-      password: user.password || ''
+      name: user.name || '',
+      email: user.email || '',
+      username: user.username || '',
+      role: typeof user.role === 'object' ? user.role?.name || 'Cajero' : user.role || 'Cajero',
+      password: ''
     });
     setShowAddUserModal(true);
   };
 
-  const handleToggleUserStatus = (user: any) => {
+  const handleToggleUserStatus = async (user: any) => {
     const adminsActive = usersList.filter(u => u.role === 'Administrador' && u.status === 'Activo').length;
     if (user.role === 'Administrador' && user.status === 'Activo' && adminsActive <= 1) {
       showAlert('No puedes deshabilitar al último administrador activo, quedarías sin acceso al sistema.', 'No permitido', 'error');
@@ -1037,6 +1103,29 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     const newStatus = user.status === 'Activo' ? 'Inactivo' : 'Activo';
     setUsersList(usersList.map(u => u.id === user.id ? { ...u, status: newStatus } : u));
     showToast(newStatus === 'Activo' ? 'Usuario habilitado' : 'Usuario deshabilitado', 'success');
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+      await fetch(getApiUrl('/api/auth/users'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          id: user.id,
+          name: user.name,
+          username: user.username,
+          email: user.email,
+          role: typeof user.role === 'object' ? user.role?.name || 'Cajero' : user.role || 'Cajero',
+          status: newStatus,
+          permissions: user.permissions || {},
+          hasCustomPermissions: !!user.hasCustomPermissions
+        })
+      });
+    } catch (e) {
+      console.warn('[handleToggleUserStatus API error]:', e);
+    }
   };
 
   const handleDeleteUser = (user: any) => {
@@ -1057,7 +1146,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     );
   };
 
-  const handleSavePermissions = (userId: string, updatedPermissions: Record<string, boolean>, newRole?: string) => {
+  const handleSavePermissions = async (userId: string, updatedPermissions: Record<string, boolean>, newRole?: string) => {
+    const targetUser = (usersList || []).find((u: any) => u.id === userId);
     setUsersList((prev: any[]) =>
       prev.map((u: any) =>
         u.id === userId
@@ -1065,6 +1155,32 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           : u
       )
     );
+
+    // Persistir directamente a SQLite usuarios_sistema
+    if (targetUser) {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+        await fetch(getApiUrl('/api/auth/users'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            id: targetUser.id,
+            name: targetUser.name,
+            username: targetUser.username,
+            email: targetUser.email,
+            role: newRole || (typeof targetUser.role === 'object' ? targetUser.role?.name : targetUser.role) || 'Cajero',
+            status: targetUser.status || 'Activo',
+            permissions: updatedPermissions,
+            hasCustomPermissions: true
+          })
+        });
+      } catch (e) {
+        console.warn('[handleSavePermissions sync error]:', e);
+      }
+    }
 
     // Si el usuario editado es el usuario en sesión activa, actualizar sesión de inmediato
     if (currentUser && (currentUser.id === userId || currentUser.username === userForPermissions?.username)) {
@@ -3225,16 +3341,23 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
                   {/* Contraseña */}
                   <div>
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                      <Lock className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Contraseña de Acceso *</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Contraseña de Acceso {editingUser ? '(Opcional)' : '*'}</span>
+                      </label>
+                      {editingUser && (
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          ✓ Contraseña guardada y protegida
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <input 
                         type={showNewUserPassword ? 'text' : 'password'}
-                        required
+                        required={!editingUser}
                         autoComplete="new-password"
-                        placeholder="••••••••"
+                        placeholder={editingUser ? "•••••••• (Dejar vacío para conservar la actual)" : "•••••••• (Mínimo 4 caracteres)"}
                         value={newUser.password}
                         onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl pl-3.5 pr-10 py-2.5 text-xs font-mono placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-cyan-500 transition"
@@ -3248,6 +3371,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                    {editingUser ? (
+                      <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                        La contraseña actual está cifrada con bcrypt por seguridad. Para cambiarla, escriba la nueva contraseña aquí; de lo contrario, deje este campo vacío.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                        Ingrese la contraseña con la que este usuario iniciará sesión en el sistema.
+                      </p>
+                    )}
                   </div>
 
                   {/* Botones de Acción */}

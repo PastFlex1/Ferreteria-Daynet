@@ -104,15 +104,11 @@ export const Header: React.FC<HeaderProps> = ({
   const { can, isSuperAdmin, userPermissions } = usePermissions();
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const isTabAllowed = (tabId: string, modulePerm?: string): boolean => {
+  const isTabAllowed = (tabId: string): boolean => {
     if (isSuperAdmin) return true;
     const direct = TAB_TO_PERMISSION_MAP[tabId];
     if (direct) {
       return can(direct);
-    }
-    // Si no hay configuración directa, verificar si tiene acceso general al módulo
-    if (modulePerm) {
-      return can(modulePerm);
     }
     return false;
   };
@@ -258,17 +254,17 @@ export const Header: React.FC<HeaderProps> = ({
     badge?: number;
     modulePerm: string;
   }[] = [
-    { id: 'VENTAS',       label: 'Ventas',       icon: <TrendingUp className="w-4 h-4" />,  items: salesSubTabs.filter(i => isTabAllowed(i.id, 'nav.ventas')),          accentClass: 'text-orange-400', badge: cartItemCount || undefined, modulePerm: 'nav.ventas' },
-    { id: 'CLIENTES',     label: 'Clientes',     icon: <Users className="w-4 h-4" />,        items: customerSubTabs.filter(i => isTabAllowed(i.id, 'nav.clientes')),        accentClass: 'text-orange-400', modulePerm: 'nav.clientes' },
-    { id: 'INVENTARIO',   label: 'Inventario',   icon: <Package className="w-4 h-4" />,      items: inventorySubTabs.filter(i => isTabAllowed(i.id, 'nav.inventario')),      accentClass: 'text-orange-400', badge: lowStockCount || undefined, modulePerm: 'nav.inventario' },
-    { id: 'COMPRAS',      label: 'Compras',      icon: <ShoppingBag className="w-4 h-4" />, items: purchasesSubTabs.filter(i => isTabAllowed(i.id, 'nav.compras')),      accentClass: 'text-orange-400', modulePerm: 'nav.compras' },
-    { id: 'PROVEEDORES',  label: 'Proveedores',  icon: <Building2 className="w-4 h-4" />,   items: suppliersSubTabs.filter(i => isTabAllowed(i.id, 'nav.proveedores')),    accentClass: 'text-orange-400', modulePerm: 'nav.proveedores' },
-    { id: 'FINANZAS',     label: 'Finanzas',     icon: <Landmark className="w-4 h-4" />,     items: financeSubTabs.filter(i => isTabAllowed(i.id, 'nav.finanzas')),        accentClass: 'text-emerald-400', modulePerm: 'nav.finanzas' },
-    { id: 'CONTABILIDAD', label: 'Contabilidad', icon: <BookOpen className="w-4 h-4" />,     items: accountingSubTabs.filter(i => isTabAllowed(i.id, 'nav.contabilidad')), accentClass: 'text-indigo-400', modulePerm: 'nav.contabilidad' },
-    { id: 'ACTIVOS',      label: 'Activos',      icon: <Briefcase className="w-4 h-4" />,    items: assetsSubTabs.filter(i => isTabAllowed(i.id, 'nav.activos')),          accentClass: 'text-amber-400', modulePerm: 'nav.activos' },
-    { id: 'RRHH',         label: 'RRHH',         icon: <Users className="w-4 h-4" />,        items: hrSubTabs.filter(i => isTabAllowed(i.id, 'nav.rrhh')),              accentClass: 'text-cyan-400', modulePerm: 'nav.rrhh' },
-    { id: 'REPORTES',     label: 'Reportes',     icon: <BarChart3 className="w-4 h-4" />,    items: reportsSubTabs.filter(i => isTabAllowed(i.id, 'nav.reportes')),        accentClass: 'text-emerald-400', modulePerm: 'nav.reportes' },
-    { id: 'CONFIGURACION', label: 'Configuración', icon: <Settings className="w-4 h-4" />,  items: settingsSubTabs.filter(i => isTabAllowed(i.id, 'nav.configuracion')),   accentClass: 'text-slate-400', modulePerm: 'nav.configuracion' },
+    { id: 'VENTAS',       label: 'Ventas',       icon: <TrendingUp className="w-4 h-4" />,  items: salesSubTabs.filter(i => isTabAllowed(i.id)),          accentClass: 'text-orange-400', badge: cartItemCount || undefined, modulePerm: 'nav.ventas' },
+    { id: 'CLIENTES',     label: 'Clientes',     icon: <Users className="w-4 h-4" />,        items: customerSubTabs.filter(i => isTabAllowed(i.id)),        accentClass: 'text-orange-400', modulePerm: 'nav.clientes' },
+    { id: 'INVENTARIO',   label: 'Inventario',   icon: <Package className="w-4 h-4" />,      items: inventorySubTabs.filter(i => isTabAllowed(i.id)),      accentClass: 'text-orange-400', badge: lowStockCount || undefined, modulePerm: 'nav.inventario' },
+    { id: 'COMPRAS',      label: 'Compras',      icon: <ShoppingBag className="w-4 h-4" />, items: purchasesSubTabs.filter(i => isTabAllowed(i.id)),      accentClass: 'text-orange-400', modulePerm: 'nav.compras' },
+    { id: 'PROVEEDORES',  label: 'Proveedores',  icon: <Building2 className="w-4 h-4" />,   items: suppliersSubTabs.filter(i => isTabAllowed(i.id)),    accentClass: 'text-orange-400', modulePerm: 'nav.proveedores' },
+    { id: 'FINANZAS',     label: 'Finanzas',     icon: <Landmark className="w-4 h-4" />,     items: financeSubTabs.filter(i => isTabAllowed(i.id)),        accentClass: 'text-emerald-400', modulePerm: 'nav.finanzas' },
+    { id: 'CONTABILIDAD', label: 'Contabilidad', icon: <BookOpen className="w-4 h-4" />,     items: accountingSubTabs.filter(i => isTabAllowed(i.id)), accentClass: 'text-indigo-400', modulePerm: 'nav.contabilidad' },
+    { id: 'ACTIVOS',      label: 'Activos',      icon: <Briefcase className="w-4 h-4" />,    items: assetsSubTabs.filter(i => isTabAllowed(i.id)),          accentClass: 'text-amber-400', modulePerm: 'nav.activos' },
+    { id: 'RRHH',         label: 'RRHH',         icon: <Users className="w-4 h-4" />,        items: hrSubTabs.filter(i => isTabAllowed(i.id)),              accentClass: 'text-cyan-400', modulePerm: 'nav.rrhh' },
+    { id: 'REPORTES',     label: 'Reportes',     icon: <BarChart3 className="w-4 h-4" />,    items: reportsSubTabs.filter(i => isTabAllowed(i.id)),        accentClass: 'text-emerald-400', modulePerm: 'nav.reportes' },
+    { id: 'CONFIGURACION', label: 'Configuración', icon: <Settings className="w-4 h-4" />,  items: settingsSubTabs.filter(i => isTabAllowed(i.id)),   accentClass: 'text-slate-400', modulePerm: 'nav.configuracion' },
   ];
 
   const modules = rawModules.filter(m => isSuperAdmin || m.items.length > 0);

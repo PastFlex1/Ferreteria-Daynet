@@ -518,8 +518,15 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
         const role = typeof u.role === 'object' ? u.role?.name || 'Cajero' : u.role || 'Cajero';
         const status = u.status || 'Activo';
 
+        // Asegurar existencia del rol en roles_sistema para satisfacer FK
+        await pool.query(`
+          INSERT INTO roles_sistema (id, name, description, permissions, data)
+          VALUES ($1, $2, $3, '[]'::jsonb, '{}'::jsonb)
+          ON CONFLICT (id) DO NOTHING;
+        `, [`role-${String(role).toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`, role, `Rol ${role}`]);
+
         let passwordHash: string | null = null;
-        if (u.password && typeof u.password === 'string' && u.password.trim() !== '') {
+        if (u.password && typeof u.password === 'string' && u.password.trim() !== '' && u.password !== '[PROTECTED_BCRYPT]') {
           if (u.password.startsWith('$2a$') || u.password.startsWith('$2b$')) {
             passwordHash = u.password;
           } else {

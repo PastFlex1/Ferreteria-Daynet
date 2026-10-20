@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import { getSqlitePool as getPool } from '../config/sqlite';
 
 export async function populateRelationalFromAppState() {
@@ -82,6 +83,22 @@ export async function populateRelationalFromAppState() {
   }
 
   // 4. Sincronizar ROLES (roles_sistema)
+  const defaultRoles = [
+    { id: 'role-admin', name: 'Administrador', desc: 'Control total del sistema', perms: '["*"]' },
+    { id: 'role-cajero', name: 'Cajero', desc: 'Punto de venta y cobros', perms: '["pos", "invoices", "customers"]' },
+    { id: 'role-vendedor', name: 'Vendedor', desc: 'Catálogo, proformas y pedidos', perms: '["sales", "quotes", "orders", "customers"]' },
+    { id: 'role-bodeguero', name: 'Bodeguero', desc: 'Inventario, almacén y recepción', perms: '["inventory", "purchases", "kardex"]' },
+    { id: 'role-contador', name: 'Contador', desc: 'Contabilidad, balances, ATS y reportes', perms: '["accounting", "ats", "reports"]' },
+    { id: 'role-supervisor', name: 'Supervisor', desc: 'Supervisión de operaciones y caja', perms: '["pos", "sales", "inventory", "reports"]' }
+  ];
+  for (const dr of defaultRoles) {
+    await pool.query(`
+      INSERT INTO roles_sistema (id, name, description, permissions, data)
+      VALUES ($1, $2, $3, $4::jsonb, '{}'::jsonb)
+      ON CONFLICT (id) DO NOTHING;
+    `, [dr.id, dr.name, dr.desc, dr.perms]);
+  }
+
   const roles = stateMap['ferreteria_settings_roles'];
   if (Array.isArray(roles)) {
     for (const r of roles) {
@@ -107,16 +124,42 @@ export async function populateRelationalFromAppState() {
       const name = String(u.name || u.username || 'Usuario');
       const username = String(u.username || id);
       const email = u.email || null;
-      const role = u.role || 'Cajero';
+      const role = typeof u.role === 'object' ? u.role?.name || 'Cajero' : u.role || 'Cajero';
       const status = u.status || 'Activo';
-      const password = u.password || 'password';
+
+      // Asegurar existencia del rol en roles_sistema para satisfacer FK
       await pool.query(`
-        INSERT INTO usuarios_sistema (id, name, username, email, role, status, password, data)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-        ON CONFLICT (id) DO UPDATE
-        SET name = EXCLUDED.name, username = EXCLUDED.username, email = EXCLUDED.email,
-            role = EXCLUDED.role, status = EXCLUDED.status, password = EXCLUDED.password, data = EXCLUDED.data;
-      `, [id, name, username, email, role, status, password, JSON.stringify(u)]);
+        INSERT INTO roles_sistema (id, name, description, permissions, data)
+        VALUES ($1, $2, $3, '[]'::jsonb, '{}'::jsonb)
+        ON CONFLICT (id) DO NOTHING;
+      `, [`role-${String(role).toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`, role, `Rol ${role}`]);
+
+      let passwordHash: string | null = null;
+      if (u.password && typeof u.password === 'string' && u.password.trim() !== '' && u.password !== '[PROTECTED_BCRYPT]') {
+        if (u.password.startsWith('$2a$') || u.password.startsWith('$2b$')) {
+          passwordHash = u.password;
+        } else {
+          passwordHash = bcrypt.hashSync(u.password, 10);
+        }
+      }
+
+      if (passwordHash) {
+        await pool.query(`
+          INSERT INTO usuarios_sistema (id, name, username, email, role, status, password, data)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+          ON CONFLICT (id) DO UPDATE
+          SET name = EXCLUDED.name, username = EXCLUDED.username, email = EXCLUDED.email,
+              role = EXCLUDED.role, status = EXCLUDED.status, password = EXCLUDED.password, data = EXCLUDED.data;
+        `, [id, name, username, email, role, status, passwordHash, JSON.stringify({ ...u, password: '[PROTECTED_BCRYPT]' })]);
+      } else {
+        await pool.query(`
+          INSERT INTO usuarios_sistema (id, name, username, email, role, status, password, data)
+          VALUES ($1, $2, $3, $4, $5, $6, 'PENDIENTE', $7::jsonb)
+          ON CONFLICT (id) DO UPDATE
+          SET name = EXCLUDED.name, username = EXCLUDED.username, email = EXCLUDED.email,
+              role = EXCLUDED.role, status = EXCLUDED.status, data = EXCLUDED.data;
+        `, [id, name, username, email, role, status, JSON.stringify({ ...u, password: '[PROTECTED_BCRYPT]' })]);
+      }
     }
     console.log(`✓ Sincronizados ${users.length} usuarios en 'usuarios_sistema'.`);
   }

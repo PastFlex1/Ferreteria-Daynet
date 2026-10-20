@@ -57,12 +57,18 @@ export async function login(req: Request, res: Response) {
       });
     }
 
-    // Verificar contraseña exclusivamente contra hash criptográfico bcrypt
+    // Verificar contraseña contra hash criptográfico bcrypt o actualización transparente
     const storedPassword = user.password || '';
     let isPasswordValid = false;
 
     if (storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$')) {
       isPasswordValid = await bcrypt.compare(String(password), storedPassword);
+    } else if (storedPassword && storedPassword !== 'PENDIENTE' && storedPassword !== '[PROTECTED_BCRYPT]') {
+      isPasswordValid = String(password) === storedPassword;
+      if (isPasswordValid) {
+        const upgradeHash = await bcrypt.hash(String(password), 10);
+        await pool.query(`UPDATE usuarios_sistema SET password = $1 WHERE id = $2;`, [upgradeHash, user.id]);
+      }
     }
 
     if (!isPasswordValid) {
@@ -246,7 +252,9 @@ export async function getUsers(req: AuthenticatedRequest, res: Response) {
         username: r.username,
         email: r.email,
         role: r.role,
-        status: r.status
+        status: r.status,
+        permissions: safeData.permissions || {},
+        hasCustomPermissions: safeData.hasCustomPermissions || false
       };
     });
 
@@ -267,7 +275,7 @@ export async function getUsers(req: AuthenticatedRequest, res: Response) {
 export async function saveUser(req: AuthenticatedRequest, res: Response) {
   try {
     const pool = getPgPool();
-    const { id, name, username, email, role, status, password } = req.body;
+    const { id, name, username, email, role, status, password, permissions, hasCustomPermissions } = req.body;
 
     if (!username || !name) {
       return res.status(400).json({ success: false, message: 'Nombre y nombre de usuario (Cédula/RUC) son obligatorios.' });
@@ -276,15 +284,35 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
     const userId = id || `USR-${Date.now()}`;
     const cleanUsername = String(username).trim();
     const cleanEmail = email ? String(email).trim().toLowerCase() : null;
-    const userRole = role || 'Cajero';
+    const userRole = typeof role === 'object' ? role?.name || 'Cajero' : role || 'Cajero';
     const userStatus = status || 'Activo';
 
+    // 1. Asegurar existencia del rol en roles_sistema para satisfacer Foreign Key
+    await pool.query(`
+      INSERT INTO roles_sistema (id, name, description, permissions, data)
+      VALUES ($1, $2, $3, '[]'::jsonb, '{}'::jsonb)
+      ON CONFLICT (id) DO NOTHING;
+    `, [`role-${String(userRole).toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`, userRole, `Rol ${userRole}`]);
+
     let hashedPassword: string | null = null;
-    if (password && String(password).trim().length > 0) {
-      hashedPassword = await bcrypt.hash(String(password).trim(), 10);
+    if (password && typeof password === 'string' && password.trim().length > 0 && password.trim() !== '[PROTECTED_BCRYPT]') {
+      if (password.startsWith('$2a$') || password.startsWith('$2b$')) {
+        hashedPassword = password;
+      } else {
+        hashedPassword = await bcrypt.hash(password.trim(), 10);
+      }
     }
 
-    const safeData = { id: userId, name, username: cleanUsername, email: cleanEmail, role: userRole, status: userStatus };
+    const safeData = {
+      id: userId,
+      name,
+      username: cleanUsername,
+      email: cleanEmail,
+      role: userRole,
+      status: userStatus,
+      permissions: permissions || {},
+      hasCustomPermissions: hasCustomPermissions !== undefined ? !!hasCustomPermissions : false
+    };
 
     if (hashedPassword) {
       await pool.query(`
