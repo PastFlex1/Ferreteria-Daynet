@@ -66,15 +66,16 @@ import {
 } from './data/initialData';
 import { generateDocumentNumber, getEcuadorianDateTime } from './utils/formatters';
 import { useModal } from './context/ModalContext';
-import { Lock, LogOut } from 'lucide-react';
+import { Lock, LogOut, ShieldAlert, UserX } from 'lucide-react';
 
 
 const AuthorizedTabContent: React.FC<{
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   children: React.ReactNode;
-}> = ({ activeTab, setActiveTab, children }) => {
-  const { can, isSuperAdmin, userPermissions } = usePermissions();
+  onLogout?: () => void;
+}> = ({ activeTab, setActiveTab, children, onLogout }) => {
+  const { can, isSuperAdmin, hasAnySectionAllowed, activeUser, userPermissions } = usePermissions();
 
   const isTabPermitted = (tab: string): boolean => {
     if (isSuperAdmin) return true;
@@ -87,11 +88,12 @@ const AuthorizedTabContent: React.FC<{
 
   const hasAnyTabAllowed = useMemo(() => {
     if (isSuperAdmin) return true;
+    if (!hasAnySectionAllowed) return false;
     return Object.keys(TAB_TO_PERMISSION_MAP).some(tab => isTabPermitted(tab));
-  }, [isSuperAdmin, userPermissions]);
+  }, [isSuperAdmin, hasAnySectionAllowed, userPermissions]);
 
   useEffect(() => {
-    if (isSuperAdmin) return;
+    if (isSuperAdmin || !hasAnyTabAllowed) return;
     if (!isCurrentAllowed) {
       // Si el trabajador no tiene permiso para este tab, buscar el primer tab permitido
       const candidateTabs = [
@@ -106,8 +108,73 @@ const AuthorizedTabContent: React.FC<{
         setActiveTab(firstAllowed as TabType);
       }
     }
-  }, [activeTab, isSuperAdmin, isCurrentAllowed, userPermissions, setActiveTab]);
+  }, [activeTab, isSuperAdmin, isCurrentAllowed, hasAnyTabAllowed, userPermissions, setActiveTab]);
 
+  // CASO 1: El usuario tiene 0 secciones asignadas en el sistema
+  if (!isSuperAdmin && (!hasAnySectionAllowed || !hasAnyTabAllowed)) {
+    const roleLabel = activeUser
+      ? (typeof activeUser.role === 'object' ? (activeUser.role as any)?.name || (activeUser.role as any)?.label : activeUser.role) || 'Sin Rol'
+      : 'Sin Rol';
+
+    return (
+      <div className="py-12 sm:py-20 px-4 max-w-xl mx-auto animate-in fade-in zoom-in-95 duration-200">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-10 text-center shadow-xl space-y-6">
+          <div className="w-20 h-20 rounded-3xl bg-rose-500/10 border border-rose-500/25 text-rose-500 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-10 h-10 stroke-[2.2]" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+              Acceso Restringido
+            </span>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+              Usuario sin secciones asignadas
+            </h2>
+            <p className="text-sm font-bold text-rose-500 dark:text-rose-400">
+              Este usuario no está asignado a ninguna sección en el sistema.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium pt-1">
+              No tiene asignado ningún módulo ni permiso de trabajo. Comuníquese con el Administrador principal para que configure y habilite sus secciones correspondientes.
+            </p>
+          </div>
+
+          {activeUser && (
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-100 dark:border-slate-700/60 text-left space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Usuario / Colaborador:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{activeUser.name || 'N/A'}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Identificación (Cédula/RUC):</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{activeUser.username || 'N/A'}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Rol Asignado:</span>
+                <span className="font-bold text-orange-500">{roleLabel}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200/60 dark:border-slate-700">
+                <span className="text-slate-400 font-medium">Estado de Permisos:</span>
+                <span className="font-black text-rose-500">0 secciones asignadas</span>
+              </div>
+            </div>
+          )}
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-full py-3 px-4 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white text-xs font-black rounded-2xl shadow-lg shadow-rose-500/25 transition cursor-pointer flex items-center justify-center gap-2 active:scale-98"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Cerrar Sesión</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // CASO 2: El usuario sí tiene algunas secciones permitidas, pero intentó entrar a una no autorizada
   if (!isSuperAdmin && !isCurrentAllowed) {
     return (
       <div className="py-24 px-6 text-center max-w-lg mx-auto space-y-4 animate-in fade-in duration-200">
@@ -116,21 +183,10 @@ const AuthorizedTabContent: React.FC<{
         </div>
         <div className="space-y-1.5">
           <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Acceso Restringido</h2>
-          {!hasAnyTabAllowed ? (
-            <div className="space-y-2">
-              <p className="text-sm text-rose-500 dark:text-rose-400 font-bold">
-                Este usuario no tiene acceso a nada.
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                No tiene asignado ningún módulo ni permiso en el sistema. Comunícate con el Administrador para que configure tus accesos de trabajo.
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-              Tu cuenta de usuario no tiene permisos habilitados para acceder a la sección <strong className="text-slate-700 dark:text-slate-200 font-bold">{activeTab}</strong>.
-              Comunícate con el Administrador para solicitar acceso si lo requieres.
-            </p>
-          )}
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+            Tu cuenta de usuario no tiene permisos habilitados para acceder a la sección <strong className="text-slate-700 dark:text-slate-200 font-bold">{activeTab}</strong>.
+            Comunícate con el Administrador para solicitar acceso si lo requieres.
+          </p>
         </div>
       </div>
     );
@@ -951,7 +1007,7 @@ export default function App() {
           {isTabLoading ? (
             <ModuleSkeleton />
           ) : (
-            <AuthorizedTabContent activeTab={activeTab} setActiveTab={setActiveTab}>
+            <AuthorizedTabContent activeTab={activeTab} setActiveTab={setActiveTab} onLogout={() => setIsLogoutConfirmOpen(true)}>
           {(activeTab === 'CAJA') && (
             <BillingTerminal
               products={products}

@@ -102,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
   sidebarCollapsed,
   setSidebarCollapsed,
 }) => {
-  const { can, isSuperAdmin, userPermissions } = usePermissions();
+  const { can, isSuperAdmin, hasAnySectionAllowed, userPermissions } = usePermissions();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const isTabAllowed = (tabId: string): boolean => {
@@ -350,30 +350,41 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right-side status pills */}
         <div className={`flex items-center gap-2 shrink-0 ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
-          {lowStockCount > 0 && (
-            <button
-              onClick={() => setActiveTab('INVENTARIO' as TabType)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 rounded-xl text-xs font-bold transition cursor-pointer"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 animate-pulse" />
-              <span className="hidden sm:inline">{lowStockCount} Bajo Stock</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setActiveTab('CASH_REGISTER')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-              isCashRegisterOpen
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
-            }`}
-          >
-            <span className="relative flex h-2 w-2">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isCashRegisterOpen ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isCashRegisterOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          {!isSuperAdmin && !hasAnySectionAllowed ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs font-bold shadow-xs">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Sin secciones asignadas</span>
             </span>
-            <span>{isCashRegisterOpen ? 'Caja Abierta' : 'Caja Cerrada'}</span>
-          </button>
+          ) : (
+            <>
+              {lowStockCount > 0 && isTabAllowed('INVENTARIO') && (
+                <button
+                  onClick={() => setActiveTab('INVENTARIO' as TabType)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 animate-pulse" />
+                  <span className="hidden sm:inline">{lowStockCount} Bajo Stock</span>
+                </button>
+              )}
+
+              {isTabAllowed('CAJA') && (
+                <button
+                  onClick={() => setActiveTab('CASH_REGISTER')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    isCashRegisterOpen
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
+                  }`}
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isCashRegisterOpen ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isCashRegisterOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                  </span>
+                  <span>{isCashRegisterOpen ? 'Caja Abierta' : 'Caja Cerrada'}</span>
+                </button>
+              )}
+            </>
+          )}
 
           <div className={`hidden md:flex items-center gap-2 text-xs text-slate-300 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 font-mono ${sidebarPosition === 'right' ? 'flex-row-reverse' : ''}`}>
             <Clock className="w-3.5 h-3.5 text-orange-400" />
@@ -427,11 +438,11 @@ export const Header: React.FC<HeaderProps> = ({
         <nav className={`flex-1 custom-scrollbar ${isHorizontal ? 'flex flex-row flex-wrap items-center justify-center px-2 h-full gap-1' : 'overflow-y-auto overflow-x-hidden py-2'}`}>
           {modules.length === 0 && (!sidebarCollapsed || isHorizontal) && (
             <div className="p-4 text-center space-y-2 mt-4 animate-in fade-in">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto shadow-inner">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-400 flex items-center justify-center mx-auto shadow-inner">
                 <Lock className="w-5 h-5 stroke-[2]" />
               </div>
-              <p className="text-[11px] font-black text-slate-300 uppercase tracking-wider">Sin módulos asignados</p>
-              <p className="text-[10px] text-slate-500 font-medium leading-relaxed">Este usuario no tiene acceso a ningún módulo del sistema.</p>
+              <p className="text-[11px] font-black text-slate-200 uppercase tracking-wider">Sin secciones asignadas</p>
+              <p className="text-[10px] text-slate-400 font-medium leading-relaxed">Este usuario no está asignado a ninguna sección en el sistema.</p>
             </div>
           )}
           {modules.map((mod) => {

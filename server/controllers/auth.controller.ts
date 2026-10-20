@@ -263,7 +263,13 @@ export async function getUsers(req: AuthenticatedRequest, res: Response) {
     );
 
     const sanitizedUsers = userRes.rows.map((r: any) => {
-      const { password, ...safeData } = (r.data || {});
+      let rawData: any = {};
+      try {
+        rawData = typeof r.data === 'string' ? JSON.parse(r.data) : (r.data || {});
+      } catch (e) {
+        rawData = {};
+      }
+      const { password, ...safeData } = rawData;
       return {
         ...safeData,
         id: r.id,
@@ -273,7 +279,7 @@ export async function getUsers(req: AuthenticatedRequest, res: Response) {
         role: r.role,
         status: r.status,
         permissions: safeData.permissions || {},
-        hasCustomPermissions: safeData.hasCustomPermissions || false
+        hasCustomPermissions: safeData.hasCustomPermissions !== undefined ? !!safeData.hasCustomPermissions : false
       };
     });
 

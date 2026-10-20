@@ -8,6 +8,7 @@ interface PermissionsContextType {
   canAny: (permissionIds: string[]) => boolean;
   canAll: (permissionIds: string[]) => boolean;
   isSuperAdmin: boolean;
+  hasAnySectionAllowed: boolean;
   activeUser: SystemUser | null;
   userPermissions: PermissionMap;
   rolesList: SystemRole[];
@@ -18,6 +19,7 @@ const PermissionsContext = createContext<PermissionsContextType>({
   canAny: () => true,
   canAll: () => true,
   isSuperAdmin: true,
+  hasAnySectionAllowed: true,
   activeUser: null,
   userPermissions: {},
   rolesList: DEFAULT_SYSTEM_ROLES,
@@ -55,54 +57,49 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
 
   const isSuperAdmin = useMemo(() => {
     if (!activeUser) return false;
-    // Si el usuario tiene permisos granulares configurados explícitamente (hasCustomPermissions),
-    // NO debe saltarse los controles; debe respetar exactamente los permisos asignados
-    if ((activeUser as any).hasCustomPermissions) {
-      return false;
-    }
-    // Usuario root maestro del sistema siempre es superadmin sin restricciones
+    // Únicamente el usuario root maestro inmutable del sistema (USR-01 / 1799999999001) es superadmin absoluto
     if (activeUser.username === '1799999999001' || activeUser.id === 'USR-01') {
       return true;
     }
-    const role = getRoleStr(activeUser.role).toLowerCase();
-    return role === 'administrador' || role === 'admin';
+    return false;
   }, [activeUser]);
 
   // Consolidar el mapa de permisos efectivos del trabajador
   const userPermissions = useMemo<PermissionMap>(() => {
     if (!activeUser) return {};
     if (isSuperAdmin) {
-      // Administrador general sin restricciones tiene acceso total a todo
+      // Administrador general root sin restricciones tiene acceso total a todo
       return ROLE_PRESETS.Administrador.permissions;
     }
 
-    // 1. Obtener la plantilla según su rol asignado (soporta roles personalizados creados dinámicamente)
+    // 1. Si el usuario tiene permisos personalizados explícitos (incluso si tiene 0 permisos / objeto vacío)
+    if (activeUser.hasCustomPermissions || (activeUser.permissions && typeof activeUser.permissions === 'object' && Object.keys(activeUser.permissions).length > 0)) {
+      const customPermissions = activeUser.permissions || {};
+      const effective: PermissionMap = {};
+      ALL_PERMISSIONS.forEach((p) => {
+        effective[p.id] = !!customPermissions[p.id];
+      });
+      return effective;
+    }
+
+    // 2. Si no tiene permisos propios guardados, hereda los de su rol asignado
     const combinedPresets = getCombinedRolePresets(rolesList);
     const userRoleStr = getRoleStr(activeUser.role);
     const matchedRole = rolesList.find(
       (r) => r.name.toLowerCase() === userRoleStr.toLowerCase() || r.id === userRoleStr
     );
-    const basePreset = matchedRole?.permissions || combinedPresets[userRoleStr]?.permissions || {};
-
-    // 2. Si el rol existe y el usuario no tiene una configuración explícita guardada como 'hasCustomPermissions',
-    // los permisos efectivos provienen 100% de la definición de su rol asignado.
-    if (!(activeUser as any).hasCustomPermissions) {
-      const rolePerms = matchedRole?.permissions || basePreset || {};
-      const effective: PermissionMap = {};
-      ALL_PERMISSIONS.forEach((p) => {
-        effective[p.id] = !!rolePerms[p.id];
-      });
-      return effective;
-    }
-
-    // 3. Aplicar sobreescrituras granulares personalizadas para este trabajador si tiene hasCustomPermissions
-    const customPermissions = (activeUser as any).permissions || {};
+    const rolePerms = matchedRole?.permissions || combinedPresets[userRoleStr]?.permissions || {};
     const effective: PermissionMap = {};
     ALL_PERMISSIONS.forEach((p) => {
-      effective[p.id] = !!customPermissions[p.id];
+      effective[p.id] = !!rolePerms[p.id];
     });
     return effective;
   }, [activeUser, isSuperAdmin, rolesList]);
+
+  const hasAnySectionAllowed = useMemo(() => {
+    if (isSuperAdmin) return true;
+    return Object.values(userPermissions).some(Boolean);
+  }, [isSuperAdmin, userPermissions]);
 
   // Mapa de equivalencias entre accesos de navegación y acciones de módulo
   const PERMISSION_ALIASES: Record<string, string[]> = {
@@ -216,6 +213,7 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
         canAny,
         canAll,
         isSuperAdmin,
+        hasAnySectionAllowed,
         activeUser,
         userPermissions,
         rolesList,
