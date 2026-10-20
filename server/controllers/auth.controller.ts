@@ -390,3 +390,28 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
     });
   }
 }
+
+export async function deleteUser(req: AuthenticatedRequest, res: Response) {
+  try {
+    const { id } = req.params;
+    const pool = getPgPool();
+    if (id === 'USR-01' || id === '1799999999001') {
+      return res.status(400).json({ success: false, message: 'No se puede eliminar el usuario administrador principal.' });
+    }
+    await pool.query('DELETE FROM usuarios_sistema WHERE id = $1 OR username = $1;', [id]);
+
+    const db = await getDatabase();
+    await logAuditEvent(db, {
+      userId: req.user?.id,
+      username: req.user?.username || 'admin',
+      action: 'ELIMINAR_USUARIO',
+      entity: 'usuarios_sistema',
+      entityId: id,
+      details: { deletedUserId: id }
+    });
+
+    return res.status(200).json({ success: true, message: 'Usuario eliminado exitosamente de SQLite.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Error al eliminar usuario.', error: error.message });
+  }
+}

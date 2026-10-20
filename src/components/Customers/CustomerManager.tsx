@@ -19,7 +19,8 @@ import {
   Send,
   Printer,
   X,
-  Edit2
+  Edit2,
+  Trash2
 } from 'lucide-react';
 import { Customer, CustomersSubTab, StoreSettings } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
@@ -39,6 +40,7 @@ interface CustomerManagerProps {
   onUpdateCustomerBalance: (customerId: string, amountPaid: number) => void;
   onBulkImportCustomers?: (customers: Customer[]) => void;
   isCashRegisterOpen?: boolean;
+  onDeleteCustomer?: (customerId: string) => void;
 }
 
 export const CustomerManager: React.FC<CustomerManagerProps> = ({
@@ -49,8 +51,9 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
   onUpdateCustomerBalance,
   onBulkImportCustomers,
   isCashRegisterOpen = false,
+  onDeleteCustomer,
 }) => {
-  const { showAlert, showToast } = useModal();
+  const { showAlert, showToast, showConfirm } = useModal();
   const [searchTerm, setSearchTerm] = useState('');
   const [docTypeFilter, setDocTypeFilter] = useState<string>('TODOS');
 
@@ -547,6 +550,28 @@ export const CustomerManager: React.FC<CustomerManagerProps> = ({
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
+
+                              {onDeleteCustomer && c.id !== 'cust-general' && (
+                                <button
+                                  onClick={() => {
+                                    if (c.currentBalance > 0) {
+                                      showAlert(`No se puede eliminar a "${c.name}" porque tiene un saldo pendiente de ${formatCurrency(c.currentBalance, settings.currencySymbol)}. Registre el pago o abono primero.`, 'Cliente con Saldo Pendiente', 'warning');
+                                      return;
+                                    }
+                                    showConfirm(
+                                      `¿Está seguro de eliminar permanentemente al cliente "${c.name}"? Esta acción no se puede deshacer.`,
+                                      () => onDeleteCustomer(c.id),
+                                      'Confirmar eliminación',
+                                      'Eliminar Cliente',
+                                      'Cancelar'
+                                    );
+                                  }}
+                                  title="Eliminar cliente"
+                                  className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
 
                               {hasDebt && (
                                 <button

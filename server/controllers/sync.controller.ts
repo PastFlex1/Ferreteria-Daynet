@@ -54,6 +54,22 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
   const pool = getPgPool();
   try {
     if (docId === 'ferreteria_products' && Array.isArray(data)) {
+      const incomingIds = data.map((p: any) => String(p.id || p._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        try {
+          await pool.query(`DELETE FROM productos WHERE id NOT IN (${placeholders});`, incomingIds);
+        } catch {
+          await pool.query(`UPDATE productos SET status = 'Inactivo' WHERE id NOT IN (${placeholders});`, incomingIds);
+        }
+      } else {
+        try {
+          await pool.query(`DELETE FROM productos;`);
+        } catch {
+          await pool.query(`UPDATE productos SET status = 'Inactivo';`);
+        }
+      }
+
       for (const p of data) {
         const id = String(p.id || p._id || `prod-${Date.now()}`);
         const code = p.code || p.sku || id;
@@ -88,6 +104,18 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_customers' && Array.isArray(data)) {
+      const incomingIds = data.map((c: any) => String(c.id || c._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        try {
+          await pool.query(`DELETE FROM clientes WHERE id NOT IN (${placeholders}) AND id != 'cust-general';`, incomingIds);
+        } catch {}
+      } else {
+        try {
+          await pool.query(`DELETE FROM clientes WHERE id != 'cust-general';`);
+        } catch {}
+      }
+
       for (const c of data) {
         const id = String(c.id || c._id || `cust-${Date.now()}`);
         const name = String(c.name || 'Cliente');
@@ -112,6 +140,20 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_invoices' && Array.isArray(data)) {
+      const incomingIds = data.map((inv: any) => String(inv.id || inv._id || inv.invoiceNumber)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        try {
+          await pool.query(`DELETE FROM factura_detalles WHERE factura_id NOT IN (${placeholders});`, incomingIds);
+          await pool.query(`DELETE FROM facturas_ventas WHERE id NOT IN (${placeholders});`, incomingIds);
+        } catch {}
+      } else {
+        try {
+          await pool.query(`DELETE FROM factura_detalles;`);
+          await pool.query(`DELETE FROM facturas_ventas;`);
+        } catch {}
+      }
+
       for (const inv of data) {
         const id = String(inv.id || inv._id || `inv-${Date.now()}`);
         const invNum = String(inv.invoiceNumber || inv.invoice_number || id);
@@ -393,6 +435,14 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_hr_employees' && Array.isArray(data)) {
+      const incomingIds = data.map((emp: any) => String(emp.id || emp._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM empleados WHERE id NOT IN (${placeholders});`, incomingIds);
+      } else {
+        await pool.query(`DELETE FROM empleados;`);
+      }
+
       for (const emp of data) {
         const id = String(emp.id || emp._id || `emp-${Date.now()}`);
         const ident = String(emp.identification || emp.cedula || emp.id || id);
@@ -426,6 +476,14 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_promotions' && Array.isArray(data)) {
+      const incomingIds = data.map((promo: any) => String(promo.id || promo._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM promociones WHERE id NOT IN (${placeholders});`, incomingIds);
+      } else {
+        await pool.query(`DELETE FROM promociones;`);
+      }
+
       for (const promo of data) {
         const id = String(promo.id || promo._id || `promo-${Date.now()}`);
         const code = promo.code || null;
@@ -464,6 +522,14 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_categories' && Array.isArray(data)) {
+      const incomingIds = data.map((cat: any) => String(cat.id || cat._id || cat.name)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM categorias_productos WHERE id NOT IN (${placeholders});`, incomingIds);
+      } else {
+        await pool.query(`DELETE FROM categorias_productos;`);
+      }
+
       for (const cat of data) {
         const id = String(cat.id || cat._id || cat.name || `cat-${Date.now()}`);
         const name = String(cat.name || cat.label || id);
@@ -479,6 +545,14 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_units' && Array.isArray(data)) {
+      const incomingIds = data.map((u: any) => String(u.id || u._id || u.code)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM unidades_medida WHERE id NOT IN (${placeholders});`, incomingIds);
+      } else {
+        await pool.query(`DELETE FROM unidades_medida;`);
+      }
+
       for (const u of data) {
         const id = String(u.id || u._id || u.code || `unit-${Date.now()}`);
         const name = String(u.name || u.label || id);
@@ -494,6 +568,12 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_settings_roles' && Array.isArray(data)) {
+      const incomingIds = data.map((r: any) => String(r.id || r._id || r.name)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM roles_sistema WHERE id NOT IN (${placeholders}) AND id NOT IN ('role-admin', 'role-cajero', 'role-vendedor');`, incomingIds);
+      }
+
       for (const r of data) {
         const id = String(r.id || r._id || r.name || `role-${Date.now()}`);
         const name = String(r.name || id);
@@ -510,6 +590,12 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_settings_users_list' && Array.isArray(data)) {
+      const incomingIds = data.map((u: any) => String(u.id || u._id || u.username)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM usuarios_sistema WHERE id NOT IN (${placeholders}) AND id != 'USR-01' AND username != '1799999999001';`, incomingIds);
+      }
+
       for (const u of data) {
         const id = String(u.id || u._id || u.username || `user-${Date.now()}`);
         const name = String(u.name || u.username || 'Usuario');
@@ -556,6 +642,14 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if ((docId === 'ferreteria_suppliers' || docId === 'ferreteria_suppliers_details') && Array.isArray(data)) {
+      const incomingIds = data.map((s: any) => String(s.id || s._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        await pool.query(`DELETE FROM proveedores WHERE id NOT IN (${placeholders});`, incomingIds);
+      } else {
+        await pool.query(`DELETE FROM proveedores;`);
+      }
+
       for (const s of data) {
         const id = String(s.id || s._id || `sup-${Date.now()}`);
         const name = String(s.name || 'Proveedor');
@@ -670,7 +764,7 @@ export async function getDoc(req: Request, res: Response) {
 
     // 1. LECTURA RELACIONAL DIRECTA PARA ENTIDADES PRINCIPALES
     if (docId === 'ferreteria_products') {
-      const resPg = await pool.query(`SELECT * FROM productos ORDER BY name ASC;`);
+      const resPg = await pool.query(`SELECT * FROM productos WHERE status != 'Inactivo' AND status != 'Descontinuado' ORDER BY name ASC;`);
       const clean = resPg.rows.map(r => ({
         ...(r.data || {}),
         id: r.id,
@@ -974,15 +1068,6 @@ export async function saveDoc(req: Request, res: Response) {
     // SEGURIDAD: Nunca guardar contraseñas de usuarios en app_state
     if (docId === 'ferreteria_settings_users_list' && Array.isArray(dataToSave)) {
       dataToSave = dataToSave.map(({ password, ...safe }: any) => safe);
-    }
-
-    if (docId === 'ferreteria_invoices' && Array.isArray(data)) {
-      const existing = await db.collection<any>('app_state').findOne({ _id: docId });
-      if (existing && Array.isArray(existing.data)) {
-        const incomingIds = new Set(data.map((d: any) => String(d.id || d._id)));
-        const others = existing.data.filter((d: any) => !incomingIds.has(String(d.id || d._id)));
-        dataToSave = [...data, ...others];
-      }
     }
 
     // Guardar en app_state SOLAMENTE si NO es entidad de negocio (exclusivo para preferencias de UI: tema, sidebar, etc.)

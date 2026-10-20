@@ -7,10 +7,12 @@ coverage/
 .env*
 !.env.example
 
-# SQLite runtime temporary files (WAL mode & locks)
+# SQLite database and runtime files
+*.sqlite
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite-journal
+server/data/*.sqlite
 server/data/*.sqlite-wal
 server/data/*.sqlite-shm
 server/data/*.sqlite-journal

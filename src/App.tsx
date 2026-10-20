@@ -682,6 +682,24 @@ export default function App() {
     );
   };
 
+  const handleDeleteCustomer = (customerId: string) => {
+    if (customerId === 'cust-general') {
+      showToast('No se puede eliminar el Consumidor Final predeterminado.', 'warning');
+      return;
+    }
+    setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+      fetch(getApiUrl(`/api/customers/${encodeURIComponent(customerId)}`), {
+        method: 'DELETE',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      }).catch(() => {});
+    } catch {}
+    showToast('Cliente eliminado correctamente.', 'info');
+  };
+
   const handleSaveProduct = (productToSave: Product) => {
     setProducts((prev) => {
       const exists = prev.some((p) => p.id === productToSave.id);
@@ -695,6 +713,15 @@ export default function App() {
 
   const handleDeleteProduct = (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+      fetch(getApiUrl(`/api/products/${encodeURIComponent(productId)}`), {
+        method: 'DELETE',
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      }).catch(() => {});
+    } catch {}
   };
 
   const handleStockAdjust = (productId: string, adjustmentQty: number) => {
@@ -1048,6 +1075,7 @@ export default function App() {
             onUpdateCustomerBalance={handleUpdateCustomerBalance}
             onBulkImportCustomers={handleBulkImportCustomers}
             isCashRegisterOpen={cashSession.status === 'ABIERTA'}
+            onDeleteCustomer={handleDeleteCustomer}
           />
         )}
 

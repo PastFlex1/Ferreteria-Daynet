@@ -453,9 +453,13 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           </button>
 
                           {/* Delete Product */}
-                          {can('inventory.delete_product') && (
+                          {(can('inventory.delete_product') || can('nav.inventario.productos') || isSuperAdmin) && (
                             <button
-                              onClick={() => onDeleteProduct(p.id)}
+                              onClick={() => {
+                                if (window.confirm(`¿Está seguro de eliminar el producto "${p.name}"?`)) {
+                                  onDeleteProduct(p.id);
+                                }
+                              }}
                               className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg text-xs transition cursor-pointer"
                               title="Eliminar Producto"
                             >

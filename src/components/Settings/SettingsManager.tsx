@@ -1136,8 +1136,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     }
     showConfirm(
       `¿Eliminar al usuario "${user.name}" (${user.username})? Esta acción no se puede deshacer.`,
-      () => {
+      async () => {
         setUsersList(usersList.filter(u => u.id !== user.id));
+        try {
+          const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+          await fetch(getApiUrl(`/api/auth/users/${encodeURIComponent(user.id)}`), {
+            method: 'DELETE',
+            headers: {
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            }
+          });
+        } catch (e) {
+          console.warn('[handleDeleteUser error]:', e);
+        }
         showToast('Usuario eliminado correctamente', 'success');
       },
       'Confirmar eliminación',

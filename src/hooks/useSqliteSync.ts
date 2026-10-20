@@ -76,9 +76,6 @@ export function useSqliteSync<T>(docId: string, initialValue: T) {
         }
         const parsed = JSON.parse(cached);
         if (isValidType(parsed)) {
-          if (Array.isArray(initialValue) && Array.isArray(parsed) && parsed.length === 0 && (initialValue as any[]).length > 0) {
-            return initialValue;
-          }
           return parsed as T;
         }
       }
@@ -127,21 +124,10 @@ export function useSqliteSync<T>(docId: string, initialValue: T) {
       })
       .then((res) => {
         if (res && res.exists && isValidType(res.data)) {
-          const isRemoteEmptyArray = Array.isArray(res.data) && res.data.length === 0;
-          const isInitialHasItems = Array.isArray(initialValue) && (initialValue as any[]).length > 0;
-
-          if (isRemoteEmptyArray && isInitialHasItems) {
-            fetch(getApiUrl(`/api/sqlite/doc/${encodeURIComponent(docId)}`), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ data: initialValue })
-            }).catch(() => {});
-          } else {
-            setData(res.data);
-            try {
-              localStorage.setItem(docId, typeof res.data === 'string' ? res.data : JSON.stringify(res.data));
-            } catch {}
-          }
+          setData(res.data);
+          try {
+            localStorage.setItem(docId, typeof res.data === 'string' ? res.data : JSON.stringify(res.data));
+          } catch {}
         }
       })
       .catch(() => {})

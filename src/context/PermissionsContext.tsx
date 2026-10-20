@@ -117,14 +117,16 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
 
     // Clientes y Cartera
     'nav.clientes.lista': ['customers.create', 'customers.edit', 'customers.delete'],
+    'customers.delete': ['nav.clientes.lista', 'nav.clientes'],
     'nav.clientes.cuentas_cobrar': ['customers.collect_payment', 'customers.edit_credit_limit'],
-    'nav.clientes': ['nav.clientes.lista', 'nav.clientes.cuentas_cobrar', 'customers.create'],
+    'nav.clientes': ['nav.clientes.lista', 'nav.clientes.cuentas_cobrar', 'customers.create', 'customers.delete'],
 
     // Inventario y Almacén
-    'nav.inventario.productos': ['inventory.create_product', 'inventory.edit_product_info', 'inventory.edit_sale_price', 'inventory.view_cost_price', 'inventory.stock_manual_adjust'],
+    'nav.inventario.productos': ['inventory.create_product', 'inventory.edit_product_info', 'inventory.edit_sale_price', 'inventory.view_cost_price', 'inventory.stock_manual_adjust', 'inventory.delete_product'],
+    'inventory.delete_product': ['nav.inventario.productos', 'nav.inventario'],
     'nav.inventario.precios_masivos': ['inventory.bulk_price_update'],
     'nav.inventario.ajustes': ['inventory.stock_manual_adjust'],
-    'nav.inventario': ['nav.inventario.productos', 'nav.inventario.categorias', 'nav.inventario.promociones', 'inventory.create_product'],
+    'nav.inventario': ['nav.inventario.productos', 'nav.inventario.categorias', 'nav.inventario.promociones', 'inventory.create_product', 'inventory.delete_product'],
 
     // Compras y Proveedores
     'nav.compras.facturas': ['purchases.create_bill', 'purchases.receive_bill', 'purchases.view_cost_history'],
