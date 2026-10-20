@@ -1,5 +1,4 @@
-import { Request, Response } from 'express';
-import { getDatabase } from '../config/db';
+import { getDatabase, getPgPool } from '../config/db';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 
 export interface AuditLogEntry {
@@ -19,12 +18,31 @@ export interface AuditLogEntry {
 /**
  * Registra un evento inmutable en la bitácora de auditoría del sistema
  */
-export async function logAuditEvent(db: any, entry: Omit<AuditLogEntry, 'timestamp'>) {
+export async function logAuditEvent(_db: any, entry: Omit<AuditLogEntry, 'timestamp'>) {
   try {
-    await db.collection('bitacora_auditoria').insertOne({
-      ...entry,
-      timestamp: new Date()
-    });
+    const pool = getPgPool();
+    const id = `AUD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date();
+    const safeData = { ...entry, id, timestamp: now };
+
+    await pool.query(`
+      INSERT INTO bitacora_auditoria (id, timestamp, user_id, username, role, action, entity, entity_id, ip, terminal, emission_point, details, data)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+    `, [
+      id,
+      now.toISOString(),
+      entry.userId || null,
+      entry.username || 'sistema',
+      entry.role || 'Sistema',
+      entry.action,
+      entry.entity,
+      entry.entityId || null,
+      entry.ip || null,
+      entry.terminal || null,
+      entry.emissionPoint || null,
+      JSON.stringify(entry.details || {}),
+      JSON.stringify(safeData)
+    ]);
   } catch (err: any) {
     console.warn('[Auditoría] Error registrando bitácora:', err?.message);
   }

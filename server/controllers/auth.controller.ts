@@ -281,18 +281,34 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
       return res.status(400).json({ success: false, message: 'Nombre y nombre de usuario (Cédula/RUC) son obligatorios.' });
     }
 
-    const userId = id || `USR-${Date.now()}`;
     const cleanUsername = String(username).trim();
     const cleanEmail = email ? String(email).trim().toLowerCase() : null;
-    const userRole = typeof role === 'object' ? role?.name || 'Cajero' : role || 'Cajero';
+    let userRole = typeof role === 'object' ? role?.name || 'Cajero' : role || 'Cajero';
     const userStatus = status || 'Activo';
 
     // 1. Asegurar existencia del rol en roles_sistema para satisfacer Foreign Key
-    await pool.query(`
-      INSERT INTO roles_sistema (id, name, description, permissions, data)
-      VALUES ($1, $2, $3, '[]'::jsonb, '{}'::jsonb)
-      ON CONFLICT (id) DO NOTHING;
-    `, [`role-${String(userRole).toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`, userRole, `Rol ${userRole}`]);
+    const existingRoleRes = await pool.query(
+      'SELECT id, name FROM roles_sistema WHERE lower(name) = lower($1) OR id = $1 LIMIT 1;',
+      [userRole]
+    );
+
+    if (existingRoleRes.rows.length > 0) {
+      userRole = existingRoleRes.rows[0].name;
+    } else {
+      const generatedRoleId = `role-${String(userRole).toLowerCase().replace(/[^a-z0-9_-]/g, '_')}`;
+      await pool.query(`
+        INSERT INTO roles_sistema (id, name, description, permissions, data)
+        VALUES ($1, $2, $3, '[]', '{}')
+        ON CONFLICT DO NOTHING;
+      `, [generatedRoleId, userRole, `Rol ${userRole}`]);
+    }
+
+    // 2. Verificar si el usuario ya existe por ID o por Cédula/RUC (username)
+    const existingUserRes = await pool.query(
+      `SELECT id FROM usuarios_sistema WHERE id = $1 OR username = $2 LIMIT 1;`,
+      [id || '', cleanUsername]
+    );
+    const userId = existingUserRes.rows.length > 0 ? existingUserRes.rows[0].id : (id || `USR-${Date.now()}`);
 
     let hashedPassword: string | null = null;
     if (password && typeof password === 'string' && password.trim().length > 0 && password.trim() !== '[PROTECTED_BCRYPT]') {
@@ -317,7 +333,7 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
     if (hashedPassword) {
       await pool.query(`
         INSERT INTO usuarios_sistema (id, name, username, email, role, status, password, data, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
         ON CONFLICT (id) DO UPDATE
         SET name = EXCLUDED.name, username = EXCLUDED.username, email = EXCLUDED.email,
             role = EXCLUDED.role, status = EXCLUDED.status, password = EXCLUDED.password, data = EXCLUDED.data, updated_at = NOW();
@@ -325,7 +341,7 @@ export async function saveUser(req: AuthenticatedRequest, res: Response) {
     } else {
       await pool.query(`
         INSERT INTO usuarios_sistema (id, name, username, email, role, status, password, data, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, 'PENDIENTE', $7::jsonb, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, 'PENDIENTE', $7, NOW())
         ON CONFLICT (id) DO UPDATE
         SET name = EXCLUDED.name, username = EXCLUDED.username, email = EXCLUDED.email,
             role = EXCLUDED.role, status = EXCLUDED.status, data = EXCLUDED.data, updated_at = NOW();

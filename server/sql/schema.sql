@@ -436,7 +436,9 @@ CREATE TABLE IF NOT EXISTS bitacora_auditoria (
     emission_point TEXT,
     terminal TEXT,
     ip TEXT,
-    details TEXT
+    details TEXT,
+    data TEXT DEFAULT '{}',
+    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_auditoria_timestamp ON bitacora_auditoria(timestamp);
