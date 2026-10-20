@@ -156,6 +156,28 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [secCreditNote, setSecCreditNote] = usePostgresSync<string>('ferreteria_settings_sec_credit_note', '000000001');
   const [secRetention, setSecRetention] = usePostgresSync<string>('ferreteria_settings_sec_retention', '000000001');
 
+  useEffect(() => {
+    const fetchSequentials = async () => {
+      try {
+        const estab = (establishment || '001').padStart(3, '0').slice(-3);
+        const pto = (emissionPoint || '001').padStart(3, '0').slice(-3);
+        const res = await fetch(getApiUrl('/api/invoices/emission-points'));
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            const point = json.data.find((p: any) => p.establishment === estab && p.emissionPoint === pto);
+            if (point && point.nextSequential !== undefined && point.nextSequential > 1) {
+              setSecInvoice(String(point.nextSequential).padStart(9, '0'));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error sincronizando secuenciales:', err);
+      }
+    };
+    fetchSequentials();
+  }, [establishment, emissionPoint]);
+
   // Tax Rates (IVAs) Management State
   const [taxRates, setTaxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const [showTaxModal, setShowTaxModal] = useState(false);
@@ -701,6 +723,73 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setSavedSuccess(true);
       showToast('Configuración de firma y backend actualizada correctamente.', 'success');
       setTimeout(() => setSavedSuccess(false), 3000);
+    }
+  };
+
+  const [isSavingSequentials, setIsSavingSequentials] = useState(false);
+
+  const handleSaveSequentials = async () => {
+    try {
+      setIsSavingSequentials(true);
+      const estab = (establishment || '001').padStart(3, '0').slice(-3);
+      const pto = (emissionPoint || '001').padStart(3, '0').slice(-3);
+
+      const invNum = Math.max(1, parseInt(secInvoice || '1', 10));
+      const credNum = Math.max(1, parseInt(secCreditNote || '1', 10));
+      const retNum = Math.max(1, parseInt(secRetention || '1', 10));
+
+      // 1. Guardar Factura Electrónica (01) en SQLite
+      await fetch(getApiUrl('/api/invoices/set-sequential'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          establishment: estab,
+          emissionPoint: pto,
+          documentType: '01',
+          nextSequential: invNum
+        })
+      });
+
+      // 2. Guardar Nota de Crédito (04) en SQLite
+      await fetch(getApiUrl('/api/invoices/set-sequential'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          establishment: estab,
+          emissionPoint: pto,
+          documentType: '04',
+          nextSequential: credNum
+        })
+      });
+
+      // 3. Guardar Retención (07) en SQLite
+      await fetch(getApiUrl('/api/invoices/set-sequential'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          establishment: estab,
+          emissionPoint: pto,
+          documentType: '07',
+          nextSequential: retNum
+        })
+      });
+
+      // 4. Sincronizar en StoreSettings
+      const updatedSettings: StoreSettings = {
+        ...settings,
+        nextInvoiceNumber: invNum,
+        nextTicketNumber: parseInt(secBoleta || '1', 10),
+        nextQuoteNumber: parseInt(secQuote || '1', 10),
+      };
+      onSaveSettings(updatedSettings);
+
+      setSavedSuccess(true);
+      showToast(`Puntos de emisión y secuenciales guardados: Próxima Factura #${estab}-${pto}-${String(invNum).padStart(9, '0')}`, 'success');
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err: any) {
+      showAlert('Error al persistir secuenciales en el servidor: ' + err.message, 'Error', 'error');
+    } finally {
+      setIsSavingSequentials(false);
     }
   };
 
@@ -1907,15 +1996,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
             <div className="pt-4 border-t border-slate-800 flex justify-end">
               <button
-                onClick={() => {
-                  setSavedSuccess(true);
-                  showToast('Puntos de emisión y secuenciales guardados exitosamente', 'success');
-                  setTimeout(() => setSavedSuccess(false), 3000);
-                }}
-                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-purple-600/20 flex items-center space-x-2 cursor-pointer"
+                type="button"
+                disabled={isSavingSequentials}
+                onClick={handleSaveSequentials}
+                className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs transition shadow-md shadow-purple-600/20 flex items-center space-x-2 cursor-pointer disabled:opacity-50"
               >
-                <Save className="w-4 h-4" />
-                <span>Guardar Puntos de Emisión & Secuenciales</span>
+                <Save className={`w-4 h-4 ${isSavingSequentials ? 'animate-spin' : ''}`} />
+                <span>{isSavingSequentials ? 'Guardando en Servidor...' : 'Guardar Puntos de Emisión & Secuenciales'}</span>
               </button>
             </div>
           </div>

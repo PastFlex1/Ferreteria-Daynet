@@ -176,7 +176,12 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
+          body: JSON.stringify({ 
+            establishment: estab, 
+            emissionPoint: ptoEmi, 
+            documentType: '01',
+            requestedSequential: currentSecNum 
+          })
         });
         if (seqRes.ok) {
           const seqData = await seqRes.json();

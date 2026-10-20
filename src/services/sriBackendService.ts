@@ -213,17 +213,17 @@ export class SriBackendService {
       try {
         let resRecepcion: Response;
         try {
-          // Intentar vía proxy de Express
+          // Intentar vía proxy de Express (enviamos JSON o texto)
           resRecepcion = await fetch(getApiUrl('/api/sri/recepcion'), {
             method: 'POST',
-            headers: { 'Content-Type': 'text/plain', ...getAuthHeaders() },
-            body: xmlFirmado,
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ xmlFirmado }),
           });
         } catch {
           // Fallback directo a Java
           resRecepcion = await fetch(`${baseUrl}/api/sri/recepcion`, {
             method: 'POST',
-            headers: { 'Content-Type': 'text/plain' },
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
             body: xmlFirmado,
           });
         }

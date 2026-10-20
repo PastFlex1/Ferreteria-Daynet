@@ -152,6 +152,42 @@ export async function createInvoice(req: AuthenticatedRequest, res: Response) {
       });
     }
 
+    // Si la factura ya existe en la base de datos (por ejemplo, actualización tras firma/emisión SRI), actualizarla
+    const incomingId = invoiceData.id;
+    const incomingNumber = invoiceData.invoiceNumber || invoiceData.fullNumber;
+    if (incomingId || incomingNumber) {
+      const existingCheck = await client.query(
+        `SELECT id, invoice_number, data FROM facturas_ventas WHERE id = $1 OR invoice_number = $2;`,
+        [incomingId || '', incomingNumber || '']
+      );
+      if (existingCheck.rows.length > 0) {
+        const row = existingCheck.rows[0];
+        const updateSriStatus = invoiceData.sriStatus || invoiceData.status || undefined;
+        const updateAccessKey = invoiceData.accessKey || invoiceData.sriClaveAcceso || undefined;
+        const updateAuthNum = invoiceData.authorizationNumber || invoiceData.sriNumeroAutorizacion || undefined;
+        const updateAuthDate = invoiceData.authorizationDate || invoiceData.sriFechaAutorizacion || undefined;
+        const mergedData = { ...(row.data || {}), ...invoiceData };
+
+        await client.query(`
+          UPDATE facturas_ventas
+          SET sri_status = COALESCE($1, sri_status),
+              access_key = COALESCE($2, access_key),
+              authorization_number = COALESCE($3, authorization_number),
+              authorization_date = COALESCE($4, authorization_date),
+              data = $5::jsonb,
+              updated_at = NOW()
+          WHERE id = $6;
+        `, [updateSriStatus, updateAccessKey, updateAuthNum, updateAuthDate, JSON.stringify(mergedData), row.id]);
+
+        client.release();
+        return res.status(200).json({
+          success: true,
+          message: 'Factura actualizada exitosamente.',
+          invoice: mergedData
+        });
+      }
+    }
+
     // 1. INICIAR TRANSACCIÓN ATÓMICA
     await client.query('BEGIN;');
 
@@ -179,30 +215,42 @@ export async function createInvoice(req: AuthenticatedRequest, res: Response) {
     const emissionPoint = String(invoiceData.emissionPoint || (req.user as any)?.puntoEmision || '001').padStart(3, '0').slice(-3);
     const documentType = '01'; // 01 = Factura
 
+    // Si la factura ya trae un secuencial asignado (ej. desde el modal de emisión o terminal), respetarlo y asegurar que la tabla secuenciales_emision esté sincronizada
+    const explicitSeq = invoiceData.number || (invoiceData.fullNumber ? parseInt(invoiceData.fullNumber.split('-')[2], 10) : undefined);
     let currentSequential: number;
 
-    const seqUpdateRes = await client.query(`
-      UPDATE secuenciales_emision
-      SET current_sequential = current_sequential + 1, updated_at = NOW()
-      WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
-      RETURNING current_sequential;
-    `, [establishment, emissionPoint, documentType]);
-
-    if (seqUpdateRes.rows.length > 0) {
-      currentSequential = Number(seqUpdateRes.rows[0].current_sequential);
-    } else {
-      // Si no existe aún registro para ese establecimiento y punto, insertarlo atómicamente con secuencial 1
-      const seqInsertRes = await client.query(`
+    if (explicitSeq && explicitSeq > 0) {
+      currentSequential = explicitSeq;
+      await client.query(`
         INSERT INTO secuenciales_emision (
           id, establishment, emission_point, document_type, name, current_sequential, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, 1, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
         ON CONFLICT (establishment, emission_point, document_type)
-        DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+        DO UPDATE SET current_sequential = GREATEST(secuenciales_emision.current_sequential, EXCLUDED.current_sequential), updated_at = NOW();
+      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`, explicitSeq]);
+    } else {
+      const seqUpdateRes = await client.query(`
+        UPDATE secuenciales_emision
+        SET current_sequential = current_sequential + 1, updated_at = NOW()
+        WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
         RETURNING current_sequential;
-      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
+      `, [establishment, emissionPoint, documentType]);
 
-      currentSequential = Number(seqInsertRes.rows[0].current_sequential);
+      if (seqUpdateRes.rows.length > 0) {
+        currentSequential = Number(seqUpdateRes.rows[0].current_sequential);
+      } else {
+        const seqInsertRes = await client.query(`
+          INSERT INTO secuenciales_emision (
+            id, establishment, emission_point, document_type, name, current_sequential, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, 1, NOW())
+          ON CONFLICT (establishment, emission_point, document_type)
+          DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+          RETURNING current_sequential;
+        `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
+        currentSequential = Number(seqInsertRes.rows[0].current_sequential);
+      }
     }
 
     const sequentialFormatted = String(currentSequential).padStart(9, '0');
@@ -506,29 +554,61 @@ export async function reserveSequential(req: Request, res: Response) {
   try {
     const establishment = String(req.body.establishment || '001').padStart(3, '0').slice(-3);
     const emissionPoint = String(req.body.emissionPoint || '001').padStart(3, '0').slice(-3);
-    const documentType = '01';
-
-    const seqRes = await pool.query(`
-      UPDATE secuenciales_emision
-      SET current_sequential = current_sequential + 1, updated_at = NOW()
-      WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
-      RETURNING current_sequential;
-    `, [establishment, emissionPoint, documentType]);
+    const documentType = String(req.body.documentType || '01').padStart(2, '0').slice(-2);
+    const requestedSequential = req.body.requestedSequential ? parseInt(String(req.body.requestedSequential), 10) : undefined;
 
     let nextNum: number;
-    if (seqRes.rows.length > 0) {
-      nextNum = Number(seqRes.rows[0].current_sequential);
+
+    // Si se envía un secuencial solicitado (por ej. configurado en Configuración o terminal), respetarlo y sincronizar la tabla
+    if (requestedSequential && requestedSequential > 0) {
+      const currentRec = await pool.query(`
+        SELECT current_sequential FROM secuenciales_emision
+        WHERE establishment = $1 AND emission_point = $2 AND document_type = $3;
+      `, [establishment, emissionPoint, documentType]);
+
+      const currentVal = currentRec.rows.length > 0 ? Number(currentRec.rows[0].current_sequential) : 0;
+      
+      if (requestedSequential > currentVal) {
+        await pool.query(`
+          INSERT INTO secuenciales_emision (
+            id, establishment, emission_point, document_type, name, current_sequential, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          ON CONFLICT (establishment, emission_point, document_type)
+          DO UPDATE SET current_sequential = EXCLUDED.current_sequential, updated_at = NOW();
+        `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Punto ${emissionPoint}`, requestedSequential]);
+        nextNum = requestedSequential;
+      } else {
+        const seqRes = await pool.query(`
+          UPDATE secuenciales_emision
+          SET current_sequential = current_sequential + 1, updated_at = NOW()
+          WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
+          RETURNING current_sequential;
+        `, [establishment, emissionPoint, documentType]);
+        nextNum = Number(seqRes.rows[0].current_sequential);
+      }
     } else {
-      const initRes = await pool.query(`
-        INSERT INTO secuenciales_emision (
-          id, establishment, emission_point, document_type, name, current_sequential, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, 1, NOW())
-        ON CONFLICT (establishment, emission_point, document_type)
-        DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+      const seqRes = await pool.query(`
+        UPDATE secuenciales_emision
+        SET current_sequential = current_sequential + 1, updated_at = NOW()
+        WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
         RETURNING current_sequential;
-      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
-      nextNum = Number(initRes.rows[0].current_sequential);
+      `, [establishment, emissionPoint, documentType]);
+
+      if (seqRes.rows.length > 0) {
+        nextNum = Number(seqRes.rows[0].current_sequential);
+      } else {
+        const initRes = await pool.query(`
+          INSERT INTO secuenciales_emision (
+            id, establishment, emission_point, document_type, name, current_sequential, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, 1, NOW())
+          ON CONFLICT (establishment, emission_point, document_type)
+          DO UPDATE SET current_sequential = secuenciales_emision.current_sequential + 1, updated_at = NOW()
+          RETURNING current_sequential;
+        `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Caja ${emissionPoint}`]);
+        nextNum = Number(initRes.rows[0].current_sequential);
+      }
     }
 
     const sequentialFormatted = String(nextNum).padStart(9, '0');
@@ -547,6 +627,53 @@ export async function reserveSequential(req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       message: 'Error al reservar secuencial atómico en SQLite.',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * ACTUALIZAR O ESTABLECER SECUENCIALES DE EMISIÓN DESDE CONFIGURACIÓN
+ */
+export async function updateSequential(req: Request, res: Response) {
+  const pool = getPgPool();
+  try {
+    const establishment = String(req.body.establishment || '001').padStart(3, '0').slice(-3);
+    const emissionPoint = String(req.body.emissionPoint || '001').padStart(3, '0').slice(-3);
+    const documentType = String(req.body.documentType || '01').padStart(2, '0').slice(-2);
+    
+    // nextSequential es el número que el usuario espera que sea emitido a continuación
+    const nextSeq = Math.max(1, parseInt(String(req.body.nextSequential || req.body.sequential || '1'), 10));
+    // current_sequential se establece en nextSeq - 1 para que el próximo incremento dé exactamente nextSeq
+    const currentSequential = Math.max(0, nextSeq - 1);
+    
+    const id = `${establishment}-${emissionPoint}-${documentType}`;
+    const name = req.body.name || (documentType === '01' ? 'Factura Electrónica' : (documentType === '04' ? 'Nota de Crédito' : 'Retención'));
+
+    await pool.query(`
+      INSERT INTO secuenciales_emision (
+        id, establishment, emission_point, document_type, name, current_sequential, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (establishment, emission_point, document_type)
+      DO UPDATE SET current_sequential = EXCLUDED.current_sequential, updated_at = NOW();
+    `, [id, establishment, emissionPoint, documentType, name, currentSequential]);
+
+    return res.status(200).json({
+      success: true,
+      message: `Secuencial para ${establishment}-${emissionPoint} (${documentType}) actualizado a ${nextSeq}.`,
+      establishment,
+      emissionPoint,
+      documentType,
+      currentSequential,
+      nextSequential: nextSeq,
+      formattedNext: String(nextSeq).padStart(9, '0'),
+      fullNumber: `${establishment}-${emissionPoint}-${String(nextSeq).padStart(9, '0')}`
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error al actualizar secuencial en SQLite.',
       error: error.message
     });
   }
@@ -578,12 +705,14 @@ export async function getEmissionPoints(req: Request, res: Response) {
 
     const result = DEFAULT_POINTS.map(p => {
       const key = `${p.establishment}-${p.emissionPoint}`;
-      const currentSeq = recordsMap.get(key) ?? 1;
+      const currentSeq = recordsMap.get(key) ?? 0;
+      const nextSeq = currentSeq === 0 ? 1 : currentSeq + 1;
       return {
         ...p,
         currentSequential: currentSeq,
-        formattedSequential: String(currentSeq).padStart(9, '0'),
-        nextFullNumber: `${p.establishment}-${p.emissionPoint}-${String(currentSeq).padStart(9, '0')}`,
+        nextSequential: nextSeq,
+        formattedSequential: String(nextSeq).padStart(9, '0'),
+        nextFullNumber: `${p.establishment}-${p.emissionPoint}-${String(nextSeq).padStart(9, '0')}`,
         active: true
       };
     });

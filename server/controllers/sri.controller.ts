@@ -364,17 +364,40 @@ export async function proxyRecepcionHandler(req: Request, res: Response) {
     const javaBase = await getSriJavaBaseUrl();
     const url = `${javaBase}/api/sri/recepcion`;
 
-    const bodyText = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    let xmlToSend = '';
+    if (typeof req.body === 'string') {
+      const trimmed = req.body.trim();
+      if (trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          xmlToSend = parsed.xmlFirmado || parsed.xml || '';
+        } catch {}
+      }
+      if (!xmlToSend) {
+        xmlToSend = trimmed;
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      xmlToSend = req.body.xmlFirmado || req.body.xml || '';
+    }
+
+    if (!xmlToSend || xmlToSend.trim() === '' || !xmlToSend.includes('<')) {
+      console.error('[proxyRecepcionHandler Error] Se intentó enviar un payload no XML a Recepción SRI:', typeof req.body === 'string' ? req.body.slice(0, 100) : req.body);
+      return res.status(400).send('No se proporcionó un XML válido para recepción en el SRI.');
+    }
+
+    console.log(`[proxyRecepcionHandler] Reenviando XML firmado a Java (${url}), longitud: ${xmlToSend.length} bytes.`);
+
     const javaRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': req.headers['content-type'] || 'text/plain' },
-      body: bodyText,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: xmlToSend,
       signal: AbortSignal.timeout(25000),
     });
 
     const text = await javaRes.text();
     return res.status(javaRes.status).send(text);
   } catch (err: any) {
+    console.error('[proxyRecepcionHandler Exception]:', err.message);
     return res.status(503).send(`Error comunicándose con Recepción SRI: ${err.message}`);
   }
 }
