@@ -85,6 +85,11 @@ const AuthorizedTabContent: React.FC<{
 
   const isCurrentAllowed = isTabPermitted(activeTab);
 
+  const hasAnyTabAllowed = useMemo(() => {
+    if (isSuperAdmin) return true;
+    return Object.keys(TAB_TO_PERMISSION_MAP).some(tab => isTabPermitted(tab));
+  }, [isSuperAdmin, userPermissions]);
+
   useEffect(() => {
     if (isSuperAdmin) return;
     if (!isCurrentAllowed) {
@@ -110,11 +115,22 @@ const AuthorizedTabContent: React.FC<{
           <Lock className="w-8 h-8 stroke-[2.5]" />
         </div>
         <div className="space-y-1.5">
-          <h2 className="text-xl font-black text-slate-800 tracking-tight">Acceso Restringido</h2>
-          <p className="text-xs text-slate-500 leading-relaxed font-medium">
-            Tu cuenta de usuario no tiene permisos habilitados para acceder a la sección <strong className="text-slate-700 font-bold">{activeTab}</strong>.
-            Comunícate con el Administrador para solicitar acceso si lo requieres.
-          </p>
+          <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Acceso Restringido</h2>
+          {!hasAnyTabAllowed ? (
+            <div className="space-y-2">
+              <p className="text-sm text-rose-500 dark:text-rose-400 font-bold">
+                Este usuario no tiene acceso a nada.
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                No tiene asignado ningún módulo ni permiso en el sistema. Comunícate con el Administrador para que configure tus accesos de trabajo.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+              Tu cuenta de usuario no tiene permisos habilitados para acceder a la sección <strong className="text-slate-700 dark:text-slate-200 font-bold">{activeTab}</strong>.
+              Comunícate con el Administrador para solicitar acceso si lo requieres.
+            </p>
+          )}
         </div>
       </div>
     );

@@ -36,13 +36,13 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
   usersList = [],
   rolesList = DEFAULT_SYSTEM_ROLES,
 }) => {
-  // Obtener la versión reactiva más fresca del usuario desde usersList de PostgreSQL
+  // Obtener la versión reactiva más fresca del usuario desde usersList de SQLite / PostgreSQL
   const activeUser = useMemo<SystemUser | null>(() => {
     if (!currentUser) return null;
     const found = usersList.find(
       (u) => (u.id && u.id === currentUser.id) || (u.username && u.username === currentUser.username)
     );
-    return found || currentUser;
+    return found ? { ...currentUser, ...found } : currentUser;
   }, [currentUser, usersList]);
 
   // Helper: extract role string safely (role could be a string or a SystemRole object from corrupted data)
@@ -54,7 +54,16 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
   };
 
   const isSuperAdmin = useMemo(() => {
-    if (!activeUser) return true;
+    if (!activeUser) return false;
+    // Si el usuario tiene permisos granulares configurados explícitamente (hasCustomPermissions),
+    // NO debe saltarse los controles; debe respetar exactamente los permisos asignados
+    if ((activeUser as any).hasCustomPermissions) {
+      return false;
+    }
+    // Usuario root maestro del sistema siempre es superadmin sin restricciones
+    if (activeUser.username === '1799999999001' || activeUser.id === 'USR-01') {
+      return true;
+    }
     const role = getRoleStr(activeUser.role).toLowerCase();
     return role === 'administrador' || role === 'admin';
   }, [activeUser]);
@@ -63,9 +72,11 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
   const userPermissions = useMemo<PermissionMap>(() => {
     if (!activeUser) return {};
     if (isSuperAdmin) {
-      // Administrador tiene acceso total a todo
+      // Administrador general sin restricciones tiene acceso total a todo
       return ROLE_PRESETS.Administrador.permissions;
-    }    // 1. Obtener la plantilla según su rol asignado (soporta roles personalizados creados dinámicamente)
+    }
+
+    // 1. Obtener la plantilla según su rol asignado (soporta roles personalizados creados dinámicamente)
     const combinedPresets = getCombinedRolePresets(rolesList);
     const userRoleStr = getRoleStr(activeUser.role);
     const matchedRole = rolesList.find(
@@ -75,10 +86,8 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
 
     // 2. Si el rol existe y el usuario no tiene una configuración explícita guardada como 'hasCustomPermissions',
     // los permisos efectivos provienen 100% de la definición de su rol asignado.
-    // Esto previene que datos residuales en el objeto de usuario (ej: permisos de un rol anterior como Contador)
-    // otorguen acceso indebido al asignarle un nuevo rol como "prueba".
-    if (matchedRole && !(activeUser as any).hasCustomPermissions) {
-      const rolePerms = matchedRole.permissions || {};
+    if (!(activeUser as any).hasCustomPermissions) {
+      const rolePerms = matchedRole?.permissions || basePreset || {};
       const effective: PermissionMap = {};
       ALL_PERMISSIONS.forEach((p) => {
         effective[p.id] = !!rolePerms[p.id];
@@ -87,17 +96,10 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({
     }
 
     // 3. Aplicar sobreescrituras granulares personalizadas para este trabajador si tiene hasCustomPermissions
-    const customPermissions = activeUser.permissions || {};
-
+    const customPermissions = (activeUser as any).permissions || {};
     const effective: PermissionMap = {};
     ALL_PERMISSIONS.forEach((p) => {
-      if (typeof customPermissions[p.id] === 'boolean') {
-        effective[p.id] = customPermissions[p.id];
-      } else if (typeof basePreset[p.id] === 'boolean') {
-        effective[p.id] = basePreset[p.id];
-      } else {
-        effective[p.id] = false;
-      }
+      effective[p.id] = !!customPermissions[p.id];
     });
     return effective;
   }, [activeUser, isSuperAdmin, rolesList]);

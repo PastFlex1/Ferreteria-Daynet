@@ -100,11 +100,19 @@ export async function login(req: Request, res: Response) {
     });
 
     // Sanitizar usuario para no exponer el hash/password en la respuesta
-    const { password: _, ...safeUser } = user;
-    safeUser.id = String(user.id);
-    if (typeof safeUser.role === 'object' && safeUser.role) {
-      safeUser.role = safeUser.role.name || safeUser.role.label || 'Administrador';
-    }
+    const safeData = typeof user.data === 'string' ? JSON.parse(user.data) : (user.data || {});
+    const { password: _p, ...cleanSafeData } = safeData;
+    const safeUser = {
+      ...cleanSafeData,
+      id: String(user.id),
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      role: typeof user.role === 'object' ? user.role?.name || user.role?.label || 'Administrador' : user.role || 'Administrador',
+      status: user.status,
+      permissions: cleanSafeData.permissions || {},
+      hasCustomPermissions: cleanSafeData.hasCustomPermissions !== undefined ? !!cleanSafeData.hasCustomPermissions : false
+    };
 
     // Registrar inicio de sesión en bitácora de auditoría
     const db = await getDatabase();
@@ -155,8 +163,19 @@ export async function getProfile(req: AuthenticatedRequest, res: Response) {
     }
 
     const user = userRes.rows[0];
-    const { password: _, ...safeUser } = user;
-    safeUser.id = String(user.id);
+    const safeData = typeof user.data === 'string' ? JSON.parse(user.data) : (user.data || {});
+    const { password: _p, ...cleanSafeData } = safeData;
+    const safeUser = {
+      ...cleanSafeData,
+      id: String(user.id),
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      role: typeof user.role === 'object' ? user.role?.name || user.role?.label || 'Administrador' : user.role || 'Administrador',
+      status: user.status,
+      permissions: cleanSafeData.permissions || {},
+      hasCustomPermissions: cleanSafeData.hasCustomPermissions !== undefined ? !!cleanSafeData.hasCustomPermissions : false
+    };
 
     return res.status(200).json({
       success: true,

@@ -66,7 +66,8 @@ import {
   LogOut,
   X,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Lock
 } from 'lucide-react';
 import { CustomersSubTab, InventorySubTab, PurchasesSubTab, SalesSubTab, SuppliersSubTab, FinanceSubTab, AccountingSubTab, AssetsSubTab, HRSubTab, ReportsSubTab, SettingsSubTab, StoreSettings, TabType } from '../types';
 import { usePermissions } from '../context/PermissionsContext';
@@ -424,6 +425,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Navigation Items */}
         <nav className={`flex-1 custom-scrollbar ${isHorizontal ? 'flex flex-row flex-wrap items-center justify-center px-2 h-full gap-1' : 'overflow-y-auto overflow-x-hidden py-2'}`}>
+          {modules.length === 0 && (!sidebarCollapsed || isHorizontal) && (
+            <div className="p-4 text-center space-y-2 mt-4 animate-in fade-in">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto shadow-inner">
+                <Lock className="w-5 h-5 stroke-[2]" />
+              </div>
+              <p className="text-[11px] font-black text-slate-300 uppercase tracking-wider">Sin módulos asignados</p>
+              <p className="text-[10px] text-slate-500 font-medium leading-relaxed">Este usuario no tiene acceso a ningún módulo del sistema.</p>
+            </div>
+          )}
           {modules.map((mod) => {
             const isModuleActive = mod.items.some(i => i.id === activeTab);
             const isOpen = openModule === mod.id;
