@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { usePostgresSync } from './hooks/usePostgresSync';
 import { getApiUrl } from './lib/apiConfig';
 import { Header } from './components/Header';
