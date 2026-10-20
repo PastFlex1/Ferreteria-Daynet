@@ -391,7 +391,9 @@ CREATE TABLE IF NOT EXISTS certificados_sri (
     environment TEXT DEFAULT 'PRUEBAS',
     status TEXT DEFAULT 'ACTIVO',
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-    updated_by TEXT
+    updated_by TEXT,
+    file_name TEXT,
+    file_size TEXT
 );
 
 -- 12. CAJA Y SESIONES DE CAJEROS (UNIFICADA)

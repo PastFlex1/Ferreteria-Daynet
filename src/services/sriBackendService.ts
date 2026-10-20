@@ -54,7 +54,7 @@ export function isSecuencialAlreadyRegistered(rawResponse?: string, errorMsg?: s
 }
 
 export class SriBackendService {
-  private static defaultBaseUrl = 'http://localhost:8080';
+  private static defaultBaseUrl = 'http://localhost:8081';
 
   public static getBaseUrl(): string {
     const saved = localStorage.getItem('ferreteria_sri_api_url');
@@ -62,7 +62,10 @@ export class SriBackendService {
     if (saved && saved.trim() !== '') {
       target = saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     }
-    // Forzamos el uso de la URL completa (ej. http://localhost:8080) siempre.
+    // Si la URL guardada era 8080 pero no responde, usar 8081 como puerto predeterminado del microservicio
+    if (target.includes(':8080')) {
+      target = target.replace(':8080', ':8081');
+    }
     return target;
   }
 
@@ -70,29 +73,63 @@ export class SriBackendService {
    * Guarda la URL base configurada para el backend local.
    */
   public static setBaseUrl(url: string) {
-    const cleanUrl = (url || 'http://localhost:8080').trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
+    const cleanUrl = (url || 'http://localhost:8081').trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     localStorage.setItem('ferreteria_sri_api_url', cleanUrl);
   }
 
   /**
-   * Prueba la conectividad con el backend Java local (Spring Boot).
+   * Prueba la conectividad con el microservicio Java local del SRI (Spring Boot).
    */
   public static async testConnection(targetUrl?: string): Promise<{ ok: boolean; message: string; urlUsed: string }> {
-    const rawTarget = targetUrl || localStorage.getItem('ferreteria_sri_api_url') || this.defaultBaseUrl;
+    const rawTarget = targetUrl || this.getBaseUrl();
     const displayUrl = rawTarget.trim().replace(/\/$/, '');
-    
-    // Ignoramos completamente la verificación para que el frontend nunca se bloquee
+
+    // 1. Probar primero a través del backend Express institucional (/api/sri/test-connection)
+    try {
+      const resExpress = await fetch(getApiUrl(`/api/sri/test-connection?url=${encodeURIComponent(displayUrl)}`), {
+        signal: AbortSignal.timeout(3500),
+      });
+      if (resExpress.ok) {
+        const data = await resExpress.json();
+        return {
+          ok: data.ok,
+          message: data.message,
+          urlUsed: data.urlUsed || displayUrl,
+        };
+      }
+    } catch (_) {}
+
+    // 2. Probar directamente contra el microservicio Java (/api/test/cors)
+    try {
+      const directRes = await fetch(`${displayUrl}/api/test/cors`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (directRes.ok) {
+        return {
+          ok: true,
+          message: `Microservicio Java SRI activo y respondiendo en ${displayUrl}.`,
+          urlUsed: displayUrl,
+        };
+      }
+    } catch (err: any) {
+      return {
+        ok: false,
+        message: `No se pudo conectar con el servidor SRI en ${displayUrl} (${err.message}). Asegúrese de ejecutar iniciar_servicio.bat.`,
+        urlUsed: displayUrl,
+      };
+    }
+
     return {
-      ok: true,
-      message: `Conexión omitida exitosamente.`,
-      urlUsed: displayUrl
+      ok: false,
+      message: `No se pudo conectar con el servidor SRI en ${displayUrl}.`,
+      urlUsed: displayUrl,
     };
   }
 
   /**
    * 1️⃣ FIRMAR XML
-   * Envía el XML sin firmar al backend local para firmarlo con XAdES-BES
-   * pasando dinámicamente el Base64 y contraseña almacenados.
+   * Envía el XML al backend Express (/api/sri/firmar), el cual inyecta
+   * automáticamente el certificado .p12 y la contraseña desde la bóveda segura AES-256.
    */
   public static async firmarXml(
     xml: string,
@@ -100,34 +137,65 @@ export class SriBackendService {
     password?: string
   ): Promise<{ success: boolean; xmlFirmado?: string; claveAcceso?: string; error?: string }> {
     try {
-      const baseUrl = this.getBaseUrl();
       const payload: any = { xml };
       if (certBase64) payload.certificadoBase64 = certBase64;
       if (password) payload.password = password;
 
-      const resFirma = await fetch(`${baseUrl}/api/sri/firmar`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+      let lastError = 'Error en el servicio de firma digital.';
+      let resFirma: Response | null = null;
 
-      if (!resFirma.ok) {
-        const errorText = await resFirma.text();
-        throw new Error(errorText || 'Error en el servicio de firma digital.');
+      // 1. Enviar primero al backend Express institucional (/api/sri/firmar)
+      // para que inyecte la firma cifrada almacenada en la tabla protegida certificados_sri
+      try {
+        resFirma = await fetch(getApiUrl('/api/sri/firmar'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (resFirma.ok) {
+          const xmlFirmado = await resFirma.text();
+          const claveMatch = xml.match(/<claveAcceso>(.*?)<\/claveAcceso>/);
+          const claveAcceso = claveMatch ? claveMatch[1] : null;
+          if (!claveAcceso) {
+            throw new Error('No se pudo extraer la clave de acceso del XML.');
+          }
+          return { success: true, xmlFirmado, claveAcceso };
+        } else {
+          lastError = await resFirma.text();
+        }
+      } catch (err: any) {
+        lastError = err.message || lastError;
       }
-      
-      const xmlFirmado = await resFirma.text();
 
-      const claveMatch = xml.match(/<claveAcceso>(.*?)<\/claveAcceso>/);
-      const claveAcceso = claveMatch ? claveMatch[1] : null;
-      
-      if (!claveAcceso) {
-        throw new Error('No se pudo extraer la clave de acceso del XML.');
+      // 2. Si Express devolvió 404 o no está disponible, intentar contra baseUrl directo
+      if (!resFirma || resFirma.status === 404) {
+        const baseUrl = this.getBaseUrl();
+        try {
+          const directRes = await fetch(`${baseUrl}/api/sri/firmar`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+          if (directRes.ok) {
+            const xmlFirmado = await directRes.text();
+            const claveMatch = xml.match(/<claveAcceso>(.*?)<\/claveAcceso>/);
+            const claveAcceso = claveMatch ? claveMatch[1] : null;
+            return { success: true, xmlFirmado, claveAcceso: claveAcceso || undefined };
+          } else {
+            lastError = await directRes.text();
+          }
+        } catch (e: any) {
+          lastError = e.message || lastError;
+        }
       }
 
-      return { success: true, xmlFirmado, claveAcceso };
+      return { success: false, error: lastError };
     } catch (error: any) {
       return { success: false, error: error.message || 'Error en firma digital.' };
     }
@@ -135,7 +203,7 @@ export class SriBackendService {
 
   /**
    * 2️⃣ RECEPCIÓN SRI
-   * Envía el XML firmado al Web Service de Recepción del SRI.
+   * Envía el XML firmado al Web Service de Recepción del SRI (a través de Express proxy o Java directo).
    */
   public static async recepcionarSri(xmlFirmado: string, retries = 3, delayMs = 2500): Promise<{ success: boolean; recepcion?: string; error?: string }> {
     const baseUrl = this.getBaseUrl();
@@ -143,15 +211,25 @@ export class SriBackendService {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const resRecepcion = await fetch(`${baseUrl}/api/sri/recepcion`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: xmlFirmado,
-        });
+        let resRecepcion: Response;
+        try {
+          // Intentar vía proxy de Express
+          resRecepcion = await fetch(getApiUrl('/api/sri/recepcion'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain', ...getAuthHeaders() },
+            body: xmlFirmado,
+          });
+        } catch {
+          // Fallback directo a Java
+          resRecepcion = await fetch(`${baseUrl}/api/sri/recepcion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: xmlFirmado,
+          });
+        }
 
         if (!resRecepcion.ok) {
           const errorText = await resRecepcion.text();
-          // Si el error es de construcción de servicio (SRI caído) o timeouts, intentamos de nuevo
           const isIntermittentError = errorText.includes('ServiceConstructionException') || 
                                       errorText.includes('Timeout') || 
                                       errorText.includes('Connection refused') || 
@@ -166,7 +244,6 @@ export class SriBackendService {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
             continue;
           }
-          // Si es otro tipo de error, lanzamos error (rompe el try y va al catch)
           throw new Error(lastError);
         }
         
@@ -203,7 +280,16 @@ export class SriBackendService {
     
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const resAutorizacion = await fetch(`${baseUrl}/api/sri/autorizacion/${claveAcceso}`);
+        let resAutorizacion: Response;
+        try {
+          // Intentar vía proxy Express
+          resAutorizacion = await fetch(getApiUrl(`/api/sri/autorizacion/${claveAcceso}`), {
+            headers: { ...getAuthHeaders() }
+          });
+        } catch {
+          // Fallback directo a Java
+          resAutorizacion = await fetch(`${baseUrl}/api/sri/autorizacion/${claveAcceso}`);
+        }
 
         if (resAutorizacion.ok) {
           const autorizacion = await resAutorizacion.text();

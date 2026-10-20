@@ -1,11 +1,10 @@
 import { getDatabase } from '../config/db';
 import { broadcastSse } from '../controllers/sync.controller';
 import { SriQueueRecord } from '../controllers/sriQueue.controller';
+import { getSriJavaBaseUrl } from '../controllers/sri.controller';
 
 let workerIntervalId: NodeJS.Timeout | null = null;
 let isProcessing = false;
-
-const SRI_JAVA_URL = process.env.SRI_API_URL || 'http://localhost:8080';
 
 /**
  * WORKER EN SEGUNDO PLANO PARA FACTURACIÓN ELECTRÓNICA:
@@ -45,7 +44,8 @@ export async function processSriQueueBatch() {
         };
 
         try {
-          const res = await fetch(`${SRI_JAVA_URL}/api/sri/autorizacion/${claveAcceso}`, {
+          const javaBase = await getSriJavaBaseUrl();
+          const res = await fetch(`${javaBase}/api/sri/autorizacion/${claveAcceso}`, {
             headers: { 'Accept': 'text/plain, application/xml, application/json' },
             signal: AbortSignal.timeout(6000)
           });

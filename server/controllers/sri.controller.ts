@@ -106,7 +106,7 @@ export function decryptPassword(encryptedHex: string, ivHex: string): string {
  */
 export async function uploadCertificate(req: AuthenticatedRequest, res: Response) {
   try {
-    const { p12Base64, password, environment = 'PRUEBAS' } = req.body;
+    const { p12Base64, password, environment = 'PRUEBAS', fileName, fileSize } = req.body;
 
     if (!p12Base64 || !password) {
       return res.status(400).json({
@@ -119,9 +119,16 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
     const encryptedData = encryptPassword(String(password).trim());
 
     const pool = getPgPool();
+    try {
+      await pool.query("ALTER TABLE certificados_sri ADD COLUMN file_name TEXT;");
+    } catch {}
+    try {
+      await pool.query("ALTER TABLE certificados_sri ADD COLUMN file_size TEXT;");
+    } catch {}
+
     await pool.query(
-      `INSERT INTO certificados_sri (id, p12_base64, encrypted_password, iv, environment, status, updated_at, updated_by)
-       VALUES ($1, $2, $3, $4, $5, 'ACTIVO', NOW(), $6)
+      `INSERT INTO certificados_sri (id, p12_base64, encrypted_password, iv, environment, status, updated_at, updated_by, file_name, file_size)
+       VALUES ($1, $2, $3, $4, $5, 'ACTIVO', NOW(), $6, $7, $8)
        ON CONFLICT (id) DO UPDATE
        SET p12_base64 = EXCLUDED.p12_base64,
            encrypted_password = EXCLUDED.encrypted_password,
@@ -129,8 +136,10 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
            environment = EXCLUDED.environment,
            status = 'ACTIVO',
            updated_at = NOW(),
-           updated_by = EXCLUDED.updated_by`,
-      ['active_certificate', p12Base64, encryptedData.encrypted, encryptedData.iv, environment, req.user?.username || 'admin']
+           updated_by = EXCLUDED.updated_by,
+           file_name = EXCLUDED.file_name,
+           file_size = EXCLUDED.file_size`,
+      ['active_certificate', p12Base64, encryptedData.encrypted, encryptedData.iv, environment, req.user?.username || 'admin', fileName || 'firma_electronica.p12', fileSize || '']
     );
 
     const db = await getDatabase();
@@ -146,7 +155,9 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
     return res.status(200).json({
       success: true,
       message: 'Certificado digital .p12 almacenado con éxito en la bóveda segura con cifrado AES-256.',
-      environment
+      environment,
+      fileName: fileName || 'firma_electronica.p12',
+      fileSize: fileSize || ''
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -163,8 +174,15 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
 export async function getCertificateStatus(req: Request, res: Response) {
   try {
     const pool = getPgPool();
+    try {
+      await pool.query("ALTER TABLE certificados_sri ADD COLUMN file_name TEXT;");
+    } catch {}
+    try {
+      await pool.query("ALTER TABLE certificados_sri ADD COLUMN file_size TEXT;");
+    } catch {}
+
     const result = await pool.query(
-      `SELECT id, environment, status, updated_at, updated_by,
+      `SELECT id, environment, status, updated_at, updated_by, file_name, file_size,
               (p12_base64 IS NOT NULL AND length(p12_base64) > 0) as has_cert
        FROM certificados_sri WHERE id = $1`,
       ['active_certificate']
@@ -184,7 +202,9 @@ export async function getCertificateStatus(req: Request, res: Response) {
       environment: cert.environment || 'PRUEBAS',
       updatedAt: cert.updated_at,
       updatedBy: cert.updated_by,
-      status: cert.status || 'ACTIVO'
+      status: cert.status || 'ACTIVO',
+      fileName: cert.file_name || 'firma_electronica.p12',
+      fileSize: cert.file_size || null
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -253,24 +273,53 @@ export async function getActiveCertificate(): Promise<{ p12Base64: string; passw
 }
 
 /**
+ * Detecta la URL activa del microservicio Java del SRI (probando 8081 y 8080)
+ */
+export async function getSriJavaBaseUrl(customUrl?: string): Promise<string> {
+  const candidateUrls = [
+    customUrl,
+    process.env.SRI_JAVA_URL,
+    process.env.SRI_API_URL,
+    'http://localhost:8081',
+    'http://localhost:8080',
+    'http://127.0.0.1:8081',
+    'http://127.0.0.1:8080',
+  ].filter(Boolean) as string[];
+
+  for (const rawUrl of candidateUrls) {
+    const clean = rawUrl.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
+    try {
+      const res = await fetch(`${clean}/api/test/cors`, { signal: AbortSignal.timeout(1200) });
+      if (res.ok) {
+        return clean;
+      }
+    } catch {}
+  }
+
+  return (process.env.SRI_JAVA_URL || process.env.SRI_API_URL || 'http://localhost:8081')
+    .replace(/\/$/, '')
+    .replace(/\/api\/sri\/?$/, '');
+}
+
+/**
  * Endpoint de firmado seguro: Si no se provee certificado en el body,
  * se utiliza el certificado cifrado almacenado en la bóveda certificados_sri.
  */
 export async function signXmlHandler(req: Request, res: Response) {
   try {
-    const { xml } = req.body;
+    const { xml, backendUrl } = req.body;
     if (!xml) {
       return res.status(400).send('El parámetro XML es requerido.');
     }
 
     // Firma EXCLUSIVA en el backend desde certificados_sri
     const activeCert = await getActiveCertificate();
-    if (!activeCert) {
+    const certBase64 = req.body.certificadoBase64 || activeCert?.p12Base64;
+    const password = req.body.password || activeCert?.password;
+
+    if (!certBase64 || !password) {
       return res.status(400).send('No hay certificado digital activo en la bóveda certificados_sri. Cargue su archivo .p12 en Configuración.');
     }
-
-    const certBase64 = activeCert.p12Base64;
-    const password = activeCert.password;
 
     // Purgar de forma definitiva cualquier clave residual de p12 en app_state
     try {
@@ -278,25 +327,104 @@ export async function signXmlHandler(req: Request, res: Response) {
       await pool.query("DELETE FROM app_state WHERE id LIKE 'ferreteria_settings_p12%';");
     } catch {}
 
-    // Intentar reenviar al backend Java local de firma si está configurado
-    const javaBackendUrl = process.env.SRI_JAVA_URL || 'http://localhost:8080/api/sri/firmar';
+    // Resolver la URL del microservicio Java (8081 o 8080)
+    const javaBase = await getSriJavaBaseUrl(backendUrl);
+    const javaBackendUrl = `${javaBase}/api/sri/firmar`;
+
     try {
       const javaRes = await fetch(javaBackendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xml, certificadoBase64: certBase64, password })
+        body: JSON.stringify({ xml, certificadoBase64: certBase64, password }),
+        signal: AbortSignal.timeout(20000),
       });
 
       if (javaRes.ok) {
         const signedXml = await javaRes.text();
         return res.status(200).type('application/xml').send(signedXml);
+      } else {
+        const javaError = await javaRes.text();
+        return res.status(javaRes.status || 500).send(javaError || 'Error al firmar con el microservicio Java.');
       }
-    } catch {
-      // Si el backend Java no está activo en este momento
+    } catch (fetchErr: any) {
+      console.warn(`[signXmlHandler] Error conectando con microservicio Java en ${javaBackendUrl}:`, fetchErr.message);
     }
 
-    return res.status(503).send('Servicio de firma digital local Java (:8080) no disponible. Verifique que el servicio de firma esté en ejecución.');
+    return res.status(503).send(`Servicio de firma digital local Java (${javaBase}) no disponible. Verifique que el servicio de firma esté en ejecución en el puerto 8081.`);
   } catch (error: any) {
     return res.status(500).send(`Error en el servicio de firma: ${error.message}`);
+  }
+}
+
+/**
+ * Proxy para el Web Service de Recepción SRI a través del microservicio Java
+ */
+export async function proxyRecepcionHandler(req: Request, res: Response) {
+  try {
+    const javaBase = await getSriJavaBaseUrl();
+    const url = `${javaBase}/api/sri/recepcion`;
+
+    const bodyText = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const javaRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': req.headers['content-type'] || 'text/plain' },
+      body: bodyText,
+      signal: AbortSignal.timeout(25000),
+    });
+
+    const text = await javaRes.text();
+    return res.status(javaRes.status).send(text);
+  } catch (err: any) {
+    return res.status(503).send(`Error comunicándose con Recepción SRI: ${err.message}`);
+  }
+}
+
+/**
+ * Proxy para el Web Service de Autorización SRI a través del microservicio Java
+ */
+export async function proxyAutorizacionHandler(req: Request, res: Response) {
+  try {
+    const { clave } = req.params;
+    const javaBase = await getSriJavaBaseUrl();
+    const url = `${javaBase}/api/sri/autorizacion/${clave}`;
+
+    const javaRes = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'text/plain, application/xml, application/json' },
+      signal: AbortSignal.timeout(20000),
+    });
+
+    const text = await javaRes.text();
+    return res.status(javaRes.status).send(text);
+  } catch (err: any) {
+    return res.status(503).send(`Error consultando Autorización SRI: ${err.message}`);
+  }
+}
+
+/**
+ * Prueba la conexión con el microservicio Java SRI local
+ */
+export async function testSriBackendConnection(req: Request, res: Response) {
+  try {
+    const custom = (req.query.url as string) || undefined;
+    const detectedUrl = await getSriJavaBaseUrl(custom);
+    const resTest = await fetch(`${detectedUrl}/api/test/cors`, { signal: AbortSignal.timeout(3000) });
+    if (resTest.ok) {
+      return res.status(200).json({
+        ok: true,
+        message: `Servidor SRI Java conectado exitosamente en ${detectedUrl}.`,
+        urlUsed: detectedUrl,
+      });
+    }
+    return res.status(503).json({
+      ok: false,
+      message: `No se pudo conectar con el microservicio Java en ${detectedUrl}.`,
+      urlUsed: detectedUrl,
+    });
+  } catch (err: any) {
+    return res.status(503).json({
+      ok: false,
+      message: `Fallo de conexión con microservicio Java: ${err.message}`,
+    });
   }
 }

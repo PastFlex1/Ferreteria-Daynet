@@ -115,6 +115,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     updatedAt?: string;
     updatedBy?: string;
     status?: string;
+    fileName?: string;
+    fileSize?: string;
   } | null>(null);
   const [showSignaturePassword, setShowSignaturePassword] = useState(false);
   const [copiedBase64, setCopiedBase64] = useState(false);
@@ -136,7 +138,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   }, []);
 
   // Java Backend API URL State
-  const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8080/api/sri');
+  const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8081/api/sri');
   const [isTestingBackend, setIsTestingBackend] = useState(false);
   const [backendStatus, setBackendStatus] = useState<{ tested: boolean; ok: boolean; message: string }>({
     tested: false,
@@ -671,6 +673,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             p12Base64: signatureBase64,
             password: signaturePassword,
             environment: sriMode,
+            fileName: signatureFileName || 'firma_electronica.p12',
+            fileSize: signatureFileSize || '',
           }),
         });
 
@@ -702,7 +706,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   const handleTestBackendConnection = async () => {
     setIsTestingBackend(true);
-    SriBackendService.setBaseUrl(sriApiUrl || 'http://localhost:8080/api/sri');
+    SriBackendService.setBaseUrl(sriApiUrl || 'http://localhost:8081/api/sri');
     const result = await SriBackendService.testConnection();
     setIsTestingBackend(false);
     setBackendStatus({ tested: true, ok: result.ok, message: result.message });
@@ -1425,14 +1429,22 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     <span>Archivo de Certificado Digital (.p12 o .pfx)</span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Al seleccionar el archivo, el sistema lo <strong>convertirá automáticamente a formato Base64</strong> y lo guardará listo para el firmado del SRI.
+                    {vaultCertStatus?.installed
+                      ? 'Su certificado digital ya se encuentra resguardado y cifrado en el servidor. Si desea renovarlo, haga clic en Reemplazar Archivo.'
+                      : 'Al seleccionar el archivo, el sistema lo convertirá automáticamente a formato Base64 y lo guardará listo para el firmado del SRI.'}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <label className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-black rounded-xl text-xs transition cursor-pointer shadow-lg shadow-amber-500/20 flex items-center gap-2 active:scale-95">
                     <Upload className="w-4 h-4" />
-                    <span>{signatureBase64 ? 'Reemplazar Archivo .p12' : 'Cargar Archivo .p12'}</span>
+                    <span>
+                      {signatureBase64
+                        ? 'Cambiar Archivo Seleccionado'
+                        : vaultCertStatus?.installed
+                        ? 'Reemplazar Archivo .p12'
+                        : 'Cargar Archivo .p12'}
+                    </span>
                     <input
                       type="file"
                       accept=".p12,.pfx,application/x-pkcs12"
@@ -1444,11 +1456,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   {signatureBase64 && (
                     <button
                       type="button"
-                      onClick={handleRemoveSignature}
+                      onClick={() => {
+                        setSignatureBase64('');
+                        setSignatureFileName('');
+                        setSignatureFileSize('');
+                        setSignaturePassword('');
+                      }}
                       className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                      title="Eliminar Firma"
+                      title="Descartar archivo seleccionado"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <X className="w-4 h-4" />
                     </button>
                   )}
                 </div>
@@ -1456,18 +1473,27 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
               {/* Status & Metadata Card */}
               {signatureBase64 ? (
-                <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-xl space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                /* Archivo recién seleccionado por el usuario en memoria, listo para guardar */
+                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2 pb-2 border-b border-amber-500/20">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase">
+                      Nuevo archivo por guardar
+                    </span>
+                    <span className="text-[11px] text-amber-200">
+                      Ingrese la contraseña abajo y haga clic en <strong>Guardar Configuración de Firma & Bóveda</strong> para cifrarlo en el servidor.
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                        <CheckCircle2 className="w-5 h-5" />
+                      <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30">
+                        <FileCode className="w-5 h-5" />
                       </div>
                       <div>
                         <h4 className="text-xs font-black text-white font-mono">
                           {(typeof signatureFileName === 'string' && signatureFileName) || 'firma_electronica.p12'}
                         </h4>
-                        <p className="text-[10px] text-slate-400">
-                          Tamaño: <strong>{(typeof signatureFileSize === 'string' && signatureFileSize) || 'N/A'}</strong> • Convertido a Base64 ({typeof signatureBase64 === 'string' ? signatureBase64.length.toLocaleString() : 0} caracteres)
+                        <p className="text-[10px] text-slate-300">
+                          Tamaño: <strong>{(typeof signatureFileSize === 'string' && signatureFileSize) || 'N/A'}</strong> • Base64 ({typeof signatureBase64 === 'string' ? signatureBase64.length.toLocaleString() : 0} caracteres)
                         </p>
                       </div>
                     </div>
@@ -1481,18 +1507,38 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       <span>{copiedBase64 ? 'Copiado' : 'Copiar Base64'}</span>
                     </button>
                   </div>
+                </div>
+              ) : vaultCertStatus?.installed ? (
+                /* Certificado YA guardado e instalado en el servidor */
+                <div className="p-4 bg-slate-900 border border-emerald-500/30 rounded-xl space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center space-x-3.5">
+                      <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+                        <ShieldCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-black text-white font-mono">
+                            {vaultCertStatus.fileName || 'firma_electronica.p12'}
+                          </h4>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                            GUARDADO EN BÓVEDA
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          {vaultCertStatus.fileSize ? `Tamaño: ${vaultCertStatus.fileSize} • ` : ''}Certificado digital activo y cifrado con <strong>AES-256-CBC</strong> en el servidor seguro.
+                        </p>
+                      </div>
+                    </div>
 
-                  {/* Base64 String Preview */}
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">
-                      Cadena Base64 Generada (Primeros 160 caracteres):
-                    </label>
-                    <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 font-mono text-[11px] text-amber-400/90 break-all select-all">
-                      {signatureBase64.slice(0, 160)}...
+                    <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 self-start sm:self-auto">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Operativo para Firmar SRI</span>
                     </div>
                   </div>
                 </div>
               ) : (
+                /* Sin certificado instalado */
                 <div className="p-5 border-2 border-dashed border-slate-800 rounded-xl text-center space-y-2">
                   <Key className="w-8 h-8 text-slate-600 mx-auto" />
                   <p className="text-xs font-bold text-slate-400">Ningún archivo de firma .p12 seleccionado</p>
@@ -1505,12 +1551,22 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
             {/* Password Configuration */}
             <div className="p-6 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
-              <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <Lock className="w-4 h-4 text-purple-400" />
-                <span>Contraseña del Certificado Digital</span>
-              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-purple-400" />
+                  <span>Contraseña del Certificado Digital</span>
+                </h3>
+                {vaultCertStatus?.installed && !signaturePassword && (
+                  <span className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 self-start sm:self-auto">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Contraseña Protegida en Servidor</span>
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400">
-                Ingrese la contraseña proporcionada por la entidad certificadora al momento de emitir su firma electrónica. Esta clave se usará para desencriptar el certificado durante el firmado XML del SRI.
+                {vaultCertStatus?.installed && !signaturePassword
+                  ? 'La contraseña de su firma ya se encuentra cifrada con AES-256 en la base de datos protegida. Solo debe ingresar una nueva contraseña si va a reemplazar su certificado o si necesita actualizar la clave.'
+                  : 'Ingrese la contraseña proporcionada por la entidad certificadora al momento de emitir su firma electrónica. Esta clave se usará para desencriptar el certificado durante el firmado XML del SRI.'}
               </p>
 
               <div className="max-w-md relative">
@@ -1518,7 +1574,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   type={showSignaturePassword ? 'text' : 'password'}
                   value={signaturePassword}
                   onChange={(e) => setSignaturePassword(e.target.value)}
-                  placeholder="Ingrese la contraseña de su archivo .p12"
+                  placeholder={
+                    vaultCertStatus?.installed
+                      ? '•••••••••••••••• (Contraseña guardada y protegida)'
+                      : 'Ingrese la contraseña de su archivo .p12'
+                  }
                   className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-amber-500 pr-10"
                 />
                 <button
@@ -1529,6 +1589,15 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   {showSignaturePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+
+              {vaultCertStatus?.installed && !signaturePassword && (
+                <div className="flex items-center gap-2 text-[11px] text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 max-w-md">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    Clave resguardada de forma segura. No requiere volver a escribirla.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Ambiente SRI (Pruebas / Producción) */}
@@ -1625,14 +1694,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] font-bold text-slate-400 uppercase">URL del Backend Local Java (Spring Boot)</label>
                     <span className="text-[10px] font-mono text-cyan-400">
-                      Puerto predeterminado: :8080
+                      Puerto predeterminado: :8081 / :8080
                     </span>
                   </div>
                   <input
                     type="text"
                     value={sriApiUrl}
                     onChange={(e) => setSriApiUrl(e.target.value)}
-                    placeholder="http://localhost:8080"
+                    placeholder="http://localhost:8081/api/sri"
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-cyan-500"
                   />
                 </div>
@@ -1668,7 +1737,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <span>¿Cómo funciona el firmado digital y la transmisión al SRI?</span>
               </h4>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                El ERP genera el XML de la factura con la <strong>Clave de Acceso de 49 dígitos (Módulo 11)</strong> y se comunica con su backend Java en <code>{sriApiUrl || 'http://localhost:8080/api/sri'}</code>. El backend firma el XML con su certificado digital <strong>PKCS#12 (.p12 en Base64)</strong> bajo el estándar <strong>XAdES-BES</strong> y lo envía a los Web Services del SRI tanto en ambiente de <strong>Pruebas</strong> como de <strong>Producción</strong>.
+                El ERP genera el XML de la factura con la <strong>Clave de Acceso de 49 dígitos (Módulo 11)</strong> y se comunica con su backend Java en <code>{sriApiUrl || 'http://localhost:8081/api/sri'}</code>. El backend firma el XML con su certificado digital <strong>PKCS#12 (.p12 en Base64)</strong> bajo el estándar <strong>XAdES-BES</strong> y lo envía a los Web Services del SRI tanto en ambiente de <strong>Pruebas</strong> como de <strong>Producción</strong>.
               </p>
             </div>
 
