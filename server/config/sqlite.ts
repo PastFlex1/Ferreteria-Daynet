@@ -84,6 +84,7 @@ export function normalizeSqlAndParams(sql: string, rawParams: any[] = []): { sql
   // 4. Funciones de inspección de servidor PostgreSQL
   adaptedSql = adaptedSql.replace(/current_database\(\)/gi, `'${currentDbName}'`);
   adaptedSql = adaptedSql.replace(/version\(\)/gi, "'SQLite 3 (Embedded Local)'");
+  adaptedSql = adaptedSql.replace(/\bGREATEST\b/gi, 'MAX');
 
   // 5. Manejo de parámetros posicionales $1, $2, ...
   if (/\$[0-9]+/.test(adaptedSql)) {

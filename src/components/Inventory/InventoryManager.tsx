@@ -30,7 +30,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   onStockAdjust,
   units,
 }) => {
-  const { can } = usePermissions();
+  const { can, isSuperAdmin } = usePermissions();
   const [syncedTaxRates] = usePostgresSync<TaxRateItem[]>('ferreteria_settings_tax_rates', defaultTaxRates);
   const availableTaxRates = useMemo(() => (syncedTaxRates && syncedTaxRates.length > 0 ? syncedTaxRates : defaultTaxRates).filter(t => t.active !== false), [syncedTaxRates]);
   const [searchTerm, setSearchTerm] = useState('');

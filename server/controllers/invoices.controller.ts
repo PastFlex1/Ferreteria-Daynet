@@ -559,34 +559,17 @@ export async function reserveSequential(req: Request, res: Response) {
 
     let nextNum: number;
 
-    // Si se envía un secuencial solicitado (por ej. configurado en Configuración o terminal), respetarlo y sincronizar la tabla
+    // Si se envía un secuencial solicitado (por ej. factura emitida offline, reenvío o terminal), respetarlo siempre y sincronizar la tabla
     if (requestedSequential && requestedSequential > 0) {
-      const currentRec = await pool.query(`
-        SELECT current_sequential FROM secuenciales_emision
-        WHERE establishment = $1 AND emission_point = $2 AND document_type = $3;
-      `, [establishment, emissionPoint, documentType]);
-
-      const currentVal = currentRec.rows.length > 0 ? Number(currentRec.rows[0].current_sequential) : 0;
-      
-      if (requestedSequential > currentVal) {
-        await pool.query(`
-          INSERT INTO secuenciales_emision (
-            id, establishment, emission_point, document_type, name, current_sequential, updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, NOW())
-          ON CONFLICT (establishment, emission_point, document_type)
-          DO UPDATE SET current_sequential = EXCLUDED.current_sequential, updated_at = NOW();
-        `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Punto ${emissionPoint}`, requestedSequential]);
-        nextNum = requestedSequential;
-      } else {
-        const seqRes = await pool.query(`
-          UPDATE secuenciales_emision
-          SET current_sequential = current_sequential + 1, updated_at = NOW()
-          WHERE establishment = $1 AND emission_point = $2 AND document_type = $3
-          RETURNING current_sequential;
-        `, [establishment, emissionPoint, documentType]);
-        nextNum = Number(seqRes.rows[0].current_sequential);
-      }
+      await pool.query(`
+        INSERT INTO secuenciales_emision (
+          id, establishment, emission_point, document_type, name, current_sequential, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (establishment, emission_point, document_type)
+        DO UPDATE SET current_sequential = GREATEST(secuenciales_emision.current_sequential, EXCLUDED.current_sequential), updated_at = NOW();
+      `, [`${establishment}-${emissionPoint}-${documentType}`, establishment, emissionPoint, documentType, `Punto ${emissionPoint}`, requestedSequential]);
+      nextNum = requestedSequential;
     } else {
       const seqRes = await pool.query(`
         UPDATE secuenciales_emision

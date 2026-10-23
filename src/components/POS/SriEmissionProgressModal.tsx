@@ -171,7 +171,9 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
       const estab = establishment ? establishment.padStart(3, '0').slice(-3) : '001';
       const ptoEmi = emissionPoint ? emissionPoint.padStart(3, '0').slice(-3) : '001';
 
-      // CONTROL DE CONCURRENCIA: Reservar secuencial atómico garantizado en el servidor para evitar choques entre terminales
+      // CONTROL DE CONCURRENCIA: Si la factura ya posee un secuencial establecido (ej. emitida offline o pendiente),
+      // se debe PRESERVAR dicho secuencial al enviar al SRI para respetar la correlatividad tributaria.
+      // Sincronizamos con el servidor para que conozca el número en uso sin mutar este comprobante.
       try {
         const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
           method: 'POST',
@@ -185,7 +187,8 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         });
         if (seqRes.ok) {
           const seqData = await seqRes.json();
-          if (seqData.success && seqData.sequentialNumber) {
+          // Solo si NO existía un secuencial previo válido se toma el devuelto por el servidor
+          if (seqData.success && seqData.sequentialNumber && (!currentSecNum || currentSecNum <= 0)) {
             currentSecNum = seqData.sequentialNumber;
           }
         }

@@ -416,5 +416,7 @@ export interface SystemUser {
   status: 'Activo' | 'Inactivo';
   password?: string;
   permissions?: Record<string, boolean>;
+  hasCustomPermissions?: boolean;
 }
+
 
