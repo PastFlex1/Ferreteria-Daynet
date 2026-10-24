@@ -255,6 +255,17 @@ export default function App() {
     }
   });
 
+  // Sincronizar automáticamente el punto de emisión cuando cambia en Configuración
+  useEffect(() => {
+    if (globalEmissionPoint) {
+      const clean = String(globalEmissionPoint).padStart(3, '0').slice(-3);
+      setTerminalEmissionPoint(clean);
+      try {
+        localStorage.setItem('ferreteria_terminal_emission_point', clean);
+      } catch {}
+    }
+  }, [globalEmissionPoint]);
+
   const handleSetTerminalEmissionPoint = (pto: string) => {
     const clean = pto.padStart(3, '0').slice(-3);
     setTerminalEmissionPoint(clean);

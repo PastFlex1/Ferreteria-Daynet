@@ -21,6 +21,18 @@ export default defineConfig(() => {
           changeOrigin: true,
           secure: false,
           ws: true,
+          configure: (proxy) => {
+            proxy.on('error', (err, _req, res: any) => {
+              if ((err as any).code === 'ECONNREFUSED') {
+                if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+                  res.writeHead(503, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ error: 'Servidor Express inicializándose...' }));
+                }
+                return;
+              }
+              console.error('[Proxy Error]:', err.message);
+            });
+          },
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

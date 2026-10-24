@@ -774,9 +774,18 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         })
       });
 
-      // 4. Sincronizar en StoreSettings
+      // 4. Asegurar formato de 3 dígitos y persistir
+      setEstablishment(estab);
+      setEmissionPoint(pto);
+      try {
+        localStorage.setItem('ferreteria_terminal_emission_point', pto);
+      } catch {}
+
+      // 5. Sincronizar en StoreSettings
       const updatedSettings: StoreSettings = {
         ...settings,
+        invoicePrefix: `${estab}-${pto}`,
+        ticketPrefix: `${estab}-${pto}`,
         nextInvoiceNumber: invNum,
         nextTicketNumber: parseInt(secBoleta || '1', 10),
         nextQuoteNumber: parseInt(secQuote || '1', 10),

@@ -51,8 +51,9 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
   const [syncedEstablishment] = usePostgresSync<string>('ferreteria_settings_establishment', '001');
   const [syncedEmissionPoint] = usePostgresSync<string>('ferreteria_settings_emission_point', '001');
 
-  const establishment = propEstablishment || syncedEstablishment || '001';
-  const emissionPoint = propEmissionPoint || (typeof window !== 'undefined' ? localStorage.getItem('ferreteria_terminal_emission_point') : null) || syncedEmissionPoint || '001';
+  const parts = (invoice?.fullNumber || '').split('-');
+  const establishment = (parts.length >= 2 && parts[0]) ? parts[0] : (propEstablishment || syncedEstablishment || '001');
+  const emissionPoint = (parts.length >= 2 && parts[1]) ? parts[1] : (propEmissionPoint || (typeof window !== 'undefined' ? localStorage.getItem('ferreteria_terminal_emission_point') : null) || syncedEmissionPoint || '001');
   const [inputPassword, setInputPassword] = useState('');
 
   // Pipeline execution state

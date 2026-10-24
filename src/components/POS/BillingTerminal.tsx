@@ -55,6 +55,7 @@ import { CustomerSelectModal } from './CustomerSelectModal';
 import { PaymentModal } from './PaymentModal';
 import { SriEmissionProgressModal } from './SriEmissionProgressModal';
 import { ProductSearch } from './ProductSearch';
+import { getApiUrl } from '../../lib/apiConfig';
 
 interface BillingTerminalProps {
   products: Product[];
@@ -440,6 +441,30 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Sincronizar automáticamente el secuencial del servidor para el punto de emisión y establecimiento seleccionados
+  useEffect(() => {
+    const syncSequentialForPoint = async () => {
+      if (documentType !== 'FACTURA' || !setSecInvoice) return;
+      try {
+        const estab = (establishment || '001').padStart(3, '0').slice(-3);
+        const pto = (emissionPoint || '001').padStart(3, '0').slice(-3);
+        const res = await fetch(getApiUrl('/api/invoices/emission-points'));
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            const point = json.data.find((p: any) => p.establishment === estab && p.emissionPoint === pto);
+            if (point && point.nextSequential !== undefined && point.nextSequential >= 1) {
+              setSecInvoice(String(point.nextSequential).padStart(9, '0'));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error sincronizando secuencial para punto de emisión:', err);
+      }
+    };
+    syncSequentialForPoint();
+  }, [establishment, emissionPoint, documentType]);
 
   // Formatted Sequential Number (001-001-000000001)
   const formattedSequentialNumber = useMemo(() => {
@@ -1191,7 +1216,11 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                   <div className="flex flex-col text-left">
                     <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 leading-none">Punto Emisión</span>
                     <span className="font-black text-xs text-amber-950 leading-tight">
-                      {emissionPoint === '002' ? 'Caja 2 (002)' : emissionPoint === '003' ? 'Caja 3 (003)' : emissionPoint === '004' ? 'Caja 4 (004)' : 'Caja 1 (001)'}
+                      {emissionPoint === '001' ? 'Caja 1 (001)' :
+                       emissionPoint === '002' ? 'Caja 2 (002)' :
+                       emissionPoint === '003' ? 'Caja 3 (003)' :
+                       emissionPoint === '004' ? 'Caja 4 (004)' :
+                       `Punto ${emissionPoint} (${emissionPoint})`}
                     </span>
                   </div>
                   <ChevronDown className={`w-3.5 h-3.5 text-amber-600 transition-transform duration-200 ${isEmissionPointDropdownOpen ? 'rotate-180' : ''}`} />
@@ -1200,43 +1229,50 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 {isEmissionPointDropdownOpen && (
                   <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200/90 rounded-2xl shadow-2xl z-50 p-1.5 space-y-1 animate-fadeIn ring-1 ring-slate-900/10">
                     <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                      Puntos de Emisión SRI (TDR)
+                      Puntos de Emisión SRI
                     </div>
 
-                    {[
-                      { code: '001', name: 'Caja 1', label: 'Caja 1 (001)', desc: 'Caja Principal / Mostrador' },
-                      { code: '002', name: 'Caja 2', label: 'Caja 2 (002)', desc: 'Atención al Cliente' },
-                      { code: '003', name: 'Caja 3', label: 'Caja 3 (003)', desc: 'Patio / Bodega' },
-                      { code: '004', name: 'Caja 4', label: 'Caja 4 (004)', desc: 'Express / Mayorista' }
-                    ].map((pt) => {
-                      const isSelected = emissionPoint === pt.code;
-                      return (
-                        <button
-                          key={pt.code}
-                          type="button"
-                          onClick={() => {
-                            if (onSelectEmissionPoint) onSelectEmissionPoint(pt.code);
-                            setIsEmissionPointDropdownOpen(false);
-                          }}
-                          className={`w-full text-left p-2 rounded-xl flex items-center justify-between transition cursor-pointer ${
-                            isSelected
-                              ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black shadow-md shadow-orange-500/20'
-                              : 'hover:bg-amber-50/80 text-slate-800 font-bold hover:text-amber-950'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-white/20 text-white' : 'bg-amber-100/70 text-amber-700'}`}>
-                              <Building2 className="w-3.5 h-3.5" />
+                    {(() => {
+                      const defaultPoints = [
+                        { code: '001', name: 'Caja 1', label: 'Caja 1 (001)', desc: 'Caja Principal / Mostrador' },
+                        { code: '002', name: 'Caja 2', label: 'Caja 2 (002)', desc: 'Atención al Cliente' },
+                        { code: '003', name: 'Caja 3', label: 'Caja 3 (003)', desc: 'Patio / Bodega' },
+                        { code: '004', name: 'Caja 4', label: 'Caja 4 (004)', desc: 'Express / Mayorista' }
+                      ];
+                      const allPoints = defaultPoints.some(p => p.code === emissionPoint)
+                        ? defaultPoints
+                        : [...defaultPoints, { code: emissionPoint, name: `Punto ${emissionPoint}`, label: `Punto ${emissionPoint} (${emissionPoint})`, desc: 'Punto configurado en ajustes' }];
+
+                      return allPoints.map((pt) => {
+                        const isSelected = emissionPoint === pt.code;
+                        return (
+                          <button
+                            key={pt.code}
+                            type="button"
+                            onClick={() => {
+                              if (onSelectEmissionPoint) onSelectEmissionPoint(pt.code);
+                              setIsEmissionPointDropdownOpen(false);
+                            }}
+                            className={`w-full text-left p-2 rounded-xl flex items-center justify-between transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black shadow-md shadow-orange-500/20'
+                                : 'hover:bg-amber-50/80 text-slate-800 font-bold hover:text-amber-950'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-white/20 text-white' : 'bg-amber-100/70 text-amber-700'}`}>
+                                <Building2 className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <div className="text-xs">{pt.name} <span className="font-mono text-[10px] opacity-80">({pt.code})</span></div>
+                                <div className={`text-[10px] ${isSelected ? 'text-white/80' : 'text-slate-400'} font-normal`}>{pt.desc}</div>
+                              </div>
                             </div>
-                            <div>
-                              <div className="text-xs">{pt.name} <span className="font-mono text-[10px] opacity-80">({pt.code})</span></div>
-                              <div className={`text-[10px] ${isSelected ? 'text-white/80' : 'text-slate-400'} font-normal`}>{pt.desc}</div>
-                            </div>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
-                        </button>
-                      );
-                    })}
+                            {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
+                          </button>
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </div>

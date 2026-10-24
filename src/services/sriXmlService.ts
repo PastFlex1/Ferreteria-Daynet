@@ -345,14 +345,19 @@ export function convertERPInvoiceToSRI(
   const year = now.getFullYear();
   const fechaEmision = `${day}/${month}/${year}`;
 
+  const fullParts = (invoice.fullNumber || '').split('-');
+  const estabVal = (fullParts.length >= 2 && fullParts[0]) ? fullParts[0] : (establishment || '001');
+  const ptoVal = (fullParts.length >= 2 && fullParts[1]) ? fullParts[1] : (emissionPoint || '001');
+  const secVal = (fullParts.length >= 3 && fullParts[2]) ? fullParts[2] : String(invoice.number || '1');
+
   return {
     rucEmisor: settings.taxId || (settings as any).ruc || '1790012345001',
     razonSocialEmisor: settings.legalName || settings.storeName || 'FERRETERÍA DAYNET',
     nombreComercialEmisor: settings.storeName || 'FERRETERÍA DAYNET',
     dirMatriz: settings.address || 'Quito, Ecuador',
-    estab: establishment || '001',
-    ptoEmi: emissionPoint || '001',
-    secuencial: String(invoice.number || '1').padStart(9, '0'),
+    estab: estabVal.padStart(3, '0').slice(-3),
+    ptoEmi: ptoVal.padStart(3, '0').slice(-3),
+    secuencial: secVal.padStart(9, '0'),
     fechaEmision,
     ambiente,
     cliente: {
