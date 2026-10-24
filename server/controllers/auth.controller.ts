@@ -21,7 +21,7 @@ export async function login(req: Request, res: Response) {
 
     // 1. Buscar en la tabla relacional 'usuarios_sistema'
     const userRes = await pool.query(
-      `SELECT * FROM usuarios_sistema WHERE username = $1 OR lower(email) = lower($1) OR id = $1 LIMIT 1;`,
+      `SELECT * FROM usuarios_sistema WHERE lower(username) = lower($1) OR lower(email) = lower($1) OR lower(id) = lower($1) LIMIT 1;`,
       [cleanUsername]
     );
 
