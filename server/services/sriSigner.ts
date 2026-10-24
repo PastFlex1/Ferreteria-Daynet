@@ -120,9 +120,24 @@ export function extractPkcs12(p12Base64: string, password: string) {
   const certDigestBase64 = sha1Base64(certBuffer);
   const cleanCertBase64 = certBuffer.toString('base64');
 
+  // Extraer cadena de certificados completa (Certificado de usuario + CAs intermedias y raíz)
+  const allCertificatesBase64: string[] = [cleanCertBase64];
+  for (const bag of certList) {
+    if (bag.cert && bag.cert !== selectedCert) {
+      try {
+        const asn1 = forge.pki.certificateToAsn1(bag.cert);
+        const der = forge.asn1.toDer(asn1).getBytes();
+        const b64 = Buffer.from(der, 'binary').toString('base64');
+        if (!allCertificatesBase64.includes(b64)) {
+          allCertificatesBase64.push(b64);
+        }
+      } catch {}
+    }
+  }
+
   // Extraer Subject / Issuer
-  // El SRI requiere formato RFC 2253 / X.500: e.g. CN=...,OU=...,O=...,C=EC
-  const issuerAttributes = selectedCert.issuer.attributes;
+  // El SRI exige formato RFC 2253 (orden inverso de los atributos ASN.1: CN primero, luego OU, O, C)
+  const issuerAttributes = selectedCert.issuer.attributes.slice().reverse();
   const issuerParts: string[] = [];
   for (const attr of issuerAttributes) {
     const name = attr.shortName || attr.name;
@@ -151,6 +166,7 @@ export function extractPkcs12(p12Base64: string, password: string) {
     certificate: selectedCert,
     certDigestBase64,
     cleanCertBase64,
+    allCertificatesBase64,
     issuerName,
     serialNumber,
     modulusBase64,
@@ -232,8 +248,12 @@ export function signXmlXadesBes(options: SignXmlOptions): string {
   const canonicalComprobante = canonicalizeXml(cleanXml);
   const comprobanteDigest = sha1Base64(canonicalComprobante);
 
-  // 5. Estructurar KeyInfo y su Digest
-  const keyInfoXml = `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="Certificate${certNumber}"><ds:X509Data><ds:X509Certificate>${certData.cleanCertBase64}</ds:X509Certificate></ds:X509Data><ds:KeyValue><ds:RSAKeyValue><ds:Modulus>${certData.modulusBase64}</ds:Modulus><ds:Exponent>${certData.exponentBase64}</ds:Exponent></ds:RSAKeyValue></ds:KeyValue></ds:KeyInfo>`;
+  // 5. Estructurar KeyInfo y su Digest (incluyendo toda la cadena de certificados para validar confianza)
+  const x509CertsXml = certData.allCertificatesBase64
+    .map(c => `<ds:X509Certificate>${c}</ds:X509Certificate>`)
+    .join('\n');
+
+  const keyInfoXml = `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="Certificate${certNumber}"><ds:X509Data>${x509CertsXml}</ds:X509Data><ds:KeyValue><ds:RSAKeyValue><ds:Modulus>${certData.modulusBase64}</ds:Modulus><ds:Exponent>${certData.exponentBase64}</ds:Exponent></ds:RSAKeyValue></ds:KeyValue></ds:KeyInfo>`;
   const canonicalKeyInfo = canonicalizeXml(keyInfoXml);
   const keyInfoDigest = sha1Base64(canonicalKeyInfo);
 
@@ -255,14 +275,16 @@ export function signXmlXadesBes(options: SignXmlOptions): string {
   // Formatear SignatureValue en líneas de 76 caracteres (estándar PEM/XMLDSig)
   const formattedSignatureValue = signatureValue.match(/.{1,76}/g)?.join('\n') || signatureValue;
 
-  // 9. Ensamblar la firma ds:Signature completa
+  // 9. Ensamblar la firma ds:Signature completa con QualifyingProperties explícito (Exigencia XAdES-BES del SRI)
+  const qualifyingPropertiesXml = `<etsi:QualifyingProperties Target="#Signature${sigNumber}">${signedPropertiesXml}</etsi:QualifyingProperties>`;
+
   const signatureBlock = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" Id="Signature${sigNumber}">
 ${signedInfoXml}
 <ds:SignatureValue Id="SignatureValue${sigNumber}">
 ${formattedSignatureValue}
 </ds:SignatureValue>
 ${keyInfoXml.replace('xmlns:ds="http://www.w3.org/2000/09/xmldsig#"', '')}
-<ds:Object Id="Signature${sigNumber}-Object${objNumber}">${signedPropertiesXml.replace('xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#"', '').replace('xmlns:ds="http://www.w3.org/2000/09/xmldsig#"', '')}</ds:Object></ds:Signature>`;
+<ds:Object Id="Signature${sigNumber}-Object${objNumber}">${qualifyingPropertiesXml}</ds:Object></ds:Signature>`;
 
   // 10. Insertar antes del cierre de la etiqueta raíz
   const closingTag = `</${rootTag}>`;

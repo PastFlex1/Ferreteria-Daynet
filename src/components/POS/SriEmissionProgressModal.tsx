@@ -619,7 +619,7 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
                   <div>
                     <h4 className="text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
                       <Key className="w-3.5 h-3.5" />
-                      <span>1. Firma Digital XAdES-BES (Backend Java Local)</span>
+                      <span>1. Firma Digital XAdES-BES (Motor Nativo Integrado)</span>
                     </h4>
                     <p className="text-[11px] font-medium mt-0.5 leading-relaxed">
                       {step1Details || 'Firma del XML en memoria con clave privada y certificado PKCS#12.'}
