@@ -593,7 +593,7 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
       const incomingIds = data.map((u: any) => String(u.id || u._id || u.username)).filter(Boolean);
       if (incomingIds.length > 0) {
         const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
-        await pool.query(`DELETE FROM usuarios_sistema WHERE id NOT IN (${placeholders}) AND id != 'USR-01' AND username != '1799999999001';`, incomingIds);
+        await pool.query(`DELETE FROM usuarios_sistema WHERE id NOT IN (${placeholders}) AND id != 'USR-01' AND id != 'user-admin' AND username != '1799999999001' AND username != 'admin';`, incomingIds);
       }
 
       for (const u of data) {
