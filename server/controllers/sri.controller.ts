@@ -301,9 +301,13 @@ export async function getSriJavaBaseUrl(customUrl?: string): Promise<string> {
     .replace(/\/api\/sri\/?$/, '');
 }
 
+import { signXmlXadesBes } from '../services/sriSigner';
+import { sendSriRecepcion, sendSriAutorizacion, detectEnvironmentFromClave, SriEnvironment } from '../services/sriSoapClient';
+
 /**
  * Endpoint de firmado seguro: Si no se provee certificado en el body,
  * se utiliza el certificado cifrado almacenado en la bóveda certificados_sri.
+ * Ejecuta el firmado XAdES-BES de forma 100% nativa en Node.js sin depender de Java.
  */
 export async function signXmlHandler(req: Request, res: Response) {
   try {
@@ -312,7 +316,7 @@ export async function signXmlHandler(req: Request, res: Response) {
       return res.status(400).send('El parámetro XML es requerido.');
     }
 
-    // Firma EXCLUSIVA en el backend desde certificados_sri
+    // 1. Obtener certificado activo de la bóveda segura certificados_sri
     const activeCert = await getActiveCertificate();
     const certBase64 = req.body.certificadoBase64 || activeCert?.p12Base64;
     const password = req.body.password || activeCert?.password;
@@ -327,43 +331,48 @@ export async function signXmlHandler(req: Request, res: Response) {
       await pool.query("DELETE FROM app_state WHERE id LIKE 'ferreteria_settings_p12%';");
     } catch {}
 
-    // Resolver la URL del microservicio Java (8081 o 8080)
-    const javaBase = await getSriJavaBaseUrl(backendUrl);
-    const javaBackendUrl = `${javaBase}/api/sri/firmar`;
-
+    // 2. Firmar de forma 100% NATIVA en Node.js (XAdES-BES)
     try {
-      const javaRes = await fetch(javaBackendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xml, certificadoBase64: certBase64, password }),
-        signal: AbortSignal.timeout(20000),
+      const signedXml = signXmlXadesBes({
+        xml,
+        p12Base64: certBase64,
+        password
       });
 
-      if (javaRes.ok) {
-        const signedXml = await javaRes.text();
-        return res.status(200).type('application/xml').send(signedXml);
-      } else {
-        const javaError = await javaRes.text();
-        return res.status(javaRes.status || 500).send(javaError || 'Error al firmar con el microservicio Java.');
-      }
-    } catch (fetchErr: any) {
-      console.warn(`[signXmlHandler] Error conectando con microservicio Java en ${javaBackendUrl}:`, fetchErr.message);
-    }
+      console.log(`[signXmlHandler] XML firmado exitosamente con motor nativo Node.js. Longitud: ${signedXml.length} bytes.`);
+      return res.status(200).type('application/xml').send(signedXml);
+    } catch (nativeSignErr: any) {
+      console.warn('[signXmlHandler] Error en firmador nativo Node.js:', nativeSignErr.message);
 
-    return res.status(503).send(`Servicio de firma digital local Java (${javaBase}) no disponible. Verifique que el servicio de firma esté en ejecución en el puerto 8081.`);
+      // Fallback opcional a microservicio externo si existiera configurado
+      if (backendUrl || process.env.SRI_JAVA_URL) {
+        try {
+          const javaBase = await getSriJavaBaseUrl(backendUrl);
+          const javaRes = await fetch(`${javaBase}/api/sri/firmar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ xml, certificadoBase64: certBase64, password }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (javaRes.ok) {
+            const fallbackXml = await javaRes.text();
+            return res.status(200).type('application/xml').send(fallbackXml);
+          }
+        } catch {}
+      }
+
+      return res.status(422).send(`Error al firmar documento digitalmente: ${nativeSignErr.message}`);
+    }
   } catch (error: any) {
     return res.status(500).send(`Error en el servicio de firma: ${error.message}`);
   }
 }
 
 /**
- * Proxy para el Web Service de Recepción SRI a través del microservicio Java
+ * Envío directo al Web Service de Recepción del SRI (SOAP nativo sin microservicio Java)
  */
 export async function proxyRecepcionHandler(req: Request, res: Response) {
   try {
-    const javaBase = await getSriJavaBaseUrl();
-    const url = `${javaBase}/api/sri/recepcion`;
-
     let xmlToSend = '';
     if (typeof req.body === 'string') {
       const trimmed = req.body.trim();
@@ -381,21 +390,31 @@ export async function proxyRecepcionHandler(req: Request, res: Response) {
     }
 
     if (!xmlToSend || xmlToSend.trim() === '' || !xmlToSend.includes('<')) {
-      console.error('[proxyRecepcionHandler Error] Se intentó enviar un payload no XML a Recepción SRI:', typeof req.body === 'string' ? req.body.slice(0, 100) : req.body);
       return res.status(400).send('No se proporcionó un XML válido para recepción en el SRI.');
     }
 
-    console.log(`[proxyRecepcionHandler] Reenviando XML firmado a Java (${url}), longitud: ${xmlToSend.length} bytes.`);
+    // Detectar ambiente de la clave de acceso dentro del XML o del certificado activo
+    let env: SriEnvironment = 'PRUEBAS';
+    const claveMatch = xmlToSend.match(/<claveAcceso>(.*?)<\/claveAcceso>/i);
+    if (claveMatch) {
+      env = detectEnvironmentFromClave(claveMatch[1].trim());
+    } else {
+      const activeCert = await getActiveCertificate();
+      if (activeCert?.environment === 'PRODUCCION' || activeCert?.environment === '2') {
+        env = 'PRODUCCION';
+      }
+    }
 
-    const javaRes = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: xmlToSend,
-      signal: AbortSignal.timeout(25000),
-    });
+    console.log(`[proxyRecepcionHandler] Enviando XML al SRI Recepción (${env}) vía SOAP nativo. Longitud: ${xmlToSend.length} bytes.`);
 
-    const text = await javaRes.text();
-    return res.status(javaRes.status).send(text);
+    const recepcionResult = await sendSriRecepcion(xmlToSend, env);
+
+    if (recepcionResult.estado === 'ERROR') {
+      return res.status(503).send(recepcionResult.rawResponse);
+    }
+
+    // Retornar la respuesta SOAP/XML original del SRI
+    return res.status(200).type('application/xml').send(recepcionResult.rawResponse);
   } catch (err: any) {
     console.error('[proxyRecepcionHandler Exception]:', err.message);
     return res.status(503).send(`Error comunicándose con Recepción SRI: ${err.message}`);
@@ -403,51 +422,54 @@ export async function proxyRecepcionHandler(req: Request, res: Response) {
 }
 
 /**
- * Proxy para el Web Service de Autorización SRI a través del microservicio Java
+ * Consulta directa al Web Service de Autorización del SRI (SOAP nativo sin microservicio Java)
  */
 export async function proxyAutorizacionHandler(req: Request, res: Response) {
   try {
     const { clave } = req.params;
-    const javaBase = await getSriJavaBaseUrl();
-    const url = `${javaBase}/api/sri/autorizacion/${clave}`;
+    if (!clave || clave.length !== 49) {
+      return res.status(400).send('Clave de acceso inválida (debe contener 49 dígitos numéricos).');
+    }
 
-    const javaRes = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'text/plain, application/xml, application/json' },
-      signal: AbortSignal.timeout(20000),
-    });
+    const env = detectEnvironmentFromClave(clave);
+    console.log(`[proxyAutorizacionHandler] Consultando autorización SRI para clave ${clave} en ambiente ${env}.`);
 
-    const text = await javaRes.text();
-    return res.status(javaRes.status).send(text);
+    const authResult = await sendSriAutorizacion(clave, env);
+
+    if (authResult.estado === 'ERROR') {
+      return res.status(503).send(authResult.rawResponse);
+    }
+
+    return res.status(200).type('application/xml').send(authResult.rawResponse);
   } catch (err: any) {
+    console.error('[proxyAutorizacionHandler Exception]:', err.message);
     return res.status(503).send(`Error consultando Autorización SRI: ${err.message}`);
   }
 }
 
 /**
- * Prueba la conexión con el microservicio Java SRI local
+ * Prueba y diagnóstico del motor nativo SRI
  */
 export async function testSriBackendConnection(req: Request, res: Response) {
   try {
-    const custom = (req.query.url as string) || undefined;
-    const detectedUrl = await getSriJavaBaseUrl(custom);
-    const resTest = await fetch(`${detectedUrl}/api/test/cors`, { signal: AbortSignal.timeout(3000) });
-    if (resTest.ok) {
-      return res.status(200).json({
-        ok: true,
-        message: `Servidor SRI Java conectado exitosamente en ${detectedUrl}.`,
-        urlUsed: detectedUrl,
-      });
-    }
-    return res.status(503).json({
-      ok: false,
-      message: `No se pudo conectar con el microservicio Java en ${detectedUrl}.`,
-      urlUsed: detectedUrl,
+    const activeCert = await getActiveCertificate();
+    return res.status(200).json({
+      ok: true,
+      message: 'Motor nativo SRI Node.js integrado y activo. No requiere Java.',
+      engine: 'native-nodejs-xades-bes',
+      certificateInstalled: !!activeCert,
+      environment: activeCert?.environment || 'PRUEBAS',
+      endpoints: {
+        recepcion: 'SOAP directo SRI',
+        autorizacion: 'SOAP directo SRI',
+        firma: 'XAdES-BES nativo en servidor'
+      }
     });
   } catch (err: any) {
-    return res.status(503).json({
+    return res.status(500).json({
       ok: false,
-      message: `Fallo de conexión con microservicio Java: ${err.message}`,
+      message: `Error al verificar estado del motor SRI: ${err.message}`,
     });
   }
 }
+

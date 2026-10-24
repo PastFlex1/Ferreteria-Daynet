@@ -137,8 +137,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     fetchCertificateStatus();
   }, []);
 
-  // Java Backend API URL State
-  const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', 'http://localhost:8081/api/sri');
+  // SRI Native Backend API URL State
+  const [sriApiUrl, setSriApiUrl] = usePostgresSync<string>('ferreteria_settings_sri_api_url', '/api/sri');
   const [isTestingBackend, setIsTestingBackend] = useState(false);
   const [backendStatus, setBackendStatus] = useState<{ tested: boolean; ok: boolean; message: string }>({
     tested: false,
@@ -1917,16 +1917,16 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                 <div className="md:col-span-2 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase">URL del Backend Local Java (Spring Boot)</label>
-                    <span className="text-[10px] font-mono text-cyan-400">
-                      Puerto predeterminado: :8081 / :8080
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Motor de Facturación SRI (Nativo Node.js / Express)</label>
+                    <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                      Fusión Completa: Integrado en puerto 5000 (Sin Java)
                     </span>
                   </div>
                   <input
                     type="text"
                     value={sriApiUrl}
                     onChange={(e) => setSriApiUrl(e.target.value)}
-                    placeholder="http://localhost:8081/api/sri"
+                    placeholder="/api/sri"
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-cyan-500"
                   />
                 </div>
@@ -1939,7 +1939,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                     className="w-full px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isTestingBackend ? 'animate-spin' : ''}`} />
-                    <span>{isTestingBackend ? 'Probando...' : 'Probar Conexión'}</span>
+                    <span>{isTestingBackend ? 'Verificando...' : 'Verificar Motor SRI'}</span>
                   </button>
 
                   <button
@@ -1956,13 +1956,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </div>
 
             {/* Technical Information Box */}
-            <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl space-y-2 text-xs text-slate-300">
-              <h4 className="font-bold text-blue-400 flex items-center gap-1.5">
+            <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl space-y-2 text-xs text-slate-300">
+              <h4 className="font-bold text-emerald-400 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4" />
-                <span>¿Cómo funciona el firmado digital y la transmisión al SRI?</span>
+                <span>Motor SRI Unificado (Arquitectura Nativa 100% en Node.js)</span>
               </h4>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                El ERP genera el XML de la factura con la <strong>Clave de Acceso de 49 dígitos (Módulo 11)</strong> y se comunica con su backend Java en <code>{sriApiUrl || 'http://localhost:8081/api/sri'}</code>. El backend firma el XML con su certificado digital <strong>PKCS#12 (.p12 en Base64)</strong> bajo el estándar <strong>XAdES-BES</strong> y lo envía a los Web Services del SRI tanto en ambiente de <strong>Pruebas</strong> como de <strong>Producción</strong>.
+                El ERP genera el XML de la factura con la <strong>Clave de Acceso de 49 dígitos (Módulo 11)</strong> y ejecuta la firma digital <strong>XAdES-BES</strong> directamente en el backend principal Node.js con su certificado <strong>.p12 (AES-256)</strong>. Los comprobantes se transmiten de forma directa vía <strong>SOAP nativo</strong> a los Web Services del SRI (RecepcionComprobantesOffline y AutorizacionComprobantesOffline) tanto en ambiente de <strong>Pruebas</strong> como de <strong>Producción</strong>, sin requerir Java ni microservicios adicionales en ejecución.
               </p>
             </div>
 

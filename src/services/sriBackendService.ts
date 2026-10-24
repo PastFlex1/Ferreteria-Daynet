@@ -54,26 +54,21 @@ export function isSecuencialAlreadyRegistered(rawResponse?: string, errorMsg?: s
 }
 
 export class SriBackendService {
-  private static defaultBaseUrl = 'http://localhost:8081';
+  private static defaultBaseUrl = '/api/sri';
 
   public static getBaseUrl(): string {
     const saved = localStorage.getItem('ferreteria_sri_api_url');
-    let target = this.defaultBaseUrl;
-    if (saved && saved.trim() !== '') {
-      target = saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
+    if (saved && saved.trim() !== '' && !saved.includes('8081') && !saved.includes('8080')) {
+      return saved.trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     }
-    // Si la URL guardada era 8080 pero no responde, usar 8081 como puerto predeterminado del microservicio
-    if (target.includes(':8080')) {
-      target = target.replace(':8080', ':8081');
-    }
-    return target;
+    return getApiUrl('/api/sri');
   }
 
   /**
    * Guarda la URL base configurada para el backend local.
    */
   public static setBaseUrl(url: string) {
-    const cleanUrl = (url || 'http://localhost:8081').trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
+    const cleanUrl = (url || '/api/sri').trim().replace(/\/$/, '').replace(/\/api\/sri\/?$/, '');
     localStorage.setItem('ferreteria_sri_api_url', cleanUrl);
   }
 

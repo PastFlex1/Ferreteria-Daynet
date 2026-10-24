@@ -1,7 +1,7 @@
 import { getDatabase } from '../config/db';
 import { broadcastSse } from '../controllers/sync.controller';
 import { SriQueueRecord } from '../controllers/sriQueue.controller';
-import { getSriJavaBaseUrl } from '../controllers/sri.controller';
+import { sendSriAutorizacion } from './sriSoapClient';
 
 let workerIntervalId: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -44,28 +44,18 @@ export async function processSriQueueBatch() {
         };
 
         try {
-          const javaBase = await getSriJavaBaseUrl();
-          const res = await fetch(`${javaBase}/api/sri/autorizacion/${claveAcceso}`, {
-            headers: { 'Accept': 'text/plain, application/xml, application/json' },
-            signal: AbortSignal.timeout(6000)
-          });
+          const soapRes = await sendSriAutorizacion(claveAcceso, undefined, 10000);
+          authResult.rawText = soapRes.rawResponse;
 
-          if (res.ok) {
-            const text = await res.text();
-            authResult.rawText = text;
-
-            if (text.includes('AUTORIZADO') && !text.includes('NO AUTORIZADO')) {
-              authResult.isAuthorized = true;
-              const authNumMatch = text.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
-              const authDateMatch = text.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
-              authResult.authNumber = authNumMatch ? authNumMatch[1] : claveAcceso;
-              authResult.authDate = authDateMatch ? authDateMatch[1] : new Date().toISOString();
-            } else if (text.includes('DEVUELTA') || text.includes('NO AUTORIZADO')) {
-              authResult.isDevuelta = true;
-            }
+          if (soapRes.estado === 'AUTORIZADO') {
+            authResult.isAuthorized = true;
+            authResult.authNumber = soapRes.numeroAutorizacion || claveAcceso;
+            authResult.authDate = soapRes.fechaAutorizacion || new Date().toISOString();
+          } else if (soapRes.estado === 'DEVUELTA' || soapRes.estado === 'NO AUTORIZADO') {
+            authResult.isDevuelta = true;
           }
         } catch (fetchErr) {
-          // El servicio Java o el SRI no están respondiendo en este tick.
+          // El SRI no está respondiendo en este tick.
           // El worker no falla y reintentará en el próximo ciclo sin duplicar secuenciales.
         }
 
