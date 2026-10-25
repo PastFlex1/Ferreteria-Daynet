@@ -687,7 +687,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         return acc + (isInput ? m.qty : -m.qty);
       }, 0);
 
-      const initialEstimatedQty = Math.max(0, currentStock - netDelta);
+      const initialEstimatedQty = currentStock - netDelta;
       let runningQty = initialEstimatedQty;
       let runningCost = initialCost || 0;
 
@@ -704,7 +704,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           runningQty = stockNuevo;
           runningCost = runningQty > 0 ? (prevTotalValue + (cantidad * effectiveCost)) / runningQty : effectiveCost;
         } else {
-          stockNuevo = Math.max(0, stockAnt - cantidad);
+          stockNuevo = stockAnt - cantidad;
           runningQty = stockNuevo;
         }
 

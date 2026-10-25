@@ -85,9 +85,9 @@ export async function createAdjustment(req: AuthenticatedRequest, res: Response)
     let newStock = currentStock;
 
     if (adjustmentType === 'POSITIVO' || adjustmentType === 'INGRESO') {
-      newStock = currentStock + qty;
+      newStock = Number((currentStock + qty).toFixed(2));
     } else {
-      newStock = Math.max(0, currentStock - qty);
+      newStock = Number((currentStock - qty).toFixed(2));
     }
 
     await client.query(

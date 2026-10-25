@@ -319,6 +319,7 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredProducts.map((product) => {
               const isLowStock = product.stock <= product.minStock;
+              const isNegativeStock = product.stock < 0;
               const isOutStock = product.stock <= 0;
               const isJustAdded = addedProductId === product.id;
               const stockMax = Math.max(product.minStock * 3, 20);
@@ -333,10 +334,12 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutStock && handleAddClick(product)}
+                  onClick={() => handleAddClick(product)}
                   className={`group relative bg-white border rounded-2xl p-3.5 flex flex-col justify-between transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md ${
-                    isOutStock
-                      ? 'border-slate-200 opacity-60 pointer-events-none'
+                    isNegativeStock
+                      ? 'border-rose-300 ring-1 ring-rose-200 hover:border-rose-500 bg-rose-50/20'
+                      : isOutStock
+                      ? 'border-slate-200 hover:border-orange-400 bg-slate-50/40'
                       : promo
                       ? 'border-amber-300 ring-2 ring-amber-400/30 bg-gradient-to-b from-amber-50/40 to-white'
                       : isLowStock
@@ -461,7 +464,6 @@ export const ProductSearch: React.FC<ProductSearchProps> = ({
                           e.stopPropagation();
                           handleAddClick(product);
                         }}
-                        disabled={isOutStock}
                         className={`inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shadow-sm ${
                           isJustAdded
                             ? 'bg-emerald-500 text-white scale-105'

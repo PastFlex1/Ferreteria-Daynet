@@ -3683,7 +3683,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   adjustRows.map((row) => {
                     const nuevoStock = adjustMovementType === 'INGRESO'
                       ? row.currentStock + row.adjustQty
-                      : Math.max(0, row.currentStock - row.adjustQty);
+                      : row.currentStock - row.adjustQty;
 
                     return (
                       <tr key={row.productId} className="hover:bg-slate-50/80 transition">

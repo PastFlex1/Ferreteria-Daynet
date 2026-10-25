@@ -794,7 +794,7 @@ export default function App() {
   const handleStockAdjust = (productId: string, adjustmentQty: number) => {
     setProducts((prev) =>
       prev.map((p) =>
-        p.id === productId ? { ...p, stock: Math.max(0, p.stock + adjustmentQty) } : p
+        p.id === productId ? { ...p, stock: Math.round((p.stock + adjustmentQty) * 10000) / 10000 } : p
       )
     );
   };
@@ -1022,8 +1022,8 @@ export default function App() {
           {(activeTab === 'CAJA') && (
             <BillingTerminal
               products={products}
-
-            customers={allCustomers}
+              onSaveProduct={handleSaveProduct}
+              customers={allCustomers}
             settings={settings}
             categories={categories}
             promotions={promotions}

@@ -181,12 +181,11 @@ async function runMigration() {
       ALTER TABLE productos 
       ADD CONSTRAINT chk_productos_cost CHECK (cost_price >= 0),
       ADD CONSTRAINT chk_productos_price CHECK (sale_price >= 0),
-      ADD CONSTRAINT chk_productos_stock CHECK (stock >= 0),
       ADD CONSTRAINT chk_productos_min_stock CHECK (min_stock >= 0),
       ADD CONSTRAINT chk_productos_iva CHECK (iva_rate >= 0),
       ADD CONSTRAINT chk_productos_status CHECK (status IN ('Activo', 'Inactivo', 'Agotado', 'Descontinuado'));
     `);
-    console.log('  ✓ CHECKs aplicados en productos (precios >= 0, stock >= 0, estados)');
+    console.log('  ✓ CHECKs aplicados en productos (precios >= 0, soporte de stock negativo, estados)');
 
     // 4.2 facturas_ventas
     await client.query(`
@@ -242,10 +241,9 @@ async function runMigration() {
       ADD CONSTRAINT chk_kardex_quantity CHECK (quantity != 0),
       ADD CONSTRAINT chk_kardex_cost CHECK (cost_unit >= 0),
       ADD CONSTRAINT chk_kardex_total CHECK (total_cost >= 0),
-      ADD CONSTRAINT chk_kardex_stock_balance CHECK (stock_balance >= 0),
       ADD CONSTRAINT chk_kardex_type CHECK (type IN ('INGRESO', 'EGRESO', 'AJUSTE', 'VENTA', 'COMPRA', 'DEVOLUCION'));
     `);
-    console.log('  ✓ CHECKs aplicados en kardex_movimientos (costos, balance y tipos)');
+    console.log('  ✓ CHECKs aplicados en kardex_movimientos (costos, balance con soporte de negativos y tipos)');
 
     // 4.5 clientes
     await client.query(`

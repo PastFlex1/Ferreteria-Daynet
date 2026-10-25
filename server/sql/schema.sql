@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS productos (
     unit TEXT DEFAULT 'UND',
     cost_price REAL DEFAULT 0.0000 CHECK (cost_price >= 0),
     sale_price REAL NOT NULL DEFAULT 0.0000 CHECK (sale_price >= 0),
-    stock REAL NOT NULL DEFAULT 0.00 CHECK (stock >= 0),
+    stock REAL NOT NULL DEFAULT 0.00,
     min_stock REAL DEFAULT 5.00 CHECK (min_stock >= 0),
     has_iva INTEGER DEFAULT 1,
     iva_rate REAL DEFAULT 15.00 CHECK (iva_rate >= 0),
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS kardex_movimientos (
     quantity REAL NOT NULL CHECK (quantity != 0),
     cost_unit REAL NOT NULL CHECK (cost_unit >= 0),
     total_cost REAL NOT NULL CHECK (total_cost >= 0),
-    stock_balance REAL NOT NULL CHECK (stock_balance >= 0),
+    stock_balance REAL NOT NULL,
     document_ref TEXT,
     user_id TEXT REFERENCES usuarios_sistema(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT (datetime('now', 'localtime'))

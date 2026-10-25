@@ -85,6 +85,7 @@ interface BillingTerminalProps {
   paymentMethods?: PaymentMethodItem[];
   isCashRegisterOpen?: boolean;
   onOpenCashRegister?: (initialCash: number) => void;
+  onSaveProduct?: (product: Product) => void;
 }
 
 interface DecimalInputProps {
@@ -205,6 +206,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   paymentMethods,
   isCashRegisterOpen = true,
   onOpenCashRegister,
+  onSaveProduct,
 }) => {
   const { showToast, showAlert } = useModal();
   const { can } = usePermissions();
@@ -318,10 +320,14 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const [openCashAmount, setOpenCashAmount] = useState('0.00');
   const pendingEmissionActionRef = useRef<boolean>(false);
 
-  // Quick custom item form
+  // Quick custom item / direct product form
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('10.00');
+  const [customCostPrice, setCustomCostPrice] = useState('7.00');
   const [customQty, setCustomQty] = useState('1');
+  const [customStock, setCustomStock] = useState('0');
+  const [customCategory, setCustomCategory] = useState(categories && categories.length > 0 ? categories[0].name : 'Herramientas Manuales');
+  const [customUnit, setCustomUnit] = useState('UND');
   const [customTaxRate, setCustomTaxRate] = useState<number>(settings.defaultTaxRate || 15);
 
   const [isDocTypeDropdownOpen, setIsDocTypeDropdownOpen] = useState(false);
@@ -804,7 +810,9 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     setTaxDropdownPos(null);
     setCustomName('');
     setCustomPrice('10.00');
+    setCustomCostPrice('7.00');
     setCustomQty('1');
+    setCustomStock('0');
     setCustomTaxRate(settings.defaultTaxRate || 15);
 
     // Desvincular pedido y limpiar cotización o pedido precargado en App.tsx
@@ -814,38 +822,62 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     showToast('Terminal restablecido. Se han limpiado todos los datos.', 'success');
   };
 
-  // Add custom manual line item
+  // Add product directly from POS and reflect it into real inventory
   const handleAddCustomItemSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim()) return;
 
     const price = parseFloat(customPrice) || 0;
+    const cost = parseFloat(customCostPrice) || Math.round(price * 0.7 * 100) / 100;
     const qty = parseFloat(customQty) || 1;
+    const initialStock = parseFloat(customStock) || 0;
     const tax = customTaxRate;
+    const timestamp = Date.now();
+    const sku = `DIR-${timestamp.toString().slice(-4)}`;
 
-    const customProduct: Product = {
-      id: `custom-item-${Date.now()}`,
-      sku: `MISC-${Date.now().toString().slice(-4)}`,
+    const newProduct: Product = {
+      id: `prod-direct-${timestamp}`,
+      sku: sku,
       name: customName.trim(),
-      description: 'Ítem personalizado',
-      category: 'Herramientas Manuales',
+      description: customName.trim(),
+      category: customCategory || 'Herramientas Manuales',
       price: price,
-      costPrice: price * 0.7,
-      stock: 999,
+      costPrice: cost,
+      stock: initialStock, // Stock real ingresado por el cajero/usuario, sin 999 por defecto
       minStock: 1,
-      unit: 'UND',
+      unit: customUnit || 'UND',
       taxRate: tax,
       barcode: '',
       allowFractional: false,
-      isCustom: true,
+      isCustom: false,
     };
 
-    handleAddToCart(customProduct, qty);
+    // 1. Guardar y reflejar en inventario
+    if (onSaveProduct) {
+      onSaveProduct(newProduct);
+    }
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('ferreteria_auth_token') : null;
+      fetch(getApiUrl('/api/products'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(newProduct)
+      }).catch(() => {});
+    } catch {}
+
+    // 2. Agregar a la venta actual
+    handleAddToCart(newProduct, qty);
+
     setCustomName('');
     setCustomPrice('10.00');
+    setCustomCostPrice('7.00');
     setCustomQty('1');
+    setCustomStock('0');
     setIsQuickCustomItemOpen(false);
-    showToast(`Ítem "${customName}" agregado a la orden.`, 'success');
+    showToast(`Producto "${newProduct.name}" registrado en inventario (Stock inicial: ${initialStock} ${newProduct.unit}) y añadido a la venta.`, 'success');
   };
 
   // Fast customer filtering
@@ -983,18 +1015,26 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         : undefined),
     };
 
-    // Deduct stock for active sales (not quote)
-    const updatedProducts = products.map((prod) => {
-      if (documentType === 'COTIZACION') return prod;
-      const soldItem = cartItems.find((item) => item.product.id === prod.id);
-      if (soldItem) {
-        return {
-          ...prod,
-          stock: Math.max(0, prod.stock - soldItem.quantity),
-        };
-      }
-      return prod;
-    });
+    // Deduct stock for active sales (support negative stock)
+    const updatedProducts = [...products];
+    if (documentType !== 'COTIZACION') {
+      cartItems.forEach((item) => {
+        const idx = updatedProducts.findIndex((p) => p.id === item.product.id);
+        if (idx >= 0) {
+          const currentStock = updatedProducts[idx].stock;
+          updatedProducts[idx] = {
+            ...updatedProducts[idx],
+            stock: Math.round((currentStock - item.quantity) * 10000) / 10000,
+          };
+        } else {
+          // Si el producto fue creado directo en caja y aún no se reflejó por re-render en props
+          updatedProducts.unshift({
+            ...item.product,
+            stock: Math.round((item.product.stock - item.quantity) * 10000) / 10000,
+          });
+        }
+      });
+    }
 
     // Increment document number
     const updatedSettings = { ...settings };
@@ -1020,10 +1060,26 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
     // Callback
     onInvoiceCreated(newInvoice, updatedProducts, updatedSettings);
 
-    // Reset Form
+    // Reset Form y REGRESAR INMEDIATAMENTE A CONSUMIDOR FINAL TRAS FACTURAR
     setCartItems([]);
     setCashAmountTendered('');
     setPaymentReference('');
+    const defaultCustomer: Customer = customers.find(
+      (c) => c.docNumber === '9999999999999' || c.name.toUpperCase().includes('CONSUMIDOR FINAL')
+    ) || customers[0] || {
+      id: 'cf-default',
+      name: 'CONSUMIDOR FINAL',
+      docType: 'C.I.',
+      docNumber: '9999999999999',
+      email: 'consumidorfinal@sri.gob.ec',
+      phone: '9999999999',
+      address: 'ECUADOR',
+      creditLimit: 0,
+      currentBalance: 0,
+    };
+    setSelectedCustomer(defaultCustomer);
+    setCustomerSearch('');
+    setIsCustomerDropdownOpen(false);
     onClearInitialData?.();
     onCancelInvoicingOrder?.();
 
@@ -2577,61 +2633,160 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
         </div>
       )}
 
-      {/* ── MODAL: AGREGAR ÍTEM MANUAL RÁPIDO ───────────────────────────────── */}
+      {/* ── MODAL: REGISTRAR PRODUCTO DIRECTO EN CAJA E INVENTARIO ──────────── */}
       {isQuickCustomItemOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-scaleUp">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-scaleUp">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-emerald-600" />
-                <span>Agregar Ítem o Servicio Personalizado</span>
-              </h3>
+              <div>
+                <h3 className="text-base font-black text-slate-950 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200/60">
+                    <Plus className="w-4 h-4 stroke-[2.5]" />
+                  </div>
+                  <span>Registrar Producto Directo en Caja</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Se guardará formalmente en el inventario con su stock real y se agregará a la venta.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsQuickCustomItemOpen(false)}
-                className="text-slate-400 hover:text-slate-700"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddCustomItemSubmit} className="space-y-3 text-xs">
+            <form onSubmit={handleAddCustomItemSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Descripción del Ítem / Servicio *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre / Descripción del Producto *
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej: Mano de obra instalación eléctrica"
+                  placeholder="Ej: Disco de corte fino 4 1/2 Dewalt"
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   autoFocus
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Precio Unit. ($)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Categoría</label>
+                  <select
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer"
+                  >
+                    {categories && categories.length > 0 ? (
+                      categories.map((c) => (
+                        <option key={c.id || c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="Herramientas Manuales">Herramientas Manuales</option>
+                        <option value="Materiales de Construcción">Materiales de Construcción</option>
+                        <option value="Pinturas y Acabados">Pinturas y Acabados</option>
+                        <option value="Fijaciones y Tornillería">Fijaciones y Tornillería</option>
+                        <option value="General">General</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Unidad de Medida</label>
+                  <select
+                    value={customUnit}
+                    onChange={(e) => setCustomUnit(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="UND">UND (Unidades)</option>
+                    <option value="PZA">PZA (Piezas)</option>
+                    <option value="KG">KG (Kilogramos)</option>
+                    <option value="MTR">MTR (Metros)</option>
+                    <option value="LTR">LTR (Litros)</option>
+                    <option value="GLN">GLN (Galones)</option>
+                    <option value="CJA">CJA (Cajas)</option>
+                    <option value="PAQ">PAQ (Paquetes)</option>
+                    <option value="JGO">JGO (Juegos)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">P. Venta ($) *</label>
                   <input
                     type="text"
                     inputMode="decimal"
                     required
+                    placeholder="10.00"
                     value={customPrice}
                     onChange={(e) => {
                       const clean = e.target.value.replace(',', '.');
                       if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
                         setCustomPrice(clean);
+                        const p = parseFloat(clean);
+                        if (!isNaN(p)) {
+                          setCustomCostPrice((Math.round(p * 0.7 * 100) / 100).toString());
+                        }
                       }
                     }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Costo ($)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="7.00"
+                    value={customCostPrice}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(',', '.');
+                      if (/^[0-9]*\.?[0-9]*$/.test(clean)) {
+                        setCustomCostPrice(clean);
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-700 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1" title="Stock actual disponible en existencias reales">
+                    Stock Inicial
+                  </label>
                   <input
                     type="text"
                     inputMode="decimal"
                     required
+                    placeholder="0"
+                    value={customStock}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(',', '.');
+                      if (/^-?[0-9]*\.?[0-9]*$/.test(clean)) {
+                        setCustomStock(clean);
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-emerald-700 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">A Facturar</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    placeholder="1"
                     value={customQty}
                     onChange={(e) => {
                       const clean = e.target.value.replace(',', '.');
@@ -2639,31 +2794,39 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         setCustomQty(clean);
                       }
                     }}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-orange-600 focus:bg-white focus:ring-2 focus:ring-orange-500 focus:outline-none"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tarifa IVA</label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {[15, 5, 0].map((rate) => (
-                      <button
-                        key={rate}
-                        type="button"
-                        onClick={() => setCustomTaxRate(rate)}
-                        className={`py-2 px-1 text-xs font-black rounded-xl border transition cursor-pointer text-center ${
-                          customTaxRate === rate
-                            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white border-orange-500 shadow-xs'
-                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        {rate}%
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tarifa IVA</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[15, 5, 0].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => setCustomTaxRate(rate)}
+                      className={`py-2 px-1 text-xs font-black rounded-xl border transition cursor-pointer text-center ${
+                        customTaxRate === rate
+                          ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white border-orange-500 shadow-xs'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {rate}% {rate === 15 ? '(General)' : rate === 5 ? '(Construcción)' : '(0% Sin IVA)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 text-[11px] text-amber-900 flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  El producto se registrará en inventario con <strong>{customStock || '0'} {customUnit}</strong> y quedará registrado formalmente en el sistema.
+                </span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsQuickCustomItemOpen(false)}
@@ -2673,9 +2836,10 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl shadow-md cursor-pointer"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl shadow-md cursor-pointer transition flex items-center gap-1.5"
                 >
-                  Agregar a Detalle
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <span>Guardar en Inventario y Facturar</span>
                 </button>
               </div>
             </form>

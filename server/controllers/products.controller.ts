@@ -117,7 +117,7 @@ export async function createProduct(req: AuthenticatedRequest, res: Response) {
     const unit = p.unit || 'UND';
     const costPrice = Math.max(0, Number(p.costPrice ?? p.cost ?? 0));
     const salePrice = Math.max(0, Number(p.price ?? p.sale_price ?? 0));
-    const stock = Math.max(0, Number(p.stock ?? 0));
+    const stock = Number(p.stock ?? 0);
     const minStock = Math.max(0, Number(p.minStock ?? p.min_stock ?? 5));
     const hasIva = p.has_iva !== undefined ? Boolean(p.has_iva) : (p.taxRate !== undefined ? Number(p.taxRate) > 0 : true);
     const ivaRate = Math.max(0, Number(p.taxRate ?? p.iva_rate ?? 15));
@@ -188,7 +188,7 @@ export async function updateProduct(req: AuthenticatedRequest, res: Response) {
     const unit = updates.unit !== undefined ? updates.unit : current.unit;
     const costPrice = updates.costPrice !== undefined ? Math.max(0, Number(updates.costPrice)) : (updates.cost !== undefined ? Math.max(0, Number(updates.cost)) : current.cost_price);
     const salePrice = updates.price !== undefined ? Math.max(0, Number(updates.price)) : (updates.sale_price !== undefined ? Math.max(0, Number(updates.sale_price)) : current.sale_price);
-    const stock = updates.stock !== undefined ? Math.max(0, Number(updates.stock)) : current.stock;
+    const stock = updates.stock !== undefined ? Number(updates.stock) : current.stock;
     const minStock = updates.minStock !== undefined ? Math.max(0, Number(updates.minStock)) : current.min_stock;
     const hasIva = updates.has_iva !== undefined ? Boolean(updates.has_iva) : current.has_iva;
     const ivaRate = updates.taxRate !== undefined ? Math.max(0, Number(updates.taxRate)) : (updates.iva_rate !== undefined ? Math.max(0, Number(updates.iva_rate)) : current.iva_rate);

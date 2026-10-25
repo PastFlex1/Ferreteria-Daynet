@@ -323,7 +323,7 @@ export async function createInvoice(req: AuthenticatedRequest, res: Response) {
           const product = prodRes.rows[0];
           const qty = Math.max(0.01, Number(item.quantity ?? 1));
           const currentStock = Number(product.stock);
-          const newStock = Math.max(0, Number((currentStock - qty).toFixed(2)));
+          const newStock = Number((currentStock - qty).toFixed(2));
           const unitCost = Number(product.cost_price);
           const totalCost = Number((qty * unitCost).toFixed(4));
 
