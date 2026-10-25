@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
+import { loadCertificate } from 'sri-ec';
 import { getDatabase, getPgPool } from '../config/db';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { logAuditEvent } from './audit.controller';
@@ -112,6 +113,17 @@ export async function uploadCertificate(req: AuthenticatedRequest, res: Response
       return res.status(400).json({
         success: false,
         message: 'Certificado .p12 (Base64) y contraseña son requeridos.'
+      });
+    }
+
+    // Validar integridad del certificado .p12 y la contraseña
+    try {
+      const p12Buffer = Buffer.from(p12Base64, 'base64');
+      loadCertificate(new Uint8Array(p12Buffer), String(password).trim());
+    } catch (certValidationErr: any) {
+      return res.status(400).json({
+        success: false,
+        message: `El archivo .p12 o la contraseña son inválidos: ${certValidationErr.message || 'Error de lectura'}`
       });
     }
 

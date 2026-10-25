@@ -6,6 +6,7 @@
 
 import crypto from 'crypto';
 import forge from 'node-forge';
+import { loadCertificate, XadesSigner } from 'sri-ec';
 
 export interface SignXmlOptions {
   xml: string;
@@ -212,11 +213,7 @@ export function signXmlXadesBes(options: SignXmlOptions): string {
     throw new Error('Parámetros incompletos para firma digital: se requiere xml, p12Base64 y password.');
   }
 
-  // 1. Extraer certificado y claves
-  const certData = extractPkcs12(p12Base64, password);
-
-  // 2. Preparar el XML base
-  // Asegurar que el elemento raíz contenga id="comprobante"
+  // 1. Preparar el XML base asegurando que el elemento raíz contenga id="comprobante"
   let cleanXml = xml.trim();
   cleanXml = cleanXml.replace(/<\?xml[^>]*\?>\s*/gi, '');
 
@@ -229,7 +226,6 @@ export function signXmlXadesBes(options: SignXmlOptions): string {
   let rootAttributes = rootMatch[2];
 
   if (!/id\s*=\s*["']comprobante["']/i.test(rootAttributes)) {
-    // Si tiene otro id, reemplazarlo o agregarlo
     if (/id\s*=\s*["'][^"']*["']/i.test(rootAttributes)) {
       rootAttributes = rootAttributes.replace(/id\s*=\s*["'][^"']*["']/i, 'id="comprobante"');
     } else {
@@ -238,65 +234,19 @@ export function signXmlXadesBes(options: SignXmlOptions): string {
     cleanXml = `<${rootTag}${rootAttributes}>` + cleanXml.substring(rootMatch[0].length);
   }
 
-  // 3. Identificadores únicos para este documento firmado
-  const sigNumber = randomInt();
-  const certNumber = randomInt();
-  const refNumber = randomInt();
-  const objNumber = randomInt();
-
-  // 4. Digest del comprobante completo (Referencia a #comprobante con transform Enveloped)
-  const canonicalComprobante = canonicalizeXml(cleanXml);
-  const comprobanteDigest = sha1Base64(canonicalComprobante);
-
-  // 5. Estructurar KeyInfo y su Digest (incluyendo toda la cadena de certificados para validar confianza)
-  const x509CertsXml = certData.allCertificatesBase64
-    .map(c => `<ds:X509Certificate>${c}</ds:X509Certificate>`)
-    .join('\n');
-
-  const keyInfoXml = `<ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="Certificate${certNumber}"><ds:X509Data>${x509CertsXml}</ds:X509Data><ds:KeyValue><ds:RSAKeyValue><ds:Modulus>${certData.modulusBase64}</ds:Modulus><ds:Exponent>${certData.exponentBase64}</ds:Exponent></ds:RSAKeyValue></ds:KeyValue></ds:KeyInfo>`;
-  const canonicalKeyInfo = canonicalizeXml(keyInfoXml);
-  const keyInfoDigest = sha1Base64(canonicalKeyInfo);
-
-  // 6. Estructurar SignedProperties y su Digest
-  const signingTime = getSigningTimeIso();
-  const signedPropertiesXml = `<etsi:SignedProperties xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" Id="SignedProperties${sigNumber}"><etsi:SignedSignatureProperties><etsi:SigningTime>${signingTime}</etsi:SigningTime><etsi:SigningCertificate><etsi:Cert><etsi:CertDigest><ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod><ds:DigestValue>${certData.certDigestBase64}</ds:DigestValue></etsi:CertDigest><etsi:IssuerSerial><ds:X509IssuerName>${certData.issuerName}</ds:X509IssuerName><ds:X509SerialNumber>${certData.serialNumber}</ds:X509SerialNumber></etsi:IssuerSerial></etsi:Cert></etsi:SigningCertificate></etsi:SignedSignatureProperties><etsi:SignedDataObjectProperties><etsi:DataObjectFormat ObjectReference="#Reference-ID-${refNumber}"><etsi:Description>contenido comprobante</etsi:Description><etsi:MimeType>text/xml</etsi:MimeType></etsi:DataObjectFormat></etsi:SignedDataObjectProperties></etsi:SignedProperties>`;
-  const canonicalSignedProperties = canonicalizeXml(signedPropertiesXml);
-  const signedPropertiesDigest = sha1Base64(canonicalSignedProperties);
-
-  // 7. Estructurar SignedInfo
-  const signedInfoXml = `<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" Id="Signature-SignedInfo${sigNumber}"><ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:CanonicalizationMethod><ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"></ds:SignatureMethod><ds:Reference Id="SignedPropertiesID${sigNumber}" Type="http://uri.etsi.org/01903#SignedProperties" URI="#SignedProperties${sigNumber}"><ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod><ds:DigestValue>${signedPropertiesDigest}</ds:DigestValue></ds:Reference><ds:Reference URI="#Certificate${certNumber}"><ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod><ds:DigestValue>${keyInfoDigest}</ds:DigestValue></ds:Reference><ds:Reference Id="Reference-ID-${refNumber}" URI="#comprobante"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"></ds:DigestMethod><ds:DigestValue>${comprobanteDigest}</ds:DigestValue></ds:Reference></ds:SignedInfo>`;
-  const canonicalSignedInfo = canonicalizeXml(signedInfoXml);
-
-  // 8. Firmar SignedInfo con RSA-SHA1 usando la clave privada
-  const signer = crypto.createSign('RSA-SHA1');
-  signer.update(canonicalSignedInfo, 'utf8');
-  const signatureValue = signer.sign(certData.privateKeyPem, 'base64');
-
-  // Formatear SignatureValue en líneas de 76 caracteres (estándar PEM/XMLDSig)
-  const formattedSignatureValue = signatureValue.match(/.{1,76}/g)?.join('\n') || signatureValue;
-
-  // 9. Ensamblar la firma ds:Signature completa con QualifyingProperties explícito (Exigencia XAdES-BES del SRI)
-  const qualifyingPropertiesXml = `<etsi:QualifyingProperties Target="#Signature${sigNumber}">${signedPropertiesXml}</etsi:QualifyingProperties>`;
-
-  const signatureBlock = `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:etsi="http://uri.etsi.org/01903/v1.3.2#" Id="Signature${sigNumber}">
-${signedInfoXml}
-<ds:SignatureValue Id="SignatureValue${sigNumber}">
-${formattedSignatureValue}
-</ds:SignatureValue>
-${keyInfoXml.replace('xmlns:ds="http://www.w3.org/2000/09/xmldsig#"', '')}
-<ds:Object Id="Signature${sigNumber}-Object${objNumber}">${qualifyingPropertiesXml}</ds:Object></ds:Signature>`;
-
-  // 10. Insertar antes del cierre de la etiqueta raíz
-  const closingTag = `</${rootTag}>`;
-  const lastIndex = cleanXml.lastIndexOf(closingTag);
-  if (lastIndex === -1) {
-    throw new Error(`No se encontró la etiqueta de cierre ${closingTag} en el comprobante.`);
+  // 2. Cargar certificado digital PKCS#12 (.p12) y firmar con XAdES-BES certificado
+  try {
+    const p12Buffer = Buffer.from(p12Base64, 'base64');
+    const cert = loadCertificate(new Uint8Array(p12Buffer), password);
+    const signer = new XadesSigner({
+      digestAlgorithm: 'sha1',
+      description: 'contenido comprobante'
+    });
+    const signedXml = signer.sign(cleanXml, cert);
+    return signedXml;
+  } catch (signerError: any) {
+    console.warn('[sriSigner] Error en motor XadesSigner:', signerError.message);
+    throw new Error(`Error en firma digital XAdES-BES: ${signerError.message}`);
   }
-
-  const finalSignedXml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    cleanXml.substring(0, lastIndex) +
-    signatureBlock +
-    closingTag;
-
-  return finalSignedXml;
 }
+
