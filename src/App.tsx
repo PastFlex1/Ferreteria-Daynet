@@ -401,6 +401,24 @@ export default function App() {
       }
     }
   }, [customers, setCustomers]);
+
+  // Auto-corregir tarifas de IVA que hayan sido guardadas en formato decimal (ej: 0.15 -> 15%)
+  useEffect(() => {
+    if (products && products.length > 0) {
+      const needsFix = products.some(p => typeof p.taxRate === 'number' && p.taxRate > 0 && p.taxRate <= 1);
+      if (needsFix) {
+        setProducts(products.map(p => {
+          if (typeof p.taxRate === 'number' && p.taxRate > 0 && p.taxRate <= 1) {
+            return {
+              ...p,
+              taxRate: Math.round(p.taxRate * 100 * 100) / 100,
+            };
+          }
+          return p;
+        }));
+      }
+    }
+  }, [products, setProducts]);
   const [invoices, setInvoices] = usePostgresSync<Invoice[]>('ferreteria_invoices', initialInvoices);
   const [orders, setOrders] = usePostgresSync<Order[]>('ferreteria_orders', []);
   const [posInvoicingOrder, setPosInvoicingOrder] = useState<Order | null>(null);

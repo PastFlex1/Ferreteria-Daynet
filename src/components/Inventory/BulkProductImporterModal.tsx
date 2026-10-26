@@ -285,9 +285,14 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
       const price = parseCleanNumber(findVal(['precioventa', 'pvp', 'pventasiniva', 'pventa', 'preciodeventa', 'precio', 'price', 'valor'], ['costo', 'cost', 'compra']));
       const taxValStr = findVal(['tarifaiva', 'iva', 'taxrate', 'tax', 'tarifa']);
       const parsedTax = parseCleanNumber(taxValStr, -1);
-      const taxRate = parsedTax >= 0
+      let taxRate = parsedTax >= 0
         ? parsedTax
         : (typeof settings.defaultTaxRate === 'number' ? settings.defaultTaxRate : 15);
+
+      // Si viene en formato decimal de Excel (ej. 0.15 para 15%, 0.05 para 5%, 0.08 para 8%, 0.12 para 12%)
+      if (taxRate > 0 && taxRate <= 1) {
+        taxRate = Math.round(taxRate * 100 * 100) / 100;
+      }
       const stock = parseCleanNumber(findVal(['stockactual', 'stockinicial', 'stock', 'cantidad', 'existencia', 'existencias', 'qty']));
       const minStock = parseCleanNumber(findVal(['stockminimo', 'stockmin', 'minstock', 'minimo', 'alerta']), 5);
       const location = findVal(['ubicacion', 'ubicacionpasillo', 'pasillo', 'estante', 'bodega', 'location']) || '';

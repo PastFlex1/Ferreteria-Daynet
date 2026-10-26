@@ -307,7 +307,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   const isLowStock = p.stock <= p.minStock;
                   const isOutStock = p.stock <= 0;
                   const marginPct = p.costPrice > 0 ? (((p.price - p.costPrice) / p.costPrice) * 100).toFixed(0) : '100';
-                  const taxRate = (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) / 100;
+                  const rawTaxRate = typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate;
+                  const normalizedTaxRate = rawTaxRate > 0 && rawTaxRate <= 1 ? Math.round(rawTaxRate * 100 * 100) / 100 : rawTaxRate;
+                  const taxRate = normalizedTaxRate / 100;
                   const priceWithTax = p.priceWithTax !== undefined && p.priceWithTax !== null && !isNaN(Number(p.priceWithTax)) && Number(p.priceWithTax) > 0
                     ? Number(p.priceWithTax)
                     : p.price * (1 + taxRate);
@@ -351,7 +353,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         {can('inventory.edit_sale_price') || can('inventory.edit_product') ? (
                           <select
-                            value={typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate}
+                            value={normalizedTaxRate}
                             onChange={(e) => {
                               const newRate = parseFloat(e.target.value);
                               if (!isNaN(newRate)) {
@@ -362,9 +364,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                               }
                             }}
                             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer font-mono outline-none shadow-2xs ${
-                              (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 15
+                              normalizedTaxRate === 15
                                 ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                                : (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 5
+                                : normalizedTaxRate === 5
                                 ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                                 : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
                             }`}
@@ -375,21 +377,21 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                                 {t.rate}% {t.rate === 15 ? '(General)' : t.rate === 5 ? '(Construcción)' : t.rate === 0 ? '(0%)' : ''}
                               </option>
                             ))}
-                            {!availableTaxRates.some(t => t.rate === (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate)) && (
-                              <option value={p.taxRate}>{p.taxRate}%</option>
+                            {!availableTaxRates.some(t => t.rate === normalizedTaxRate) && (
+                              <option value={normalizedTaxRate}>{normalizedTaxRate}%</option>
                             )}
                           </select>
                         ) : (
                           <span
                             className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold font-mono border ${
-                              (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 15
+                              normalizedTaxRate === 15
                                 ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                : (typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate) === 5
+                                : normalizedTaxRate === 5
                                 ? 'bg-amber-50 text-amber-700 border-amber-200'
                                 : 'bg-slate-100 text-slate-700 border-slate-200'
                             }`}
                           >
-                            {typeof p.taxRate === 'number' ? p.taxRate : settings.defaultTaxRate}%
+                            {normalizedTaxRate}%
                           </span>
                         )}
                       </td>
