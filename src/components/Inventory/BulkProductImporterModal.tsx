@@ -148,18 +148,107 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
     showToast('Plantilla CSV descargada.', 'success');
   };
 
+  // ── Helper to extract rows from any worksheet, intelligently detecting header row ──
+  const extractRowsFromWorksheet = (worksheet: XLSX.WorkSheet): any[] => {
+    // 1. Get raw sheet as array of arrays
+    const rawMatrix = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
+    if (!rawMatrix || rawMatrix.length === 0) return [];
+
+    // 2. Identify the true header row index (handling title banners, blank rows, metadata)
+    const commonHeaderTerms = [
+      'sku', 'codigo', 'cod', 'barcode', 'barras',
+      'nombre', 'descripcion', 'producto', 'articulo',
+      'categoria', 'rubro', 'unidad',
+      'costo', 'precio', 'pvp', 'iva',
+      'stock', 'cantidad', 'ubicacion'
+    ];
+
+    let bestHeaderRowIndex = -1;
+    let maxMatchCount = 0;
+
+    // Scan first 15 rows to find the one with the highest concentration of header terms
+    const scanLimit = Math.min(rawMatrix.length, 15);
+    for (let r = 0; r < scanLimit; r++) {
+      const row = rawMatrix[r];
+      if (!Array.isArray(row)) continue;
+
+      let matches = 0;
+      for (const cell of row) {
+        if (cell === null || cell === undefined) continue;
+        const cellClean = String(cell).toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        if (!cellClean) continue;
+        if (commonHeaderTerms.some(term => cellClean.includes(term))) {
+          matches++;
+        }
+      }
+
+      if (matches > maxMatchCount && matches >= 2) {
+        maxMatchCount = matches;
+        bestHeaderRowIndex = r;
+      }
+    }
+
+    // Fallback: If no clear multi-match header found, default to row 0
+    if (bestHeaderRowIndex === -1) {
+      bestHeaderRowIndex = 0;
+    }
+
+    const headerRow = rawMatrix[bestHeaderRowIndex] || [];
+    const headers: string[] = headerRow.map((cell: any, idx: number) => {
+      const val = String(cell || '').trim();
+      return val || `col_${idx}`;
+    });
+
+    const dataRows = rawMatrix.slice(bestHeaderRowIndex + 1);
+    const result: any[] = [];
+
+    for (const row of dataRows) {
+      if (!Array.isArray(row)) continue;
+      // Skip completely empty rows
+      const hasContent = row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== '');
+      if (!hasContent) continue;
+
+      const obj: Record<string, any> = {};
+      headers.forEach((h, colIdx) => {
+        obj[h] = row[colIdx] !== undefined ? row[colIdx] : '';
+      });
+      result.push(obj);
+    }
+
+    return result;
+  };
+
+  // Helper to parse numbers safely (removes currency symbols, handles commas/dots)
+  const parseCleanNumber = (val: any, fallback = 0): number => {
+    if (typeof val === 'number') return isNaN(val) ? fallback : val;
+    if (val === null || val === undefined) return fallback;
+    let str = String(val).trim().replace(/[$€\s%]/g, '');
+    if (!str) return fallback;
+    if (str.includes(',') && !str.includes('.')) {
+      str = str.replace(',', '.');
+    } else if (str.includes(',') && str.includes('.')) {
+      str = str.replace(/,/g, '');
+    }
+    const num = parseFloat(str);
+    return isNaN(num) ? fallback : num;
+  };
+
   // ── Intelligent Row Normalizer ─────────────────────────────────────────────
   const normalizeAndValidateRows = (rawRows: any[]): ParsedRow[] => {
     return rawRows.map((row, index) => {
       const errors: string[] = [];
 
-      // Find value with loose key matching
-      const findVal = (...keys: string[]) => {
+      // Find value with prioritized exact match, then loose key matching with exclusions
+      const findVal = (keys: string[], exclude: string[] = []): string => {
+        const cleanExcludes = exclude.map(ex => ex.toLowerCase().trim().replace(/[^a-z0-9]/g, '')).filter(Boolean);
+
+        // 1. Exact match first
         for (const k of keys) {
+          const cleanTarget = k.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
           for (const rowKey of Object.keys(row)) {
             const cleanKey = rowKey.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            const cleanTarget = k.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            if (cleanKey.includes(cleanTarget) || cleanTarget.includes(cleanKey)) {
+            if (cleanExcludes.some(ex => cleanKey.includes(ex))) continue;
+            if (cleanKey === cleanTarget) {
               const val = row[rowKey];
               if (val !== undefined && val !== null && String(val).trim() !== '') {
                 return String(val).trim();
@@ -167,23 +256,41 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
             }
           }
         }
+
+        // 2. Contains match (target in key, or key in target if key has >= 3 chars)
+        for (const k of keys) {
+          const cleanTarget = k.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+          if (!cleanTarget) continue;
+          for (const rowKey of Object.keys(row)) {
+            const cleanKey = rowKey.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            if (cleanExcludes.some(ex => cleanKey.includes(ex))) continue;
+            if (cleanKey.includes(cleanTarget) || (cleanKey.length >= 3 && cleanTarget.includes(cleanKey))) {
+              const val = row[rowKey];
+              if (val !== undefined && val !== null && String(val).trim() !== '') {
+                return String(val).trim();
+              }
+            }
+          }
+        }
+
         return '';
       };
 
-      const sku = findVal('sku', 'codigo', 'cod', 'referencia') || `PROD-${Date.now()}-${index + 1}`;
-      const barcode = findVal('barcode', 'barras', 'codigobarras', 'ean') || sku;
-      const name = findVal('nombre', 'descripcion', 'name', 'producto', 'articulo');
-      const category = findVal('categoria', 'category', 'rubro', 'grupo') || 'Herramientas Manuales';
-      const unit = findVal('unidad', 'unit', 'medida', 'um') || 'UND';
-      const costPrice = parseFloat(findVal('costo', 'preciocosto', 'costprice', 'cost') || '0') || 0;
-      const price = parseFloat(findVal('precio', 'pvp', 'precioventa', 'price', 'valor') || '0') || 0;
-      const taxValStr = findVal('tarifaiva', 'iva', 'taxrate', 'tax');
-      const taxRate = taxValStr !== '' && !isNaN(parseFloat(taxValStr))
-        ? parseFloat(taxValStr)
+      const sku = findVal(['sku', 'codigoproducto', 'codigo', 'cod', 'referencia'], ['barras', 'barcode']) || `PROD-${Date.now()}-${index + 1}`;
+      const barcode = findVal(['barcode', 'barras', 'codigobarras', 'codbarras', 'ean']) || sku;
+      const name = findVal(['nombre', 'descripcion', 'nombredelproducto', 'nombredescripcion', 'producto', 'articulo', 'detalle', 'name'], ['categoria', 'rubro', 'plantilla', 'reporte']);
+      const category = findVal(['categoria', 'category', 'rubro', 'grupo', 'familia']) || 'Herramientas Manuales';
+      const unit = findVal(['unidad', 'unidaddemedida', 'unit', 'medida', 'um']) || 'UND';
+      const costPrice = parseCleanNumber(findVal(['costo', 'preciocosto', 'costprice', 'cost', 'compra', 'valordecompra']));
+      const price = parseCleanNumber(findVal(['precioventa', 'pvp', 'pventasiniva', 'pventa', 'preciodeventa', 'precio', 'price', 'valor'], ['costo', 'cost', 'compra']));
+      const taxValStr = findVal(['tarifaiva', 'iva', 'taxrate', 'tax', 'tarifa']);
+      const parsedTax = parseCleanNumber(taxValStr, -1);
+      const taxRate = parsedTax >= 0
+        ? parsedTax
         : (typeof settings.defaultTaxRate === 'number' ? settings.defaultTaxRate : 15);
-      const stock = parseFloat(findVal('stock', 'cantidad', 'stockactual', 'qty') || '0') || 0;
-      const minStock = parseFloat(findVal('stockminimo', 'minstock', 'minimo', 'alerta') || '5') || 5;
-      const location = findVal('ubicacion', 'pasillo', 'estante', 'location') || '';
+      const stock = parseCleanNumber(findVal(['stockactual', 'stockinicial', 'stock', 'cantidad', 'existencia', 'existencias', 'qty']));
+      const minStock = parseCleanNumber(findVal(['stockminimo', 'stockmin', 'minstock', 'minimo', 'alerta']), 5);
+      const location = findVal(['ubicacion', 'ubicacionpasillo', 'pasillo', 'estante', 'bodega', 'location']) || '';
 
       if (!name) {
         errors.push('Falta el nombre del producto');
@@ -234,7 +341,7 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
         const workbook = XLSX.read(buffer, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        const jsonData = extractRowsFromWorksheet(worksheet);
 
         if (!jsonData || jsonData.length === 0) {
           showAlert('El archivo seleccionado no contiene filas de datos.', 'Archivo Vacío', 'warning');
@@ -267,7 +374,7 @@ export const BulkProductImporterModal: React.FC<BulkProductImporterProps> = ({
       const workbook = XLSX.read(text, { type: 'string' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+      const jsonData = extractRowsFromWorksheet(worksheet);
 
       if (jsonData && jsonData.length > 0) {
         const parsed = normalizeAndValidateRows(jsonData);
