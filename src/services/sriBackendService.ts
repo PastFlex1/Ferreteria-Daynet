@@ -269,7 +269,7 @@ export class SriBackendService {
    * 3️⃣ AUTORIZACIÓN SRI
    * Consulta el Web Service de Autorización con reintentos automáticos si el estado es "EN PROCESO".
    */
-  public static async autorizarSri(claveAcceso: string, retries = 4, delayMs = 2000): Promise<{ success: boolean; autorizacion?: string; error?: string }> {
+  public static async autorizarSri(claveAcceso: string, retries = 5, delayMs = 2500): Promise<{ success: boolean; autorizacion?: string; error?: string }> {
     const baseUrl = this.getBaseUrl();
     let lastError = 'No se pudo consultar la autorización legal definitiva.';
     
@@ -288,7 +288,15 @@ export class SriBackendService {
 
         if (resAutorizacion.ok) {
           const autorizacion = await resAutorizacion.text();
-          if (autorizacion.includes('EN PROCESO') && attempt < retries) {
+          const isPending =
+            autorizacion.includes('EN PROCESO') ||
+            autorizacion.includes('<numeroComprobantes>0</numeroComprobantes>') ||
+            autorizacion.includes('numeroComprobantes>0<') ||
+            autorizacion.includes('<autorizaciones/>') ||
+            (!autorizacion.includes('AUTORIZADO') && !autorizacion.includes('DEVUELTA') && !autorizacion.includes('NO AUTORIZADO'));
+
+          if (isPending && attempt < retries) {
+            console.log(`[SRI Autorización] Comprobante aún en procesamiento/cola del SRI (intento ${attempt}/${retries}). Reconsultando en ${delayMs}ms...`);
             await new Promise((resolve) => setTimeout(resolve, delayMs));
             continue;
           }
@@ -691,20 +699,28 @@ export class SriBackendService {
         // Paso 2: Recepción SRI (:8080/api/sri/recepcion)
         const rRes = await this.recepcionarSri(fRes.xmlFirmado);
 
-        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar automáticamente al siguiente
+        // Si el secuencial ya está registrado/autorizado en el SRI, NO saltar secuencial.
+        // Se reconsulta la autorización directamente con la misma clave de acceso.
         if (isSecuencialAlreadyRegistered(rRes.recepcion, rRes.error)) {
-          console.warn(`[SRI N/C] Secuencial ${formattedSec} ya registrado en SRI. Avanzando automáticamente al siguiente...`);
-          currentSecNum++;
-          const nextSecSetting = String(currentSecNum + 1).padStart(9, '0');
-          try {
-            localStorage.setItem('ferreteria_settings_sec_credit_note', nextSecSetting);
-            fetch(getApiUrl('/api/sqlite/doc/ferreteria_settings_sec_credit_note'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ data: nextSecSetting })
-            }).catch(() => {});
-          } catch (_) {}
-          continue;
+          console.log(`[SRI N/C] Comprobante ya recibido por el SRI con clave ${claveAcceso}. Reconsultando autorización con la misma clave de acceso...`);
+          const reAuth = await this.autorizarSri(claveAcceso, 5, 2500);
+          if (reAuth.success && reAuth.autorizacion && reAuth.autorizacion.includes('AUTORIZADO')) {
+            const authNumMatch = reAuth.autorizacion.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
+            const authDateMatch = reAuth.autorizacion.match(/<fechaAutorizacion>(.*?)<\/fechaAutorizacion>/i);
+            return {
+              success: true,
+              claveAcceso,
+              estado: 'AUTORIZADO',
+              numeroAutorizacion: authNumMatch ? authNumMatch[1] : claveAcceso,
+              fechaAutorizacion: authDateMatch ? authDateMatch[1] : new Date().toISOString(),
+              xmlOriginal,
+              xmlFirmado: fRes.xmlFirmado,
+              rawRecepcion: rRes.recepcion,
+              rawAutorizacion: reAuth.autorizacion,
+              nuevoSecuencial: formattedSec,
+              nuevoId: currentNC.id,
+            };
+          }
         }
 
         if (!rRes.success || !rRes.recepcion) {

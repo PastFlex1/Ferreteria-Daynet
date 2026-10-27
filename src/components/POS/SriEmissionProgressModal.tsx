@@ -208,7 +208,10 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
 
       // Preparar datos SRI
       const sriData = convertERPInvoiceToSRI(workingInvoice, settings, estab, ptoEmi, ambienteVal);
-      const { xml: xmlOriginal, claveAcceso: claveCalculada } = generateInvoiceXML(sriData);
+      const { xml: xmlOriginal, claveAcceso: claveGenerada } = generateInvoiceXML(sriData);
+      const claveCalculada = (workingInvoice.sriClaveAcceso && workingInvoice.sriClaveAcceso.length === 49)
+        ? workingInvoice.sriClaveAcceso
+        : claveGenerada;
       setClaveAcceso(claveCalculada);
 
       try {
@@ -244,77 +247,59 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const rRes = await SriBackendService.recepcionarSri(fRes.xmlFirmado);
         console.log('📡 [SRI 2. RECEPCIÓN RAW]:', rRes.recepcion || rRes.error);
 
-        // Si el secuencial ya está registrado/autorizado en el SRI, avanzar atómicamente en el servidor
+        // Si el comprobante ya fue recibido por el SRI (Error 43 / Clave registrada),
+        // NUNCA generar un nuevo secuencial. Pasamos directamente a consultar la autorización.
         if (isSecuencialAlreadyRegistered(rRes.recepcion, rRes.error)) {
-          console.warn(`[SRI] Secuencial ${formattedSec} ya registrado en SRI. Avanzando atómicamente al siguiente...`);
-          setStep2Details(`Secuencial ${formattedSec} ya registrado en el SRI. Solicitando siguiente secuencial atómico...`);
-          try {
-            const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
-            });
-            if (seqRes.ok) {
-              const seqData = await seqRes.json();
-              if (seqData.success && seqData.sequentialNumber) {
-                currentSecNum = seqData.sequentialNumber;
-              } else {
-                currentSecNum++;
-              }
-            } else {
-              currentSecNum++;
+          console.log(`[SRI] Comprobante ya registrado previamente en el SRI con clave ${claveCalculada}. Procediendo directamente a consultar autorización...`);
+          setStep2Status('SUCCESS');
+          setStep2Details(`Comprobante previamente recibido en el SRI (${workingInvoice.fullNumber}).`);
+        } else {
+          const isRecepcionDevuelta = rRes.recepcion && rRes.recepcion.toUpperCase().includes('DEVUELTA');
+          if (!rRes.success || isRecepcionDevuelta) {
+            // Extraer mensajes de devolución del SRI
+            const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
+            const devMsgs: string[] = [];
+            let dm;
+            const rawContent = rRes.recepcion || '';
+            while ((dm = devMsgRegex.exec(rawContent)) !== null) {
+              const block = dm[1];
+              const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
+              const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
+              const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
+              const idStr = identM ? `[ERROR ${identM[1]}] ` : '';
+              const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
+              const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
+              if (msgStr) devMsgs.push(`${idStr}${msgStr}${infoStr}`);
             }
-          } catch {
-            currentSecNum++;
+
+            const errorFinal = devMsgs.length > 0 
+              ? devMsgs.join(' | ') 
+              : (rRes.error || 'El comprobante fue devuelto por el SRI en Recepción.');
+
+            setStep2Status('ERROR');
+            setStep2Details(`SRI DEVUELTA: ${errorFinal}`);
+
+            if (onInvoiceUpdated) {
+              const updatedDevuelta: Invoice = {
+                ...workingInvoice,
+                sriStatus: 'DEVUELTA',
+                sriClaveAcceso: claveCalculada,
+                sriXmlFirmado: fRes.xmlFirmado,
+                sriMensaje: errorFinal,
+              };
+              onInvoiceUpdated(updatedDevuelta);
+            }
+
+            throw new Error(`El SRI devolvió el comprobante en Recepción: ${errorFinal}`);
           }
-          await new Promise((r) => setTimeout(r, 50));
-          continue; // Reintentar con el siguiente secuencial
+
+          setStep2Status('SUCCESS');
+          setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
         }
 
-        const isRecepcionDevuelta = rRes.recepcion && rRes.recepcion.toUpperCase().includes('DEVUELTA');
-        if (!rRes.success || isRecepcionDevuelta) {
-          // Extraer mensajes de devolución del SRI
-          const devMsgRegex = /<mensaje>([\s\S]*?)<\/mensaje>/gi;
-          const devMsgs: string[] = [];
-          let dm;
-          const rawContent = rRes.recepcion || '';
-          while ((dm = devMsgRegex.exec(rawContent)) !== null) {
-            const block = dm[1];
-            const textM = block.match(/<mensaje>(.*?)<\/mensaje>/i) || [null, block];
-            const identM = block.match(/<identificador>(.*?)<\/identificador>/i);
-            const infoM = block.match(/<informacionAdicional>(.*?)<\/informacionAdicional>/i);
-            const idStr = identM ? `[ERROR ${identM[1]}] ` : '';
-            const msgStr = textM[1] ? textM[1].replace(/<[^>]+>/g, '').trim() : '';
-            const infoStr = infoM ? ` -> ${infoM[1].trim()}` : '';
-            if (msgStr) devMsgs.push(`${idStr}${msgStr}${infoStr}`);
-          }
-
-          const errorFinal = devMsgs.length > 0 
-            ? devMsgs.join(' | ') 
-            : (rRes.error || 'El comprobante fue devuelto por el SRI en Recepción.');
-
-          setStep2Status('ERROR');
-          setStep2Details(`SRI DEVUELTA: ${errorFinal}`);
-
-          if (onInvoiceUpdated) {
-            const updatedDevuelta: Invoice = {
-              ...workingInvoice,
-              sriStatus: 'DEVUELTA',
-              sriClaveAcceso: claveCalculada,
-              sriXmlFirmado: fRes.xmlFirmado,
-              sriMensaje: errorFinal,
-            };
-            onInvoiceUpdated(updatedDevuelta);
-          }
-
-          throw new Error(`El SRI devolvió el comprobante en Recepción: ${errorFinal}`);
-        }
-
-        setStep2Status('SUCCESS');
-        setStep2Details('Comprobante recibido con estado RECIBIDA por el SRI.');
-
-        // Transición inmediata a Autorización SRI
-        await new Promise((r) => setTimeout(r, 50));
+        // Espera prudencial (2.5s) para que el SRI procese el comprobante en su cola de autorización
+        setStep3Details(`Esperando indexación del comprobante en el SRI (${workingInvoice.fullNumber})...`);
+        await new Promise((r) => setTimeout(r, 2500));
 
         // ──────────────────────────────────────────────────────────
         // PASO 3: CONSULTA DE AUTORIZACIÓN SRI (SOAP Autorizacion)
@@ -326,37 +311,10 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const aRes = await SriBackendService.autorizarSri(claveCalculada);
         console.log('🏛️ [SRI 3. AUTORIZACIÓN RAW]:', aRes.autorizacion || aRes.error);
 
-        // Si la autorización indica que el secuencial ya estaba registrado
-        if (isSecuencialAlreadyRegistered(aRes.autorizacion, aRes.error) && aRes.autorizacion?.includes('NO AUTORIZADO')) {
-          console.warn(`[SRI Autorización] Secuencial ${formattedSec} ya registrado en SRI. Avanzando al siguiente...`);
-          setStep3Details(`Secuencial ${formattedSec} ya registrado en SRI. Avanzando atómicamente al siguiente secuencial...`);
-          try {
-            const seqRes = await fetch(getApiUrl('/api/invoices/reserve-sequential'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ establishment: estab, emissionPoint: ptoEmi, documentType: '01' })
-            });
-            if (seqRes.ok) {
-              const seqData = await seqRes.json();
-              if (seqData.success && seqData.sequentialNumber) {
-                currentSecNum = seqData.sequentialNumber;
-              } else {
-                currentSecNum++;
-              }
-            } else {
-              currentSecNum++;
-            }
-          } catch {
-            currentSecNum++;
-          }
-          await new Promise((r) => setTimeout(r, 50));
-          continue; // Reintentar con el siguiente secuencial
-        }
-
         if (!aRes.success) {
           setStep3Status('ERROR');
-          setStep3Details(aRes.error || 'El comprobante no pudo ser autorizado por el SRI.');
-          throw new Error(aRes.error || 'Fallo en la autorización del SRI.');
+          setStep3Details(aRes.error || 'El comprobante no pudo ser consultado ante el SRI.');
+          throw new Error(aRes.error || 'Fallo en la comunicación con el SRI.');
         }
 
         // Extraer datos de la respuesta oficial del SRI
@@ -417,7 +375,31 @@ export const SriEmissionProgressModal: React.FC<SriEmissionProgressModalProps> =
         const estadoReal = estadoMatch ? estadoMatch[1] : (isAutorizado ? 'AUTORIZADO' : 'NO AUTORIZADO');
         const mensajeError = mensajesList.length > 0 ? mensajesList.join(' | ') : 'Sin detalle de error específico devuelto por el SRI.';
 
+        const isStillEnProceso =
+          authXml.includes('EN PROCESO') ||
+          authXml.includes('<numeroComprobantes>0</numeroComprobantes>') ||
+          authXml.includes('numeroComprobantes>0<') ||
+          authXml.includes('<autorizaciones/>') ||
+          (!authXml.toUpperCase().includes('NO AUTORIZADO') && !authXml.toUpperCase().includes('DEVUELTA'));
+
         if (!isAutorizado) {
+          if (isStillEnProceso) {
+            setStep3Status('LOADING');
+            setStep3Details('Comprobante recibido por el SRI y en cola de procesamiento. Puedes consultar nuevamente en unos segundos.');
+            if (onInvoiceUpdated) {
+              const updatedPending: Invoice = {
+                ...workingInvoice,
+                sriStatus: 'PENDIENTE',
+                sriClaveAcceso: claveCalculada,
+                sriXmlFirmado: fRes.xmlFirmado,
+                sriMensaje: 'Comprobante recibido por el SRI (en trámite). Presione "Transmitir SRI" para verificar la autorización.',
+              };
+              onInvoiceUpdated(updatedPending);
+            }
+            setErrorMessage('El comprobante fue RECIBIDO por el SRI y continúa en cola de validación. Presione "Reintentar Transmisión" en unos instantes para verificar la autorización sin alterar el secuencial.');
+            break;
+          }
+
           setStep3Status('ERROR');
           setStep3Details(`SRI: ${estadoReal} — ${mensajeError}`);
 

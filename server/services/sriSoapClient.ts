@@ -219,6 +219,9 @@ function parseAutorizacionResponse(rawXml: string, fallbackClave: string): SriAu
   let estado: SriAutorizacionResult['estado'] = 'NO AUTORIZADO';
   const mensajes: SriAutorizacionResult['mensajes'] = [];
 
+  const numCompMatch = rawXml.match(/<numeroComprobantes>(.*?)<\/numeroComprobantes>/i);
+  const numComprobantes = numCompMatch ? parseInt(numCompMatch[1].trim(), 10) : null;
+
   const estadoMatch = rawXml.match(/<estado>(.*?)<\/estado>/i);
   if (estadoMatch) {
     const st = estadoMatch[1].trim().toUpperCase();
@@ -228,6 +231,8 @@ function parseAutorizacionResponse(rawXml: string, fallbackClave: string): SriAu
     else if (st === 'NO AUTORIZADO') estado = 'NO AUTORIZADO';
   } else if (rawXml.includes('AUTORIZADO') && !rawXml.includes('NO AUTORIZADO')) {
     estado = 'AUTORIZADO';
+  } else if (numComprobantes === 0 || rawXml.includes('<autorizaciones/>') || rawXml.includes('EN PROCESO')) {
+    estado = 'EN PROCESO';
   }
 
   const numAutMatch = rawXml.match(/<numeroAutorizacion>(.*?)<\/numeroAutorizacion>/i);
