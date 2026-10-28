@@ -156,31 +156,35 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
 
       for (const inv of data) {
         const id = String(inv.id || inv._id || `inv-${Date.now()}`);
-        const invNum = String(inv.invoiceNumber || inv.invoice_number || id);
+        const invNum = String(inv.fullNumber || inv.invoiceNumber || inv.invoice_number || id);
         const parts = invNum.split('-');
         const est = inv.establishment || parts[0] || '001';
         const pto = inv.emissionPoint || parts[1] || '001';
         const seq = Number(inv.sequential || parts[2] || 1);
-        const date = inv.date ? new Date(inv.date) : new Date();
-        const rawCustId = inv.customerId || inv.customer_id || null;
+        const rawDate = inv.date || inv.createdAt;
+        const date = rawDate ? new Date(rawDate) : new Date();
+        const rawCustId = inv.customer?.id || inv.customerId || inv.customer_id || null;
         let custId: string | null = null;
         if (rawCustId) {
           const cCheck = await pool.query(`SELECT id FROM clientes WHERE id = $1`, [rawCustId]);
           if (cCheck.rows.length > 0) custId = rawCustId;
         }
-        const custName = String(inv.customerName || inv.customer_name || 'Consumidor Final');
-        const custTaxId = String(inv.customerTaxId || inv.customer_tax_id || inv.customerDocNumber || '9999999999999');
+        const custName = String(inv.customer?.name || inv.customerName || inv.customer_name || 'Consumidor Final');
+        const custTaxId = String(inv.customer?.docNumber || inv.customerTaxId || inv.customer_tax_id || inv.customerDocNumber || '9999999999999');
         const seller = inv.seller || inv.sellerName || null;
         const subtotal = Math.max(0, Number(inv.subtotal ?? 0));
         const tax = Math.max(0, Number(inv.tax ?? 0));
         const discount = Math.max(0, Number(inv.discount ?? 0));
         const total = Math.max(0, Number(inv.total ?? 0));
         const payMethod = inv.paymentMethod || inv.payment_method || 'EFECTIVO';
-        const status = ['EMITIDA', 'AUTORIZADO', 'ANULADA', 'PENDIENTE', 'RECHAZADA'].includes(inv.status) ? inv.status : 'EMITIDA';
+        const isCancelled = inv.paymentStatus === 'ANULADA' || inv.status === 'ANULADA' || inv.sriStatus === 'ANULADO';
+        const status = isCancelled
+          ? 'ANULADA'
+          : (['EMITIDA', 'AUTORIZADO', 'ANULADA', 'PENDIENTE', 'RECHAZADA'].includes(inv.status) ? inv.status : 'EMITIDA');
         const sriStatus = ['PENDIENTE', 'EN_COLA', 'FIRMADO', 'RECIBIDA', 'EN_PROCESO', 'AUTORIZADO', 'DEVUELTA', 'NO AUTORIZADO', 'ERROR'].includes(inv.sriStatus) ? inv.sriStatus : 'PENDIENTE';
-        const accessKey = inv.accessKey || inv.access_key || inv.claveAcceso || null;
-        const authNum = inv.authorizationNumber || inv.authorization_number || null;
-        const authDate = inv.authorizationDate ? new Date(inv.authorizationDate) : null;
+        const accessKey = inv.sriClaveAcceso || inv.accessKey || inv.access_key || inv.claveAcceso || null;
+        const authNum = inv.sriNumeroAutorizacion || inv.authorizationNumber || inv.authorization_number || null;
+        const authDate = (inv.sriFechaAutorizacion || inv.authorizationDate) ? new Date(inv.sriFechaAutorizacion || inv.authorizationDate) : null;
         const rawItems = Array.isArray(inv.items) ? inv.items : [];
         const items = JSON.stringify(rawItems);
 
@@ -339,13 +343,25 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
     }
 
     if (docId === 'ferreteria_credit_notes' && Array.isArray(data)) {
+      const incomingIds = data.map((nc: any) => String(nc.id || nc._id)).filter(Boolean);
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map((_, i) => `$${i + 1}`).join(',');
+        try {
+          await pool.query(`DELETE FROM notas_credito WHERE id NOT IN (${placeholders});`, incomingIds);
+        } catch {}
+      } else {
+        try {
+          await pool.query(`DELETE FROM notas_credito;`);
+        } catch {}
+      }
+
       for (const nc of data) {
         const id = String(nc.id || nc._id || `nc-${Date.now()}`);
         const ncNum = String(nc.creditNoteNumber || nc.credit_note_number || id);
         const parts = ncNum.split('-');
         const est = nc.establishment || parts[0] || '001';
         const pto = nc.emissionPoint || parts[1] || '001';
-        const seq = Number(nc.sequential || parts[2] || 1);
+        const seq = Number(nc.sequential || nc.secNumber || parts[2] || 1);
         const date = nc.date ? new Date(nc.date) : new Date();
         const rawInvId = nc.invoiceId || nc.invoice_id || null;
         let invId: string | null = null;
@@ -353,23 +369,23 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
           const iCheck = await pool.query(`SELECT id FROM facturas_ventas WHERE id = $1`, [rawInvId]);
           if (iCheck.rows.length > 0) invId = rawInvId;
         }
-        const invNum = String(nc.invoiceNumber || nc.invoice_number || '001-001-000000001');
+        const invNum = String(nc.invoiceRef || nc.invoiceNumber || nc.invoice_number || '001-001-000000001');
         const rawCustId = nc.customerId || nc.customer_id || null;
         let custId: string | null = null;
         if (rawCustId) {
           const cCheck = await pool.query(`SELECT id FROM clientes WHERE id = $1`, [rawCustId]);
           if (cCheck.rows.length > 0) custId = rawCustId;
         }
-        const custName = String(nc.customerName || nc.customer_name || 'Cliente');
-        const custTaxId = String(nc.customerTaxId || nc.customer_tax_id || '9999999999999');
+        const custName = String(nc.customer || nc.customerName || nc.customer_name || 'Cliente');
+        const custTaxId = String(nc.customerRuc || nc.customerTaxId || nc.customer_tax_id || '9999999999999');
         const reason = String(nc.reason || nc.motivo || 'Devolución');
-        const subtotal = Math.max(0, Number(nc.subtotal ?? 0));
-        const tax = Math.max(0, Number(nc.tax ?? 0));
-        const total = Math.max(0, Number(nc.total ?? 0));
+        const total = Math.max(0, Number(nc.amount ?? nc.total ?? 0));
+        const subtotal = Math.max(0, Number(nc.subtotal ?? (total > 0 ? Math.round((total / 1.15) * 100) / 100 : 0)));
+        const tax = Math.max(0, Number(nc.tax ?? Math.round((total - subtotal) * 100) / 100));
         const status = ['EMITIDA', 'AUTORIZADO', 'ANULADA', 'PENDIENTE'].includes(nc.status) ? nc.status : 'EMITIDA';
-        const sriStatus = nc.sriStatus || nc.sri_status || 'PENDIENTE';
-        const accessKey = nc.accessKey || nc.access_key || null;
-        const authNum = nc.authorizationNumber || nc.authorization_number || null;
+        const sriStatus = nc.sriStatus || nc.sri_status || (nc.status === 'AUTORIZADO' ? 'AUTORIZADO' : 'PENDIENTE');
+        const accessKey = nc.claveAcceso || nc.accessKey || nc.access_key || null;
+        const authNum = nc.numeroAutorizacion || nc.authorizationNumber || nc.authorization_number || null;
         const items = JSON.stringify(nc.items || []);
 
         await pool.query(`
@@ -381,7 +397,9 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, $21::jsonb, NOW())
           ON CONFLICT (id) DO UPDATE
-          SET credit_note_number = EXCLUDED.credit_note_number, subtotal = EXCLUDED.subtotal,
+          SET credit_note_number = EXCLUDED.credit_note_number, invoice_number = EXCLUDED.invoice_number,
+              customer_name = EXCLUDED.customer_name, customer_tax_id = EXCLUDED.customer_tax_id,
+              reason = EXCLUDED.reason, subtotal = EXCLUDED.subtotal,
               tax = EXCLUDED.tax, total = EXCLUDED.total, status = EXCLUDED.status,
               sri_status = EXCLUDED.sri_status, items = EXCLUDED.items, data = EXCLUDED.data, updated_at = NOW();
         `, [id, ncNum, est, pto, seq, date, invId, invNum, custId, custName, custTaxId, reason, subtotal, tax, total, status, sriStatus, accessKey, authNum, items, JSON.stringify(nc)]);
@@ -830,29 +848,35 @@ export async function getDoc(req: Request, res: Response) {
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_invoices') {
       const resPg = await pool.query(`SELECT * FROM facturas_ventas ORDER BY date DESC;`);
-      const clean = resPg.rows.map(r => ({
-        ...(r.data || {}),
-        id: r.id,
-        invoiceNumber: r.invoice_number,
-        establishment: r.establishment,
-        emissionPoint: r.emission_point,
-        sequential: r.sequential,
-        date: r.date,
-        customerId: r.customer_id,
-        customerName: r.customer_name,
-        customerTaxId: r.customer_tax_id,
-        seller: r.seller,
-        subtotal: Number(r.subtotal),
-        tax: Number(r.tax),
-        discount: Number(r.discount),
-        total: Number(r.total),
-        paymentMethod: r.payment_method,
-        status: r.status,
-        sriStatus: r.sri_status,
-        accessKey: r.access_key,
-        items: r.items,
-        updatedAt: r.updated_at
-      }));
+      const clean = resPg.rows.map(r => {
+        const parsedData = typeof r.data === 'string' ? (() => { try { return JSON.parse(r.data); } catch { return {}; } })() : (r.data || {});
+        const isCancelled = r.status === 'ANULADA' || parsedData.paymentStatus === 'ANULADA' || parsedData.sriStatus === 'ANULADO';
+        return {
+          ...parsedData,
+          id: r.id,
+          invoiceNumber: r.invoice_number,
+          fullNumber: parsedData.fullNumber || r.invoice_number,
+          establishment: r.establishment,
+          emissionPoint: r.emission_point,
+          sequential: r.sequential,
+          date: r.date,
+          customerId: r.customer_id,
+          customerName: r.customer_name,
+          customerTaxId: r.customer_tax_id,
+          seller: r.seller,
+          subtotal: Number(r.subtotal),
+          tax: Number(r.tax),
+          discount: Number(r.discount),
+          total: Number(r.total),
+          paymentMethod: r.payment_method,
+          status: isCancelled ? 'ANULADA' : r.status,
+          paymentStatus: isCancelled ? 'ANULADA' : (parsedData.paymentStatus || 'PAGADA'),
+          sriStatus: parsedData.sriStatus === 'ANULADO' ? 'ANULADO' : (r.sri_status || parsedData.sriStatus),
+          accessKey: r.access_key || parsedData.sriClaveAcceso,
+          items: Array.isArray(r.items) ? r.items : (parsedData.items || []),
+          updatedAt: r.updated_at
+        };
+      });
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_categories') {
       const resPg = await pool.query(`SELECT * FROM categorias_productos ORDER BY name ASC;`);
@@ -955,7 +979,7 @@ export async function getDoc(req: Request, res: Response) {
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_credit_notes') {
       const resPg = await pool.query(`SELECT * FROM notas_credito ORDER BY date DESC;`);
-      const clean = resPg.rows.map(r => {
+      let clean = resPg.rows.map(r => {
         let parsedItems = r.items;
         if (typeof parsedItems === 'string') {
           try { parsedItems = JSON.parse(parsedItems); } catch { parsedItems = []; }
@@ -964,6 +988,7 @@ export async function getDoc(req: Request, res: Response) {
         if (typeof parsedData === 'string') {
           try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
         }
+        const totalVal = Number(r.total) || Number(parsedData?.amount) || Number(parsedData?.total) || 0;
         return {
           ...(parsedData || {}),
           id: r.id,
@@ -974,22 +999,32 @@ export async function getDoc(req: Request, res: Response) {
           date: r.date,
           invoiceId: r.invoice_id,
           invoiceNumber: r.invoice_number,
+          invoiceRef: (parsedData && parsedData.invoiceRef) || r.invoice_number,
           customerId: r.customer_id,
           customerName: r.customer_name,
           customer: (parsedData && parsedData.customer) || r.customer_name,
           customerTaxId: r.customer_tax_id,
+          customerRuc: (parsedData && parsedData.customerRuc) || r.customer_tax_id,
           reason: r.reason,
-          subtotal: Number(r.subtotal),
-          tax: Number(r.tax),
-          total: Number(r.total),
-          amount: Number(r.total),
-          status: r.status,
+          subtotal: Number(r.subtotal) || Number(parsedData?.subtotal) || 0,
+          tax: Number(r.tax) || Number(parsedData?.tax) || 0,
+          total: totalVal,
+          amount: totalVal,
+          status: (parsedData && parsedData.status) || r.status,
           sriStatus: r.sri_status,
-          accessKey: r.access_key,
-          items: Array.isArray(parsedItems) ? parsedItems : (parsedData?.items || []),
+          accessKey: r.access_key || parsedData?.claveAcceso,
+          items: Array.isArray(parsedItems) && parsedItems.length > 0 ? parsedItems : (parsedData?.items || []),
           updatedAt: r.updated_at
         };
       });
+
+      if (clean.length === 0) {
+        const db = await getDatabase();
+        const doc = await db.collection('app_state').findOne({ _id: docId } as any);
+        if (doc && Array.isArray(doc.data)) {
+          clean = doc.data;
+        }
+      }
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_stock_adjustments') {
       let clean: any[] = [];

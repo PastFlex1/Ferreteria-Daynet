@@ -124,10 +124,37 @@ export function useSqliteSync<T>(docId: string, initialValue: T) {
       })
       .then((res) => {
         if (res && res.exists && isValidType(res.data)) {
+          // Si la tabla en SQLite aún está vacía pero el navegador tiene registros previos en caché,
+          // preservar los registros locales y sincronizarlos hacia SQLite sin borrarlos.
+          if (
+            Array.isArray(res.data) &&
+            res.data.length === 0 &&
+            Array.isArray(latestDataRef.current) &&
+            (latestDataRef.current as any[]).length > 0
+          ) {
+            fetch(getApiUrl(`/api/sqlite/doc/${encodeURIComponent(docId)}`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ data: latestDataRef.current })
+            }).catch(() => {});
+            return;
+          }
+
           setData(res.data);
           try {
             localStorage.setItem(docId, typeof res.data === 'string' ? res.data : JSON.stringify(res.data));
           } catch {}
+        } else if (
+          res &&
+          !res.exists &&
+          Array.isArray(latestDataRef.current) &&
+          (latestDataRef.current as any[]).length > 0
+        ) {
+          fetch(getApiUrl(`/api/sqlite/doc/${encodeURIComponent(docId)}`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ data: latestDataRef.current })
+          }).catch(() => {});
         }
       })
       .catch(() => {})

@@ -1052,6 +1052,7 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
       return newRows;
     });
     setSelectedAdjustProductIds([]);
+    setIsAdjustSearchOpen(false);
     if (addedCount > 0) {
       showToast(`¡${addedCount} producto(s) agregado(s) a la tabla de ajuste!`, 'success');
     } else {
@@ -4025,87 +4026,87 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
           </div>
 
           {/* Contabilización y Resumen de Cada Ítem Debajito de la Lista */}
-          {adjustRows.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-50 via-white to-blue-50/50 rounded-2xl border border-blue-200/90 p-4 space-y-4 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 pb-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                    <ClipboardCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                      Contabilización y Balance del Ajuste
-                    </h4>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      Resumen financiero y cuantificación física de los productos a ajustar
-                    </p>
-                  </div>
+          <div className="bg-gradient-to-br from-slate-50 via-white to-blue-50/50 rounded-2xl border border-blue-200/90 p-4 space-y-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 pb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <ClipboardCheck className="w-4 h-4" />
                 </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                    Contabilización y Balance del Ajuste
+                  </h4>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Resumen financiero y cuantificación física de los productos a ajustar
+                  </p>
+                </div>
+              </div>
 
-                <span className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1.5 ${
-                  adjustMovementType === 'INGRESO'
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+              <span className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1.5 ${
+                adjustMovementType === 'INGRESO'
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  : 'bg-amber-100 text-amber-800 border border-amber-300'
+              }`}>
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                Tipo: {adjustMovementType} ({adjustMovementType === 'INGRESO' ? '+ Entrada de existencias' : '- Salida de existencias'})
+              </span>
+            </div>
+
+            {/* 4 KPI Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {/* 1. Total Ítems */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
+                <div className="flex items-center justify-between text-slate-500 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Ítems Únicos</span>
+                  <Boxes className="w-4 h-4 text-blue-600" />
+                </div>
+                <div className="text-lg font-black text-slate-900">
+                  {adjustSummaryMetrics.totalDistinctItems} <span className="text-xs font-semibold text-slate-500">productos</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">En lista de ajuste</div>
+              </div>
+
+              {/* 2. Total Unidades a Ajustar */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
+                <div className="flex items-center justify-between text-slate-500 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Total a Ajustar</span>
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className={`text-lg font-black ${
+                  adjustMovementType === 'INGRESO' ? 'text-emerald-600' : 'text-amber-600'
                 }`}>
-                  <ArrowLeftRight className="w-3.5 h-3.5" />
-                  Tipo: {adjustMovementType} ({adjustMovementType === 'INGRESO' ? '+ Entrada de existencias' : '- Salida de existencias'})
-                </span>
+                  {adjustMovementType === 'INGRESO' ? '+' : '-'}{adjustSummaryMetrics.totalAdjustUnits.toFixed(2)} <span className="text-xs font-semibold text-slate-500">und.</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Suma de cantidades</div>
               </div>
 
-              {/* 4 KPI Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {/* 1. Total Ítems */}
-                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                  <div className="flex items-center justify-between text-slate-500 mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Ítems Únicos</span>
-                    <Boxes className="w-4 h-4 text-blue-600" />
-                  </div>
-                  <div className="text-lg font-black text-slate-900">
-                    {adjustSummaryMetrics.totalDistinctItems} <span className="text-xs font-semibold text-slate-500">productos</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">En lista de ajuste</div>
+              {/* 3. Existencias Globales */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
+                <div className="flex items-center justify-between text-slate-500 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Stock Global</span>
+                  <Layers className="w-4 h-4 text-indigo-600" />
                 </div>
-
-                {/* 2. Total Unidades a Ajustar */}
-                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                  <div className="flex items-center justify-between text-slate-500 mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Total a Ajustar</span>
-                    <TrendingUp className="w-4 h-4 text-emerald-600" />
-                  </div>
-                  <div className={`text-lg font-black ${
-                    adjustMovementType === 'INGRESO' ? 'text-emerald-600' : 'text-amber-600'
-                  }`}>
-                    {adjustMovementType === 'INGRESO' ? '+' : '-'}{adjustSummaryMetrics.totalAdjustUnits.toFixed(2)} <span className="text-xs font-semibold text-slate-500">und.</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Suma de cantidades</div>
+                <div className="text-base font-black text-slate-900 font-mono">
+                  {adjustSummaryMetrics.totalCurrentStock.toFixed(1)} ➔ <span className="text-blue-600">{adjustSummaryMetrics.totalNewStock.toFixed(1)}</span>
                 </div>
-
-                {/* 3. Existencias Globales */}
-                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                  <div className="flex items-center justify-between text-slate-500 mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Stock Global</span>
-                    <Layers className="w-4 h-4 text-indigo-600" />
-                  </div>
-                  <div className="text-base font-black text-slate-900 font-mono">
-                    {adjustSummaryMetrics.totalCurrentStock.toFixed(1)} ➔ <span className="text-blue-600">{adjustSummaryMetrics.totalNewStock.toFixed(1)}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Stock actual vs nuevo</div>
-                </div>
-
-                {/* 4. Valorización Económica (Costo) */}
-                <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                  <div className="flex items-center justify-between text-slate-500 mb-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Valor Estimado</span>
-                    <DollarSign className="w-4 h-4 text-emerald-600" />
-                  </div>
-                  <div className="text-lg font-black text-emerald-700 font-mono">
-                    {formatCurrency(adjustSummaryMetrics.totalEstimatedCostImpact, settings.currencySymbol)}
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Costo ponderado (CPP)</div>
-                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Stock actual vs nuevo</div>
               </div>
 
-              {/* Item-by-item accounting breakdown ("contabilice cada item debajito") */}
+              {/* 4. Valorización Económica (Costo) */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
+                <div className="flex items-center justify-between text-slate-500 mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Valor Estimado</span>
+                  <DollarSign className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="text-lg font-black text-emerald-700 font-mono">
+                  {formatCurrency(adjustSummaryMetrics.totalEstimatedCostImpact, settings.currencySymbol)}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Costo ponderado (CPP)</div>
+              </div>
+            </div>
+
+            {/* Item-by-item accounting breakdown ("contabilice cada item debajito") */}
+            {adjustRows.length > 0 && (
               <div className="space-y-1.5 pt-1">
                 <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
                   <Tag className="w-3.5 h-3.5 text-blue-600" />
@@ -4147,8 +4148,8 @@ export const InventoryModuleView: React.FC<InventoryModuleViewProps> = ({
                   ))}
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* 5. Action Buttons: Guardar registro & Cancelar */}
           <div className="flex items-center space-x-3 pt-2">

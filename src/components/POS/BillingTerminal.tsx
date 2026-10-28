@@ -299,6 +299,7 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [selectedPosProductIds, setSelectedPosProductIds] = useState<string[]>([]);
 
   // Payment Selection
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>(() => {
@@ -894,15 +895,44 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
   // Fast product filtering
   const filteredProducts = useMemo(() => {
-    if (!productSearch.trim()) return products.slice(0, 10);
+    if (!productSearch.trim()) return products.slice(0, 50);
     const q = productSearch.toLowerCase();
     return products.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.sku.toLowerCase().includes(q) ||
         (p.barcode && p.barcode.toLowerCase().includes(q))
-    ).slice(0, 10);
+    ).slice(0, 50);
   }, [products, productSearch]);
+
+  const handleToggleSelectPosProduct = (productId: string) => {
+    setSelectedPosProductIds((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
+  };
+
+  const handleSelectAllPosProducts = (visibleProducts: Product[]) => {
+    if (visibleProducts.length === 0) return;
+    const visibleIds = visibleProducts.map((p) => p.id);
+    const allSelected = visibleIds.every((id) => selectedPosProductIds.includes(id));
+    if (allSelected) {
+      setSelectedPosProductIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedPosProductIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleAddSelectedPosProducts = () => {
+    if (selectedPosProductIds.length === 0) return;
+    const productsToAdd = products.filter((p) => selectedPosProductIds.includes(p.id));
+    productsToAdd.forEach((p) => {
+      handleAddToCart(p, 1);
+    });
+    setSelectedPosProductIds([]);
+    setProductSearch('');
+    setIsProductDropdownOpen(false);
+    showToast(`¡${productsToAdd.length} producto(s) agregado(s) a la lista!`, 'success');
+  };
 
   // Direct Invoicing / Transmitting
   const handleDirectEmission = (overrideOptions?: {
@@ -1612,13 +1642,67 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
 
                 {/* Product Search Dropdown */}
                 {isProductDropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-40 max-h-72 overflow-y-auto custom-scrollbar p-1.5 animate-fadeIn">
-                    <div className="px-2.5 py-1.5 text-[10px] uppercase font-black tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
-                      <span>Productos Disponibles ({filteredProducts.length})</span>
-                      {promotions.filter((p) => p.status === 'ACTIVA').length > 0 && (
-                        <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 font-black text-[9px]">
-                          🔥 {promotions.filter((p) => p.status === 'ACTIVA').length} Promoción(es) activa(s)
-                        </span>
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-40 max-h-80 overflow-y-auto custom-scrollbar p-1.5 animate-fadeIn">
+                    <div className="px-2.5 py-1.5 text-[10px] uppercase font-black tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap sticky top-0 bg-white z-10">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>Productos Disponibles ({filteredProducts.length})</span>
+                        {promotions.filter((p) => p.status === 'ACTIVA').length > 0 && (
+                          <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 font-black text-[9px]">
+                            🔥 {promotions.filter((p) => p.status === 'ACTIVA').length} Promoción(es) activa(s)
+                          </span>
+                        )}
+                      </div>
+                      {filteredProducts.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectAllPosProducts(filteredProducts);
+                            }}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:text-orange-800 cursor-pointer normal-case"
+                          >
+                            <input
+                              type="checkbox"
+                              readOnly
+                              checked={
+                                filteredProducts.length > 0 &&
+                                filteredProducts.every((p) => selectedPosProductIds.includes(p.id))
+                              }
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-orange-600 focus:ring-orange-500 pointer-events-none accent-orange-600"
+                            />
+                            <span>
+                              {filteredProducts.every((p) => selectedPosProductIds.includes(p.id))
+                                ? 'Deseleccionar todos'
+                                : 'Seleccionar todos'}
+                            </span>
+                          </button>
+                          {selectedPosProductIds.length > 0 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPosProductIds([]);
+                                }}
+                                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 px-1.5 py-0.5 rounded cursor-pointer normal-case"
+                              >
+                                Limpiar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddSelectedPosProducts();
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1 normal-case"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Agregar seleccionados ({selectedPosProductIds.length})
+                              </button>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -1645,70 +1729,86 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                         const discountPct = promo ? promo.discountPercent : 0;
                         const discountedPriceWithTax = promo ? priceWithTax * (1 - discountPct / 100) : priceWithTax;
                         const savings = promo ? priceWithTax - discountedPriceWithTax : 0;
+                        const isChecked = selectedPosProductIds.includes(p.id);
+                        const inCartItem = cartItems.find((item) => item.product.id === p.id);
 
                         return (
-                          <button
+                          <div
                             key={p.id}
-                            type="button"
-                            onClick={() => {
-                              handleAddToCart(p, 1);
-                              setProductSearch('');
-                              setIsProductDropdownOpen(false);
-                            }}
+                            onClick={() => handleToggleSelectPosProduct(p.id)}
                             className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between transition cursor-pointer border-b border-slate-50 last:border-none ${
-                              promo
-                                ? 'bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-transparent hover:bg-amber-100/60 border-l-4 border-l-amber-500'
-                                : 'hover:bg-slate-50'
+                              isChecked
+                                ? 'bg-orange-50/80 hover:bg-orange-100/60 border-l-4 border-l-orange-500'
+                                : promo
+                                  ? 'bg-gradient-to-r from-amber-50/70 via-orange-50/40 to-transparent hover:bg-amber-100/60 border-l-4 border-l-amber-500'
+                                  : 'hover:bg-slate-50'
                             }`}
                           >
-                            <div className="space-y-1">
-                              <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                                <span>{p.name}</span>
-                                <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
-                                {promo && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-xs animate-pulse">
-                                    🔥 PROMO: {promo.discountPercent}% OFF · {promo.name || promo.code}
-                                  </span>
-                                )}
-                                {p.priceScales && p.priceScales.length > 0 && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
-                                    <Layers className="w-3 h-3 text-indigo-500" />
-                                    {p.priceScales.length} {p.priceScales.length === 1 ? 'Escala' : 'Escalas'}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-slate-500 flex items-center gap-2 flex-wrap">
-                                <span>Cat: {p.category}</span>
-                                <span>•</span>
-                                <span className={p.stock <= p.minStock ? 'text-rose-600 font-bold' : 'text-slate-600'}>
-                                  Stock: {p.stock} {p.unit}
-                                </span>
-                                <span>•</span>
-                                <span className="font-bold text-orange-600">IVA: {taxRate}%</span>
-                                {promo && (
-                                  <>
-                                    <span>•</span>
-                                    <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                                      Ahorras: {formatCurrency(savings, settings.currencySymbol)}
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleSelectPosProduct(p.id);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500 cursor-pointer shrink-0 accent-orange-600"
+                              />
+                              <div className="space-y-1 min-w-0 flex-1">
+                                <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                  <span>{p.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">[{p.sku}]</span>
+                                  {inCartItem && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      ✓ En lista ({inCartItem.quantity})
                                     </span>
-                                  </>
+                                  )}
+                                  {promo && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-xs animate-pulse">
+                                      🔥 PROMO: {promo.discountPercent}% OFF · {promo.name || promo.code}
+                                    </span>
+                                  )}
+                                  {p.priceScales && p.priceScales.length > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                                      <Layers className="w-3 h-3 text-indigo-500" />
+                                      {p.priceScales.length} {p.priceScales.length === 1 ? 'Escala' : 'Escalas'}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-500 flex items-center gap-2 flex-wrap">
+                                  <span>Cat: {p.category}</span>
+                                  <span>•</span>
+                                  <span className={p.stock <= p.minStock ? 'text-rose-600 font-bold' : 'text-slate-600'}>
+                                    Stock: {p.stock} {p.unit}
+                                  </span>
+                                  <span>•</span>
+                                  <span className="font-bold text-orange-600">IVA: {taxRate}%</span>
+                                  {promo && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                        Ahorras: {formatCurrency(savings, settings.currencySymbol)}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                                {p.priceScales && p.priceScales.length > 0 && (
+                                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                    <span className="text-[9px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-50/90 px-1.5 py-0.5 rounded border border-indigo-200/80">
+                                      Escalas x volumen:
+                                    </span>
+                                    {p.priceScales.map((scale, sIdx) => {
+                                      const sPriceWithTax = Number(scale.price) * (1 + taxRate / 100);
+                                      return (
+                                        <span key={sIdx} className="text-[9px] font-mono font-bold bg-white text-indigo-950 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs">
+                                          {scale.name || `E${sIdx+1}`} ({scale.minQty}+ {p.unit}): <strong className="text-indigo-700">{formatCurrency(sPriceWithTax, settings.currencySymbol)}</strong>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
                                 )}
                               </div>
-                              {p.priceScales && p.priceScales.length > 0 && (
-                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                                  <span className="text-[9px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-50/90 px-1.5 py-0.5 rounded border border-indigo-200/80">
-                                    Escalas x volumen:
-                                  </span>
-                                  {p.priceScales.map((scale, sIdx) => {
-                                    const sPriceWithTax = Number(scale.price) * (1 + taxRate / 100);
-                                    return (
-                                      <span key={sIdx} className="text-[9px] font-mono font-bold bg-white text-indigo-950 px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs">
-                                        {scale.name || `E${sIdx+1}`} ({scale.minQty}+ {p.unit}): <strong className="text-indigo-700">{formatCurrency(sPriceWithTax, settings.currencySymbol)}</strong>
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
                             </div>
                             <div className="text-right pl-3 shrink-0">
                               {promo ? (
@@ -1738,13 +1838,41 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                                   )}
                                 </div>
                               )}
-                              <span className="block text-[10px] text-emerald-600 font-bold mt-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAddToCart(p, 1);
+                                  setProductSearch('');
+                                  setIsProductDropdownOpen(false);
+                                }}
+                                className="inline-block text-[10px] text-emerald-600 hover:text-emerald-700 hover:underline font-bold mt-0.5 cursor-pointer"
+                              >
                                 + Agregar
-                              </span>
+                              </button>
                             </div>
-                          </button>
+                          </div>
                         );
                       })
+                    )}
+
+                    {selectedPosProductIds.length > 0 && (
+                      <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs border-t border-slate-200 px-3 py-2 flex items-center justify-between gap-2 z-10">
+                        <span className="text-xs font-bold text-slate-700">
+                          {selectedPosProductIds.length} producto(s) marcado(s)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddSelectedPosProducts();
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-sm transition cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Agregar seleccionados a la lista ({selectedPosProductIds.length})
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -2100,6 +2228,43 @@ export const BillingTerminal: React.FC<BillingTerminalProps> = ({
                 document.body
               );
             })()}
+          </div>
+
+          {/* Resumen de ítems actualmente dentro de la lista (justo arriba de Formas de pago) */}
+          <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl px-3.5 py-2.5 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-black text-slate-700">
+                <Package className="w-3.5 h-3.5 text-orange-600" />
+                <span>Ítems en la lista ({cartItems.length})</span>
+              </div>
+              <span className="text-[11px] font-bold text-slate-500">
+                Total unidades:{' '}
+                <strong className="font-mono text-slate-800">
+                  {cartItems.reduce((acc, item) => acc + item.quantity, 0)}
+                </strong>
+              </span>
+            </div>
+            {cartItems.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic">
+                Ningún ítem agregado a la lista todavía.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {cartItems.map((item) => (
+                  <div
+                    key={item.product.id}
+                    className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-[11px] shadow-2xs"
+                  >
+                    <span className="font-bold text-slate-800 truncate max-w-[200px]">
+                      {item.product.name}
+                    </span>
+                    <span className="font-mono font-black text-orange-600 bg-orange-50 border border-orange-200/80 px-1.5 py-0.2 rounded-md text-[10px]">
+                      x{item.quantity} {item.product.unit || 'UND'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 4. SECTION: FORMAS DE PAGO */}
