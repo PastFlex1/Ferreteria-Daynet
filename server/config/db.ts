@@ -44,6 +44,7 @@ export const COMPASS_COLLECTIONS: Record<string, string> = {
   ferreteria_product_batches: 'lotes_productos',
   ferreteria_taxes: 'tarifas_impuestos',
   ferreteria_inventory_adjustments: 'ajustes_inventario',
+  ferreteria_stock_adjustments: 'ajustes_inventario',
   ferreteria_kardex: 'kardex_movimientos',
 
   // Ventas y Facturación

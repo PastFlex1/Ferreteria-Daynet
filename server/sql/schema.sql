@@ -476,7 +476,6 @@ CREATE TABLE IF NOT EXISTS configuracion_empresa (
     direccion_matriz TEXT NOT NULL,
     direccion_establecimiento TEXT,
     contribuyente_especial TEXT,
-    obligado_contabilidad INTEGER DEFAULT 0,
     regimen_rimpe TEXT,
     data TEXT DEFAULT '{}',
     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -488,3 +487,23 @@ CREATE TABLE IF NOT EXISTS app_state (
     data TEXT NOT NULL,
     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
+
+-- 15. AJUSTES DE STOCK Y TOMA FÍSICA
+CREATE TABLE IF NOT EXISTS ajustes_inventario (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    sku TEXT,
+    qty REAL NOT NULL,
+    reason TEXT,
+    user_name TEXT DEFAULT 'Administrador',
+    cost_price REAL DEFAULT 0.00,
+    type TEXT DEFAULT 'AJUSTE',
+    date TEXT DEFAULT (datetime('now', 'localtime')),
+    data TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ajustes_product ON ajustes_inventario(product_id);
+CREATE INDEX IF NOT EXISTS idx_ajustes_date ON ajustes_inventario(date);

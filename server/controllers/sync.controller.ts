@@ -670,6 +670,33 @@ export async function syncToFriendlyCompassCollection(db: any, docId: string, da
       return;
     }
 
+    if (docId === 'ferreteria_stock_adjustments' && Array.isArray(data)) {
+      for (const adj of data) {
+        const id = String(adj.id || `adj-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+        const prodId = String(adj.productId || adj.product_id || '');
+        const prodName = String(adj.productName || adj.product_name || 'Producto');
+        const sku = String(adj.sku || '');
+        const qty = Number(adj.qty ?? adj.quantity ?? 0);
+        const reason = String(adj.reason || adj.motivo || 'Ajuste de inventario');
+        const user = String(adj.user || adj.user_name || 'Administrador');
+        const costPrice = Number(adj.costPrice ?? adj.cost_price ?? 0);
+        const type = String(adj.type || (reason.toLowerCase().includes('toma') ? 'TOMA_FISICA' : 'AJUSTE'));
+        const date = adj.date ? (adj.date.includes('T') ? adj.date : adj.date.replace(' ', 'T')) : new Date().toISOString();
+
+        await pool.query(`
+          INSERT INTO ajustes_inventario (
+            id, product_id, product_name, sku, qty, reason, user_name, cost_price, type, date, data, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE
+          SET product_id = EXCLUDED.product_id, product_name = EXCLUDED.product_name, sku = EXCLUDED.sku,
+              qty = EXCLUDED.qty, reason = EXCLUDED.reason, user_name = EXCLUDED.user_name,
+              cost_price = EXCLUDED.cost_price, type = EXCLUDED.type, date = EXCLUDED.date, data = EXCLUDED.data, updated_at = NOW();
+        `, [id, prodId, prodName, sku, qty, reason, user, costPrice, type, date, JSON.stringify(adj)]);
+      }
+      return;
+    }
+
     const friendlyName = getFriendlyCollectionName(docId);
     if (!friendlyName) return;
 
@@ -928,29 +955,75 @@ export async function getDoc(req: Request, res: Response) {
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_credit_notes') {
       const resPg = await pool.query(`SELECT * FROM notas_credito ORDER BY date DESC;`);
-      const clean = resPg.rows.map(r => ({
-        ...(r.data || {}),
-        id: r.id,
-        creditNoteNumber: r.credit_note_number,
-        establishment: r.establishment,
-        emissionPoint: r.emission_point,
-        sequential: r.sequential,
-        date: r.date,
-        invoiceId: r.invoice_id,
-        invoiceNumber: r.invoice_number,
-        customerId: r.customer_id,
-        customerName: r.customer_name,
-        customerTaxId: r.customer_tax_id,
-        reason: r.reason,
-        subtotal: Number(r.subtotal),
-        tax: Number(r.tax),
-        total: Number(r.total),
-        status: r.status,
-        sriStatus: r.sri_status,
-        accessKey: r.access_key,
-        items: r.items,
-        updatedAt: r.updated_at
-      }));
+      const clean = resPg.rows.map(r => {
+        let parsedItems = r.items;
+        if (typeof parsedItems === 'string') {
+          try { parsedItems = JSON.parse(parsedItems); } catch { parsedItems = []; }
+        }
+        let parsedData = r.data;
+        if (typeof parsedData === 'string') {
+          try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
+        }
+        return {
+          ...(parsedData || {}),
+          id: r.id,
+          creditNoteNumber: r.credit_note_number,
+          establishment: r.establishment,
+          emissionPoint: r.emission_point,
+          sequential: r.sequential,
+          date: r.date,
+          invoiceId: r.invoice_id,
+          invoiceNumber: r.invoice_number,
+          customerId: r.customer_id,
+          customerName: r.customer_name,
+          customer: (parsedData && parsedData.customer) || r.customer_name,
+          customerTaxId: r.customer_tax_id,
+          reason: r.reason,
+          subtotal: Number(r.subtotal),
+          tax: Number(r.tax),
+          total: Number(r.total),
+          amount: Number(r.total),
+          status: r.status,
+          sriStatus: r.sri_status,
+          accessKey: r.access_key,
+          items: Array.isArray(parsedItems) ? parsedItems : (parsedData?.items || []),
+          updatedAt: r.updated_at
+        };
+      });
+      return res.status(200).json({ exists: true, data: clean });
+    } else if (docId === 'ferreteria_stock_adjustments') {
+      let clean: any[] = [];
+      try {
+        const resPg = await pool.query(`SELECT * FROM ajustes_inventario ORDER BY date DESC;`);
+        clean = resPg.rows.map(r => {
+          let parsedData = r.data;
+          if (typeof parsedData === 'string') {
+            try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
+          }
+          return {
+            ...(parsedData || {}),
+            id: r.id,
+            productId: r.product_id,
+            productName: r.product_name,
+            sku: r.sku,
+            qty: Number(r.qty),
+            reason: r.reason,
+            user: r.user_name,
+            costPrice: Number(r.cost_price),
+            type: r.type,
+            date: r.date,
+            updatedAt: r.updated_at
+          };
+        });
+      } catch {}
+
+      if (clean.length === 0) {
+        const db = await getDatabase();
+        const doc = await db.collection('app_state').findOne({ _id: docId } as any);
+        if (doc && Array.isArray(doc.data)) {
+          clean = doc.data;
+        }
+      }
       return res.status(200).json({ exists: true, data: clean });
     } else if (docId === 'ferreteria_orders') {
       const resPg = await pool.query(`SELECT * FROM cotizaciones_pedidos ORDER BY date DESC;`);
@@ -1024,12 +1097,7 @@ export async function getDoc(req: Request, res: Response) {
       });
     }
 
-    // 3. Si es entidad de negocio relacional, nunca consultar app_state
-    if (BUSINESS_DOCS.has(docId)) {
-      return res.status(200).json({ exists: true, data: [] });
-    }
-
-    // 4. Fallback a app_state EXCLUSIVAMENTE para preferencias de interfaz (tema, sidebar, etc.)
+    // 3. Fallback a app_state si existe información guardada
     const db = await getDatabase();
     const doc = await db.collection('app_state').findOne({ _id: docId } as any);
 
@@ -1042,6 +1110,10 @@ export async function getDoc(req: Request, res: Response) {
         });
       }
       return res.status(200).json({ exists: true, data: responseData, updatedAt: doc.updatedAt });
+    }
+
+    if (BUSINESS_DOCS.has(docId)) {
+      return res.status(200).json({ exists: true, data: [] });
     }
 
     return res.status(200).json({ exists: false, data: null });
@@ -1070,16 +1142,14 @@ export async function saveDoc(req: Request, res: Response) {
       dataToSave = dataToSave.map(({ password, ...safe }: any) => safe);
     }
 
-    // Guardar en app_state SOLAMENTE si NO es entidad de negocio (exclusivo para preferencias de UI: tema, sidebar, etc.)
-    if (!BUSINESS_DOCS.has(docId)) {
-      await db.collection('app_state').updateOne(
-        { _id: docId } as any,
-        { $set: { data: dataToSave, updatedAt: new Date() } },
-        { upsert: true }
-      );
-    }
+    // Guardar en app_state como almacenamiento seguro
+    await db.collection('app_state').updateOne(
+      { _id: docId } as any,
+      { $set: { data: dataToSave, updatedAt: new Date() } },
+      { upsert: true }
+    );
 
-    // Guarda e inserta de forma normalizada en la tabla relacional de PostgreSQL
+    // Guarda e inserta de forma normalizada en la tabla relacional de PostgreSQL/SQLite
     await syncToFriendlyCompassCollection(db, docId, data);
     broadcastSse({ type: 'doc_updated', docId, data: dataToSave });
 
@@ -1294,30 +1364,68 @@ export async function pullAll(req: Request, res: Response) {
 
       const ncRes = await pool.query('SELECT * FROM notas_credito ORDER BY date DESC;');
       if (ncRes.rows.length > 0) {
-        result['ferreteria_credit_notes'] = ncRes.rows.map(r => ({
-          ...(r.data || {}),
-          id: r.id,
-          creditNoteNumber: r.credit_note_number,
-          establishment: r.establishment,
-          emissionPoint: r.emission_point,
-          sequential: r.sequential,
-          date: r.date,
-          invoiceId: r.invoice_id,
-          invoiceNumber: r.invoice_number,
-          customerId: r.customer_id,
-          customerName: r.customer_name,
-          customerTaxId: r.customer_tax_id,
-          reason: r.reason,
-          subtotal: Number(r.subtotal),
-          tax: Number(r.tax),
-          total: Number(r.total),
-          status: r.status,
-          sriStatus: r.sri_status,
-          accessKey: r.access_key,
-          items: r.items,
-          updatedAt: r.updated_at
-        }));
+        result['ferreteria_credit_notes'] = ncRes.rows.map(r => {
+          let parsedItems = r.items;
+          if (typeof parsedItems === 'string') {
+            try { parsedItems = JSON.parse(parsedItems); } catch { parsedItems = []; }
+          }
+          let parsedData = r.data;
+          if (typeof parsedData === 'string') {
+            try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
+          }
+          return {
+            ...(parsedData || {}),
+            id: r.id,
+            creditNoteNumber: r.credit_note_number,
+            establishment: r.establishment,
+            emissionPoint: r.emission_point,
+            sequential: r.sequential,
+            date: r.date,
+            invoiceId: r.invoice_id,
+            invoiceNumber: r.invoice_number,
+            customerId: r.customer_id,
+            customerName: r.customer_name,
+            customer: (parsedData && parsedData.customer) || r.customer_name,
+            customerTaxId: r.customer_tax_id,
+            reason: r.reason,
+            subtotal: Number(r.subtotal),
+            tax: Number(r.tax),
+            total: Number(r.total),
+            amount: Number(r.total),
+            status: r.status,
+            sriStatus: r.sri_status,
+            accessKey: r.access_key,
+            items: Array.isArray(parsedItems) ? parsedItems : (parsedData?.items || []),
+            updatedAt: r.updated_at
+          };
+        });
       }
+
+      try {
+        const adjRes = await pool.query('SELECT * FROM ajustes_inventario ORDER BY date DESC;');
+        if (adjRes.rows.length > 0) {
+          result['ferreteria_stock_adjustments'] = adjRes.rows.map(r => {
+            let parsedData = r.data;
+            if (typeof parsedData === 'string') {
+              try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
+            }
+            return {
+              ...(parsedData || {}),
+              id: r.id,
+              productId: r.product_id,
+              productName: r.product_name,
+              sku: r.sku,
+              qty: Number(r.qty),
+              reason: r.reason,
+              user: r.user_name,
+              costPrice: Number(r.cost_price),
+              type: r.type,
+              date: r.date,
+              updatedAt: r.updated_at
+            };
+          });
+        }
+      } catch {}
 
       const ordRes = await pool.query('SELECT * FROM cotizaciones_pedidos ORDER BY date DESC;');
       if (ordRes.rows.length > 0) {

@@ -153,6 +153,8 @@ interface KardexManagerProps {
   onStockAdjust: (productId: string, adjustmentQty: number) => void;
   onSaveProduct: (product: Product) => void;
   invoices?: Invoice[];
+  stockAdjustments?: StockAdjustmentRecord[];
+  creditNotes?: any[];
 }
 
 export const KardexManager: React.FC<KardexManagerProps> = ({
@@ -162,6 +164,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   onStockAdjust,
   onSaveProduct,
   invoices: propsInvoices,
+  stockAdjustments: propsStockAdjustments,
+  creditNotes: propsCreditNotes,
 }) => {
   const { showAlert, showToast } = useModal();
 
@@ -185,12 +189,46 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
   }, [propsInvoices, syncInvoices]);
 
   const [purchases] = usePostgresSync<any[]>('ferreteria_purchases', []);
-  const [creditNotes] = usePostgresSync<any[]>('ferreteria_credit_notes', []);
-  const [stockAdjustments, setStockAdjustments] = usePostgresSync<StockAdjustmentRecord[]>(
+  const [syncCreditNotes] = usePostgresSync<any[]>('ferreteria_credit_notes', []);
+  const [syncStockAdjustments, setSyncStockAdjustments] = usePostgresSync<StockAdjustmentRecord[]>(
     'ferreteria_stock_adjustments', 
     []
   );
   const [transfers] = usePostgresSync<any[]>('ferreteria_transfers', []);
+
+  // Combinar reactivamente las notas de crédito de props, sync y caché local
+  const creditNotes = useMemo(() => {
+    const map = new Map<string, any>();
+    (syncCreditNotes || []).forEach((cn) => {
+      if (!cn) return;
+      const key = String(cn.id || cn.creditNoteNumber || (cn as any)._id || Math.random());
+      map.set(key, cn);
+    });
+    (propsCreditNotes || []).forEach((cn) => {
+      if (!cn) return;
+      const key = String(cn.id || cn.creditNoteNumber || (cn as any)._id || Math.random());
+      map.set(key, cn);
+    });
+    return Array.from(map.values());
+  }, [propsCreditNotes, syncCreditNotes]);
+
+  // Combinar reactivamente los ajustes de stock y toma física de props, sync y caché local
+  const stockAdjustments = useMemo(() => {
+    const map = new Map<string, StockAdjustmentRecord>();
+    (syncStockAdjustments || []).forEach((adj) => {
+      if (!adj) return;
+      const key = String(adj.id || `${adj.productId}-${adj.date}-${adj.qty}`);
+      map.set(key, adj);
+    });
+    (propsStockAdjustments || []).forEach((adj) => {
+      if (!adj) return;
+      const key = String(adj.id || `${adj.productId}-${adj.date}-${adj.qty}`);
+      map.set(key, adj);
+    });
+    return Array.from(map.values());
+  }, [propsStockAdjustments, syncStockAdjustments]);
+
+  const setStockAdjustments = setSyncStockAdjustments;
 
   // ── Selection & Filter State ───────────────────────────────────────────────
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -293,18 +331,15 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     // 1. Invoices / Sales from POS & Facturación Electrónica SRI
     (invoices || []).forEach((inv) => {
-      if (!inv) return;
-      if (
-        inv.paymentStatus === 'ANULADA' || 
+      if (!inv || inv.documentType === 'COTIZACION') return;
+
+      const isCancelled = inv.paymentStatus === 'ANULADA' || 
         (inv as any).status === 'ANULADA' || 
-        inv.sriStatus === 'ANULADO' || 
-        inv.documentType === 'COTIZACION'
-      ) {
-        return;
-      }
+        inv.sriStatus === 'ANULADO';
 
       const invDate = inv.createdAt || (inv as any).date || (inv as any).fechaEmision || new Date().toISOString();
-      const timestamp = new Date(invDate).getTime() || Date.now();
+      const safeInvDate = invDate.includes('T') ? invDate : invDate.replace(' ', 'T');
+      const timestamp = new Date(safeInvDate).getTime() || Date.now();
 
       // Formato y resolución de número de comprobante electrónico
       const isSriElectronic = !!(
@@ -331,6 +366,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       let rawItems: any[] = [];
       if (Array.isArray(inv.items)) {
         rawItems = inv.items;
+      } else if (typeof inv.items === 'string') {
+        try { rawItems = JSON.parse(inv.items); } catch {}
       } else if (Array.isArray((inv as any).detalles)) {
         rawItems = (inv as any).detalles;
       } else if ((inv as any).detalles && Array.isArray((inv as any).detalles.detalle)) {
@@ -355,6 +392,15 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
       } else if (inv.documentType === 'BOLETA' || (inv as any).documentType === 'NOTA_VENTA') {
         typeLabel = 'Nota de Venta';
       }
+
+      // Verificar si ya existe una Nota de Crédito explícita vinculada a esta factura en creditNotes
+      const hasExplicitCreditNote = isCancelled && (creditNotes || []).some(cn => {
+        if (!cn) return false;
+        return (cn.id && inv.creditNoteRef && (cn.id === inv.creditNoteRef || inv.creditNoteRef.includes(cn.id))) ||
+               (cn.invoiceId && (cn.invoiceId === inv.id || cn.invoiceId === (inv as any)._id)) ||
+               (cn.invoiceRef && inv.fullNumber && (cn.invoiceRef === inv.fullNumber || cn.invoiceRef.includes(inv.fullNumber))) ||
+               (cn.invoiceNumber && inv.fullNumber && (cn.invoiceNumber === inv.fullNumber || cn.invoiceNumber.includes(inv.fullNumber)));
+      });
 
       rawItems.forEach((item: any) => {
         if (!item) return;
@@ -392,10 +438,11 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             ? `Factura Electrónica SRI Aut: ${String(sriAuth).substring(0, 10)}... (${inv.paymentMethod || 'Contado'})`
             : `Venta POS (${inv.paymentMethod || 'Contado'})${inv.paymentReference ? ' Ref: ' + inv.paymentReference : ''}`;
 
+          // VENTA ORIGINAL (-)
           rawMovements.push({
             id: `sale-${inv.id || (inv as any)._id || Math.random()}-${itemProdId || itemSku || Math.random()}-${Math.random()}`,
             timestamp,
-            dateStr: toEcuadorDateTimeStr(invDate),
+            dateStr: toEcuadorDateTimeStr(safeInvDate),
             type: 'VENTA',
             typeLabel,
             docNumber: docNum,
@@ -411,6 +458,36 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             price,
             notes: noteText,
           });
+
+          // Si la factura fue ANULADA y no existe una Nota de Crédito separada en el listado,
+          // registrar la devolución/anulación como reingreso (+) en la fecha de anulación.
+          if (isCancelled && !hasExplicitCreditNote) {
+            const cancelDate = inv.cancelledAt || (inv as any).updatedAt || invDate;
+            const safeCancelDate = cancelDate.includes('T') ? cancelDate : cancelDate.replace(' ', 'T');
+            const cancelTimestamp = new Date(safeCancelDate).getTime() || (timestamp + 1000);
+            const cancelReason = inv.cancellationReason || inv.notes || 'Anulación / Devolución interna de mercadería';
+            const ncRefDoc = inv.creditNoteRef || (isSriElectronic ? `ANUL-${docNum}` : `DEV-${docNum}`);
+
+            rawMovements.push({
+              id: `cancel-${inv.id || (inv as any)._id || Math.random()}-${itemProdId || itemSku || Math.random()}`,
+              timestamp: cancelTimestamp,
+              dateStr: toEcuadorDateTimeStr(safeCancelDate),
+              type: 'DEVOLUCION_VENTA',
+              typeLabel: 'Devolución Anulación (+)',
+              docNumber: ncRefDoc,
+              warehouse: (inv as any).branch || 'Tienda POS / Salón de Ventas',
+              entityName: inv.customer?.name || (inv as any).customerName || 'Consumidor Final',
+              user: inv.sellerName || 'Caja POS',
+              productId: matchedProd?.id || itemProdId || '',
+              productName: matchedProd?.name || itemName || 'Producto Varios',
+              sku: matchedProd?.sku || itemSku || 'N/A',
+              unit: matchedProd?.unit || item.unit || item.unidad || 'Unid',
+              qty,
+              cost,
+              price,
+              notes: `Reingreso por ${cancelReason}`,
+            });
+          }
         }
       });
     });
@@ -418,7 +495,8 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
     // 2. Purchase Invoices from Suppliers
     (purchases || []).forEach((purch) => {
       const purchDate = purch.issueDate || purch.date || purch.createdAt || new Date().toISOString();
-      const timestamp = new Date(purchDate).getTime() || Date.now();
+      const safePurchDate = purchDate.includes('T') ? purchDate : purchDate.replace(' ', 'T');
+      const timestamp = new Date(safePurchDate).getTime() || Date.now();
       const docNum = purch.invoiceNumber || purch.orderNumber || `#${purch.id}`;
 
       if (purch.items && Array.isArray(purch.items)) {
@@ -443,7 +521,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
             rawMovements.push({
               id: `purch-${purch.id}-${itemProdId || Math.random()}-${Math.random()}`,
               timestamp,
-              dateStr: toEcuadorDateTimeStr(purchDate),
+              dateStr: toEcuadorDateTimeStr(safePurchDate),
               type: 'COMPRA',
               typeLabel: 'Compra Proveedor',
               docNumber: docNum,
@@ -466,6 +544,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     // 3. Stock Adjustments (Physical audits, mermas, manual corrections)
     (stockAdjustments || []).forEach((adj) => {
+      if (!adj) return;
       if (isTargetProduct(adj.productId, adj.sku, adj.productName)) {
         const matchedProd = 
           (adj.productId ? productMap.get(adj.productId) : null) || 
@@ -473,8 +552,9 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           (adj.productName ? productMap.get(adj.productName.trim().toLowerCase()) : null) ||
           (selectedProduct && isTargetProduct(adj.productId, adj.sku, adj.productName) ? selectedProduct : null);
 
-        const adjDate = adj.date || new Date().toISOString();
-        const timestamp = new Date(adjDate).getTime() || Date.now();
+        const rawDate = adj.date || new Date().toISOString();
+        const safeDate = rawDate.includes('T') ? rawDate : rawDate.replace(' ', 'T');
+        const timestamp = new Date(safeDate).getTime() || Date.now();
         const isEntry = adj.qty > 0;
         const reasonLower = (adj.reason || '').toLowerCase();
         const isTomaFisica = adj.type === 'TOMA_FISICA' || 
@@ -482,6 +562,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
           reasonLower.includes('toma fisica') || 
           reasonLower.includes('auditoría') || 
           reasonLower.includes('auditoria') ||
+          reasonLower.includes('conteo') ||
           reasonLower.includes('correccion sobrante') ||
           reasonLower.includes('correccion faltante');
         const isMerma = !isTomaFisica && (reasonLower.includes('merma') || reasonLower.includes('daño') || reasonLower.includes('robo'));
@@ -511,7 +592,7 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
         rawMovements.push({
           id: `adj-${adj.id}`,
           timestamp,
-          dateStr: toEcuadorDateTimeStr(adjDate),
+          dateStr: toEcuadorDateTimeStr(safeDate),
           type: movementType,
           typeLabel,
           docNumber,
@@ -532,40 +613,77 @@ export const KardexManager: React.FC<KardexManagerProps> = ({
 
     // 4. Credit Notes / Customer Returns
     (creditNotes || []).forEach((cn) => {
-      const cnDate = cn.date || cn.createdAt || new Date().toISOString();
-      const timestamp = new Date(cnDate).getTime() || Date.now();
+      if (!cn) return;
+      const rawDate = cn.date || cn.createdAt || cn.fechaAutorizacion || new Date().toISOString();
+      const safeDate = typeof rawDate === 'string' && !rawDate.includes('T') ? rawDate.replace(' ', 'T') : rawDate;
+      const timestamp = new Date(safeDate).getTime() || Date.now();
 
-      if (cn.items && Array.isArray(cn.items)) {
-        cn.items.forEach((item: any) => {
-          const itemProdId = item.productId || item.id;
-          const itemSku = item.sku || item.code || '';
-          const itemName = item.name || item.productName || item.description || '';
+      // Extracción y normalización robusta de items (Array, JSON string o desde factura referenciada)
+      let itemsList: any[] = [];
+      if (Array.isArray(cn.items)) {
+        itemsList = cn.items;
+      } else if (typeof cn.items === 'string') {
+        try { itemsList = JSON.parse(cn.items); } catch {}
+      }
+      if (!Array.isArray(itemsList) || itemsList.length === 0) {
+        if (cn.data) {
+          const dItems = typeof cn.data === 'string' ? JSON.parse(cn.data).items : cn.data.items;
+          if (Array.isArray(dItems)) itemsList = dItems;
+          else if (typeof dItems === 'string') {
+            try { itemsList = JSON.parse(dItems); } catch {}
+          }
+        }
+      }
 
-          if (isTargetProduct(itemProdId, itemSku, itemName)) {
+      // Si no hay items explícitos en la N/C, buscarlos en la factura referenciada
+      if (!Array.isArray(itemsList) || itemsList.length === 0) {
+        const targetInv = invoices.find(inv => 
+          (inv.id && (inv.id === cn.invoiceId || inv.id === cn.invoiceRef)) ||
+          (inv.fullNumber && (inv.fullNumber === cn.invoiceRef || inv.fullNumber === cn.invoiceNumber)) ||
+          (inv.creditNoteRef && cn.id && (inv.creditNoteRef === cn.id || inv.creditNoteRef.includes(cn.id)))
+        );
+        if (targetInv && Array.isArray(targetInv.items)) {
+          itemsList = targetInv.items;
+        }
+      }
+
+      if (Array.isArray(itemsList) && itemsList.length > 0) {
+        itemsList.forEach((item: any) => {
+          if (!item) return;
+          const itemProdId = String(item.productId || item.id || item._id || '').trim();
+          const itemSku = String(item.sku || item.code || item.codigo || '').trim();
+          const itemName = String(item.name || item.productName || item.description || '').trim();
+          const itemBarcode = String(item.barcode || '').trim();
+
+          if (isTargetProduct(itemProdId, itemSku, itemName, itemBarcode)) {
             const matchedProd = 
               (itemProdId ? productMap.get(itemProdId) : null) || 
               (itemSku ? productMap.get(itemSku.toLowerCase()) : null) ||
+              (itemBarcode ? productMap.get(itemBarcode.toLowerCase()) : null) ||
               (itemName ? productMap.get(itemName.trim().toLowerCase()) : null) ||
-              (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName) ? selectedProduct : null);
+              (selectedProduct && isTargetProduct(itemProdId, itemSku, itemName, itemBarcode) ? selectedProduct : null);
 
             const cost = Number(matchedProd?.costPrice || 0);
             const price = Number(item.unitPrice || (item as any).price || (matchedProd?.price || cost));
             const qty = Number(item.quantity || item.cantidad || 1);
 
+            const rawDocNum = cn.creditNoteNumber || cn.id || (cn.secNumber ? `NC-${cn.secNumber}` : 'NC S/N');
+            const docNumber = String(rawDocNum).toUpperCase().startsWith('NC') ? rawDocNum : `NC ${rawDocNum}`;
+
             rawMovements.push({
-              id: `cn-${cn.id}-${Math.random()}`,
+              id: `cn-${cn.id || Math.random()}-${itemProdId || itemSku || Math.random()}`,
               timestamp,
-              dateStr: toEcuadorDateTimeStr(cnDate),
+              dateStr: toEcuadorDateTimeStr(safeDate),
               type: 'DEVOLUCION_VENTA',
               typeLabel: 'Devolución Cliente (+)',
-              docNumber: cn.creditNoteNumber || `NC-${cn.id.substring(0, 8)}`,
+              docNumber,
               warehouse: 'Tienda POS / Salón de Ventas',
-              entityName: cn.customerName || 'Cliente',
-              user: cn.createdByName || 'Caja',
+              entityName: cn.customer || cn.customerName || 'Cliente',
+              user: cn.createdByName || cn.user || 'Caja / Devoluciones',
               productId: matchedProd?.id || itemProdId || '',
               productName: matchedProd?.name || itemName || 'Producto Varios',
               sku: matchedProd?.sku || itemSku || 'N/A',
-              unit: matchedProd?.unit || 'Unid',
+              unit: matchedProd?.unit || item.unit || 'Unid',
               qty,
               cost,
               price,
